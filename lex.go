@@ -63,15 +63,10 @@ var symbols = map[rune]tokType{
 	'<': tLESS,
 }
 
-//done + foo:ba* OR baz:w* (wildcard searches)
+// STILL NEED TO SUPPORT
 //- ~ (fuzzy searches)
 //- ~10 (proximity searches)
-//done + f:[1 to 4] (range searches inclusive)
-//done + f:{foo to bar} (range searches exclusive)
 //- f:foo^2 (boost a term)
-//done + +f:foo (must operator)
-//done + -f:foo (must not operator)
-//+ \(1\+1\)\:2 (escape syntax)
 
 func (tt tokType) String() string {
 	return map[tokType]string{
