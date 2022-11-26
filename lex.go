@@ -6,17 +6,17 @@ import (
 	"unicode/utf8"
 )
 
-// item is an item that the lexer parsed from the source
-type item struct {
-	typ itemType // the type of the item
-	pos int      // the position of the item in the string
-	val string   // the value of the item
+// token is an token that the lexer parsed from the source
+type token struct {
+	typ tokType // the type of the item
+	pos int     // the position of the item in the string
+	val string  // the value of the item
 }
 
 // String is a string representation of a lex item
-func (i item) String() string {
+func (i token) String() string {
 	switch {
-	case i.typ == itemErr:
+	case i.typ == tERR:
 		return i.val
 	case len(i.val) > 10:
 		return fmt.Sprintf("%.10q...", i.val)
@@ -24,27 +24,88 @@ func (i item) String() string {
 	return fmt.Sprintf("%q", i.val)
 }
 
-type itemType int
+type tokType int
 
 const (
-	itemErr itemType = iota
-	itemInt
-	itemStr
-	itemQuote
-	itemEqual
-	itemEOF
+	tERR tokType = iota
+	tLITERAL
+	tQUOTED
+	tEQUAL
+	tAND
+	tOR
+	tNOT
+	tLPAREN
+	tRPAREN
+	tLSQUARE
+	tRSQUARE
+	tLCURLY
+	tRCURLY
+	tCOLON
+	tPLUS
+	tMINUS
+	tGREATER
+	tLESS
+	tEOF
 )
 
-type stateFn func(*lexer) stateFn
+var symbols = map[rune]tokType{
+	'(': tLPAREN,
+	')': tRPAREN,
+	'[': tLSQUARE,
+	']': tRSQUARE,
+	'{': tLCURLY,
+	'}': tRCURLY,
+	':': tCOLON,
+	'+': tPLUS,
+	'-': tMINUS,
+	'=': tEQUAL,
+	'>': tGREATER,
+	'<': tLESS,
+}
+
+//done + foo:ba* OR baz:w* (wildcard searches)
+//- ~ (fuzzy searches)
+//- ~10 (proximity searches)
+//done + f:[1 to 4] (range searches inclusive)
+//done + f:{foo to bar} (range searches exclusive)
+//- f:foo^2 (boost a term)
+//done + +f:foo (must operator)
+//done + -f:foo (must not operator)
+//+ \(1\+1\)\:2 (escape syntax)
+
+func (tt tokType) String() string {
+	return map[tokType]string{
+		tERR:     "tERR",
+		tLITERAL: "tLITERAL",
+		tQUOTED:  "tQUOTED",
+		tEQUAL:   "tEQUAL",
+		tLPAREN:  "tLPAREN",
+		tRPAREN:  "tRPAREN",
+		tAND:     "tAND",
+		tOR:      "tOR",
+		tNOT:     "tNOT",
+		tLSQUARE: "tLSQUARE",
+		tRSQUARE: "tRSQUARE",
+		tLCURLY:  "tLCURLY",
+		tRCURLY:  "tRCURLY",
+		tCOLON:   "tCOLON",
+		tPLUS:    "tPLUS",
+		tMINUS:   "tMINUS",
+		tGREATER: "tGREATER",
+		tLESS:    "tLESS",
+		tEOF:     "tEOF",
+	}[tt]
+}
+
+type tokenStateFn func(*lexer) tokenStateFn
 
 type lexer struct {
 	input string // the input to parse
 
-	pos      int  // the position of the cursor
-	start    int  // the start of the current token
-	inVal    bool // whether we are currently in a value or not
-	currItem item // the current item being worked on
-	atEOF    bool // whether we have finished parsing the string or not
+	pos      int   // the position of the cursor
+	start    int   // the start of the current token
+	currItem token // the current item being worked on
+	atEOF    bool  // whether we have finished parsing the string or not
 
 }
 
@@ -56,32 +117,24 @@ func lex(input string) lexer {
 	}
 }
 
-func (l *lexer) nextItem() item {
+func (l *lexer) nextItem() token {
 	// default to returning EOF
-	l.currItem = item{
-		typ: itemEOF,
+	l.currItem = token{
+		typ: tEOF,
 		pos: l.pos,
 		val: "EOF",
 	}
 
-	// default to consuming spaces unless we are actively
-	// parsing a value
-	state := lexSpace
-	if l.inVal {
-		state = lexVal
+	// run the state machine until we have a token
+	for state := lexSpace; state != nil; {
+		state = state(l)
 	}
 
-	// run the state machine until we have a token
-	for {
-		state = state(l)
-		if state == nil {
-			// fmt.Printf("Finished parsing next token: %s\n", l.currItem)
-			return l.currItem
-		}
-	}
+	// fmt.Printf("Finished parsing next token: %s\n", l.currItem)
+	return l.currItem
 }
 
-func lexSpace(l *lexer) stateFn {
+func lexSpace(l *lexer) tokenStateFn {
 	// fmt.Printf("Lexing space\n")
 	for {
 		switch l.next() {
@@ -92,46 +145,81 @@ func lexSpace(l *lexer) stateFn {
 		default:
 			// transition to being in a value
 			l.backup()
-			l.inVal = true
 			return lexVal
 		}
 	}
 }
 
-func lexVal(l *lexer) stateFn {
+func lexVal(l *lexer) tokenStateFn {
 	// fmt.Printf("Lexing val\n")
 	l.start = l.pos
 	switch r := l.next(); {
-	case r == '=':
-		l.inVal = false
-		return l.emit(itemEqual)
-	case isAlphaNumeric(r):
+	case isAlphaNumeric(r) || isWildcard(r) || isEscape(r):
 		l.backup()
 		return lexWord
+	case isSymbol(r):
+		return l.emit(symbols[r])
+	case r == '"' || r == '\'':
+		l.backup()
+		return lexQuote
 	default:
 		l.errorf("error parsing token [%s]", string(r))
 	}
 	return nil
 }
 
-func lexWord(l *lexer) stateFn {
-	// fmt.Printf("Lexing word\n")
+func lexQuote(l *lexer) tokenStateFn {
+	open := l.next()
+
 	for {
 		switch r := l.next(); {
-		case isAlphaNumeric(r):
+		case isAlphaNumeric(r) || isWildcard(r) || isEscape(r):
 			// do nothing
-		default:
-			l.backup()
-			l.inVal = false
-			return l.emit(itemStr)
+		case r == ' ' || r == '\t' || r == '\r' || r == '\n':
+			// do nothing
+		case r == open:
+			return l.emit(tQUOTED)
+		case r == eof:
+			return l.errorf("unterminated quote")
 		}
 	}
 }
 
-// assembleItem returns the item at the current input point with the specified type
+func lexWord(l *lexer) tokenStateFn {
+	// fmt.Printf("Lexing word\n")
+loop:
+	for {
+		switch r := l.next(); {
+		case isAlphaNumeric(r) || isWildcard(r):
+			// do nothing
+		case isEscape(r):
+			l.next() // just ignore the next character
+		default:
+			l.backup()
+			break loop
+		}
+	}
+
+	switch l.currWord() {
+	case "AND":
+		return l.emit(tAND)
+	case "OR":
+		return l.emit(tOR)
+	case "NOT":
+		return l.emit(tNOT)
+	}
+	fmt.Printf("WORD: %s\n", l.currWord())
+	return l.emit(tLITERAL)
+}
+
+func (l *lexer) currWord() string {
+	return l.input[l.start:l.pos]
+}
+
+// toTok returns the item at the current input point with the specified type
 // and advances the input.
-func (l *lexer) assembleItem(t itemType) item {
-	i := item{
+func (l *lexer) toTok(t tokType) token {
+	i := token{
 		typ: t,
 		pos: l.start,
 		val: l.input[l.start:l.pos],
@@ -142,8 +230,8 @@ func (l *lexer) assembleItem(t itemType) item {
 }
 
 // emit passes the trailing text as an item back to the parser.
-func (l *lexer) emit(t itemType) stateFn {
-	l.currItem = l.assembleItem(t)
+func (l *lexer) emit(t tokType) tokenStateFn {
+	l.currItem = l.toTok(t)
 	return nil
 }
 
@@ -156,7 +244,6 @@ func (l *lexer) next() rune {
 		return eof
 	}
 	r, width := utf8.DecodeRuneInString(l.input[l.pos:])
-	// fmt.Printf("Decoding [%s] | left: [%s]\n", string(r), l.input[l.pos:])
 	l.pos += width
 	return r
 }
@@ -181,16 +268,29 @@ func isAlphaNumeric(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
+func isWildcard(r rune) bool {
+	return r == '*' || r == '?'
+}
+
 // isSpace reports whether r is a space character.
 func isSpace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\r' || r == '\n'
 }
 
+func isEscape(r rune) bool {
+	return r == '\\'
+}
+
+func isSymbol(r rune) bool {
+	_, found := symbols[r]
+	return found
+}
+
 // errorf returns an error token and terminates the scan by passing
 // back a nil pointer that will be the next state, terminating l.nextItem.
-func (l *lexer) errorf(format string, args ...any) stateFn {
-	l.currItem = item{
-		typ: itemErr,
+func (l *lexer) errorf(format string, args ...any) tokenStateFn {
+	l.currItem = token{
+		typ: tERR,
 		pos: l.start,
 		val: fmt.Sprintf(format, args...),
 	}
