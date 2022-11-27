@@ -40,11 +40,14 @@ const (
 	tRSQUARE
 	tLCURLY
 	tRCURLY
+	tTO
 	tCOLON
 	tPLUS
 	tMINUS
 	tGREATER
 	tLESS
+	tTILDE
+	tCARROT
 	tEOF
 )
 
@@ -60,13 +63,10 @@ var symbols = map[rune]tokType{
 	'-': tMINUS,
 	'=': tEQUAL,
 	'>': tGREATER,
+	'~': tTILDE,
+	'^': tCARROT,
 	'<': tLESS,
 }
-
-// STILL NEED TO SUPPORT
-//- ~ (fuzzy searches)
-//- ~10 (proximity searches)
-//- f:foo^2 (boost a term)
 
 func (tt tokType) String() string {
 	return map[tokType]string{
@@ -83,11 +83,14 @@ func (tt tokType) String() string {
 		tRSQUARE: "tRSQUARE",
 		tLCURLY:  "tLCURLY",
 		tRCURLY:  "tRCURLY",
+		tTO:      "tTO",
 		tCOLON:   "tCOLON",
 		tPLUS:    "tPLUS",
 		tMINUS:   "tMINUS",
 		tGREATER: "tGREATER",
 		tLESS:    "tLESS",
+		tTILDE:   "tTILDE",
+		tCARROT:  "tCARROT",
 		tEOF:     "tEOF",
 	}[tt]
 }
@@ -104,15 +107,15 @@ type lexer struct {
 
 }
 
-func lex(input string) lexer {
-	return lexer{
+func lex(input string) *lexer {
+	return &lexer{
 		input: input,
 		pos:   0,
 		start: 0,
 	}
 }
 
-func (l *lexer) nextItem() token {
+func (l *lexer) nextToken() token {
 	// default to returning EOF
 	l.currItem = token{
 		typ: tEOF,
@@ -125,12 +128,10 @@ func (l *lexer) nextItem() token {
 		state = state(l)
 	}
 
-	// fmt.Printf("Finished parsing next token: %s\n", l.currItem)
 	return l.currItem
 }
 
 func lexSpace(l *lexer) tokenStateFn {
-	// fmt.Printf("Lexing space\n")
 	for {
 		switch l.next() {
 		case eof:
@@ -146,7 +147,6 @@ func lexSpace(l *lexer) tokenStateFn {
 }
 
 func lexVal(l *lexer) tokenStateFn {
-	// fmt.Printf("Lexing val\n")
 	l.start = l.pos
 	switch r := l.next(); {
 	case isAlphaNumeric(r) || isWildcard(r) || isEscape(r):
@@ -181,7 +181,6 @@ func lexQuote(l *lexer) tokenStateFn {
 }
 
 func lexWord(l *lexer) tokenStateFn {
-	// fmt.Printf("Lexing word\n")
 loop:
 	for {
 		switch r := l.next(); {
@@ -202,8 +201,9 @@ loop:
 		return l.emit(tOR)
 	case "NOT":
 		return l.emit(tNOT)
+	case "TO":
+		return l.emit(tTO)
 	}
-	fmt.Printf("WORD: %s\n", l.currWord())
 	return l.emit(tLITERAL)
 }
 
@@ -282,7 +282,7 @@ func isSymbol(r rune) bool {
 }
 
 // errorf returns an error token and terminates the scan by passing
-// back a nil pointer that will be the next state, terminating l.nextItem.
+// back a nil pointer that will be the next state, terminating l.nextToken.
 func (l *lexer) errorf(format string, args ...any) tokenStateFn {
 	l.currItem = token{
 		typ: tERR,

@@ -13,7 +13,6 @@ type tc struct {
 }
 
 func TestLex(t *testing.T) {
-
 	tcs := map[string]tc{
 		"empty_returns_eof": {
 			in:       "",
@@ -101,6 +100,14 @@ func TestLex(t *testing.T) {
 				tok(tLITERAL, "a"),
 			},
 		},
+		"to_tokenized": {
+			in: `a TO b`,
+			expected: []token{
+				tok(tLITERAL, "a"),
+				tok(tTO, "TO"),
+				tok(tLITERAL, "b"),
+			},
+		},
 		"symbols_tokenized": {
 			in: `()[]{}:+-=><`,
 			expected: []token{
@@ -119,7 +126,7 @@ func TestLex(t *testing.T) {
 			},
 		},
 		"entire_stream_tokenized": {
-			in: `(+k1:v1 AND -k2:v2) OR k3:"foo bar" OR k4:a*`,
+			in: `(+k1:v1 AND -k2:v2) OR k3:"foo bar"^2 OR k4:a*~10`,
 			expected: []token{
 				tok(tLPAREN, "("),
 				tok(tPLUS, "+"),
@@ -136,10 +143,14 @@ func TestLex(t *testing.T) {
 				tok(tLITERAL, "k3"),
 				tok(tCOLON, ":"),
 				tok(tQUOTED, "\"foo bar\""),
+				tok(tCARROT, "^"),
+				tok(tLITERAL, "2"),
 				tok(tOR, "OR"),
 				tok(tLITERAL, "k4"),
 				tok(tCOLON, ":"),
 				tok(tLITERAL, "a*"),
+				tok(tTILDE, "~"),
+				tok(tLITERAL, "10"),
 			},
 		},
 		"escape_sequence_tokenized": {
@@ -179,7 +190,7 @@ func finalizeExpected(in string, tokens []token) (out []token) {
 func consumeAll(in string) (toks []token) {
 	l := lex(in)
 	for {
-		tok := l.nextItem()
+		tok := l.nextToken()
 		toks = append(toks, tok)
 		if tok.typ == tEOF {
 			return toks
