@@ -254,12 +254,10 @@ type parser struct {
 }
 
 func (p *parser) next() (t token) {
-	// fmt.Printf("NEXT CALLED: idx: %v | tokens: %v \n", p.tokIdx, p.tokens)
 	if p.tokIdx < len(p.tokens)-1 {
 		p.tokIdx++
 		t = p.tokens[p.tokIdx]
 
-		// fmt.Printf("AFTER GETTING CACHED TOKEN: VAL: %s | idx: %v | tokens: %v \n", t.val, p.tokIdx, p.tokens)
 		return t
 	}
 
@@ -267,8 +265,6 @@ func (p *parser) next() (t token) {
 	t = p.lex.nextToken()
 	p.tokens = append(p.tokens, t)
 	p.tokIdx++
-	// fmt.Printf("AFTER GETTING NEXT TOKEN: VAL: %s | idx: %v | tokens: %v \n", t.val, p.tokIdx, p.tokens)
-	// fmt.Printf("NEXT RETURNING %s\n", t.val)
 	return t
 
 }
@@ -298,7 +294,6 @@ func (p *parser) parse() (e Expression, err error) {
 		if token.typ == tEOF {
 			return e, err
 		}
-		fmt.Printf("EXPRESSION IS [%-20v] => next token is [%s]\n", e, token)
 
 	state:
 		switch token.typ {
@@ -324,7 +319,6 @@ func (p *parser) parse() (e Expression, err error) {
 			if err != nil {
 				return e, errors.Wrap(err, "unable to insert literal into expression")
 			}
-			fmt.Printf("FINISHED PARSING LITERAL [%s]. NEXT IS: %s\n", token.val, p.peek().val)
 
 		// quoted value:
 		// 		- we make this quoted value a literal string and ignore keywords and whitespace
@@ -419,7 +413,7 @@ func (p *parser) parse() (e Expression, err error) {
 
 			e = sub
 		case tRPAREN:
-			fmt.Printf("RETURNING FROM SUB EXPRESSION: | %s\n", e)
+
 			return e, nil
 
 		// range operators
@@ -489,13 +483,13 @@ func (p *parser) parse() (e Expression, err error) {
 			next := p.next()
 
 			if next.typ != tLITERAL {
-				fmt.Printf("Boost not literal\n")
+
 				return e, errors.New("term boost must be follow by positive number")
 			}
 
 			f, err := toPositiveFloat(next.val)
 			if err != nil {
-				fmt.Printf("Boost not positive float\n")
+
 				return e, errors.Wrap(err, "not able to parse boost number")
 			}
 
