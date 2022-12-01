@@ -108,6 +108,12 @@ func TestLex(t *testing.T) {
 				tok(tLITERAL, "b"),
 			},
 		},
+		"regexp_tokenized": {
+			in: `/a[b]*/`,
+			expected: []token{
+				tok(tREGEXP, "/a[b]*/"),
+			},
+		},
 		"symbols_tokenized": {
 			in: `()[]{}:+-=><`,
 			expected: []token{

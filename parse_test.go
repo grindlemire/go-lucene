@@ -46,6 +46,18 @@ func TestParseLucene(t *testing.T) {
 				Wild("b?z"),
 			),
 		},
+		"regexp": {
+			input: "a:/b [c]/",
+			expected: EQ(
+				Lit("a"), REGEXP("b [c]"),
+			),
+		},
+		"regexp_with_keywords": {
+			input: `a:/b "[c]/`,
+			expected: EQ(
+				Lit("a"), REGEXP(`b "[c]`),
+			),
+		},
 		// "default_to_AND_with_literals": {
 		// 	input: "a b",
 		// 	expected: AND(
@@ -99,7 +111,7 @@ func TestParseLucene(t *testing.T) {
 			input: `a:{"ab" TO "az"}`,
 			expected: EQ(
 				Lit("a"),
-				Rang(Lit(`"ab"`), Lit(`"az"`), false),
+				Rang(Lit("ab"), Lit("az"), false),
 			),
 		},
 		"range_operator_exclusive_unbound": {
@@ -204,6 +216,13 @@ func TestParseLucene(t *testing.T) {
 				EQ(Lit("a"), Lit("b")),
 			),
 		},
+		"boost_quoted_literal": {
+			input: `"foo bar"^4 AND a:b`,
+			expected: AND(
+				BOOST(Lit("foo bar"), 4),
+				EQ(Lit("a"), Lit("b")),
+			),
+		},
 		"boost_sub_expression": {
 			input: "(title:foo OR title:bar)^1.5 AND (body:foo OR body:bar)",
 			expected: AND(
@@ -248,6 +267,78 @@ func TestParseLucene(t *testing.T) {
 					),
 				),
 				EQ(Lit("k"), Lit("v")),
+			),
+		},
+		"fuzzy_key_value": {
+			input: "a:b~2 AND foo",
+			expected: AND(
+				FUZZY(EQ(Lit("a"), Lit("b")), 2),
+				Lit("foo"),
+			),
+		},
+		"fuzzy_key_value_default": {
+			input: "a:b~ AND foo",
+			expected: AND(
+				FUZZY(EQ(Lit("a"), Lit("b")), 1),
+				Lit("foo"),
+			),
+		},
+		"fuzzy_literal": {
+			input:    "foo~4",
+			expected: FUZZY(Lit("foo"), 4),
+		},
+		"fuzzy_literal_default": {
+			input:    "foo~",
+			expected: FUZZY(Lit("foo"), 1),
+		},
+		"fuzzy_literal_in_compound": {
+			input: "a:b AND foo~4",
+			expected: AND(
+				EQ(Lit("a"), Lit("b")),
+				FUZZY(Lit("foo"), 4),
+			),
+		},
+		"fuzzy_literal_leading": {
+			input: "foo~4 AND a:b",
+			expected: AND(
+				FUZZY(Lit("foo"), 4),
+				EQ(Lit("a"), Lit("b")),
+			),
+		},
+		"fuzzy_quoted_literal": {
+			input: `"foo bar"~4 AND a:b`,
+			expected: AND(
+				FUZZY(Lit("foo bar"), 4),
+				EQ(Lit("a"), Lit("b")),
+			),
+		},
+		"fuzzy_sub_expression": {
+			input: "(title:foo OR title:bar)~2 AND (body:foo OR body:bar)",
+			expected: AND(
+				FUZZY(
+					OR(
+						EQ(Lit("title"), Lit("foo")),
+						EQ(Lit("title"), Lit("bar")),
+					),
+					2),
+				OR(
+					EQ(Lit("body"), Lit("foo")),
+					EQ(Lit("body"), Lit("bar")),
+				),
+			),
+		},
+		"nested_sub_expressions_with_fuzzy": {
+			input: "((title:foo)~ OR title:bar) AND (body:foo OR body:bar)",
+			expected: AND(
+				OR(
+					FUZZY(EQ(Lit("title"), Lit("foo")), 1),
+					EQ(Lit("title"), Lit("bar")),
+				),
+
+				OR(
+					EQ(Lit("body"), Lit("foo")),
+					EQ(Lit("body"), Lit("bar")),
+				),
 			),
 		},
 	}
@@ -361,5 +452,18 @@ func BOOST(e Expression, power float32) *Boost {
 	return &Boost{
 		expr:  e,
 		power: power,
+	}
+}
+
+func FUZZY(e Expression, distance int) *Fuzzy {
+	return &Fuzzy{
+		expr:     e,
+		distance: distance,
+	}
+}
+
+func REGEXP(val any) *RegexpLiteral {
+	return &RegexpLiteral{
+		Literal: Literal{val},
 	}
 }

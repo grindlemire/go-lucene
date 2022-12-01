@@ -173,8 +173,11 @@ func (l *Literal) insert(e Expression) (Expression, error) {
 	}
 }
 
-// WildLiteral indicates the literal has regex values in it and should be matched as a regex
+// WildLiteral indicates the literal has regex values in it and should be matched as a loose wildcard
 type WildLiteral struct{ Literal }
+
+// RegexpLiteral indicates the literal has regex values in it and should be matched as a regex
+type RegexpLiteral struct{ Literal }
 
 // Range ...
 type Range struct {
@@ -243,6 +246,23 @@ func (b *Boost) insert(e Expression) (Expression, error) {
 	panic("boost should never be inserted into")
 }
 
+// Fuzzy ...
+type Fuzzy struct {
+	expr     Expression
+	distance int
+}
+
+func (b Fuzzy) String() string {
+	if b.distance == 1 {
+		return fmt.Sprintf("Fuzzy(%s~)", b.expr)
+	}
+	return fmt.Sprintf("Fuzzy(%s~%v)", b.expr, b.distance)
+}
+
+func (b *Fuzzy) insert(e Expression) (Expression, error) {
+	panic("Fuzzy should never be inserted into")
+}
+
 type parser struct {
 	// keep an internal representation of tokens in case we need to backtrack
 	tokIdx int
@@ -295,7 +315,6 @@ func (p *parser) parse() (e Expression, err error) {
 			return e, err
 		}
 
-	state:
 		switch token.typ {
 		case tERR:
 			return e, errors.Errorf(token.val)
@@ -312,7 +331,7 @@ func (p *parser) parse() (e Expression, err error) {
 			}
 			if e == nil {
 				e = expr
-				break state // breaks out of the switch, not the for loop
+				continue // break out of switch and parse next token
 			}
 
 			e, err = e.insert(expr)
@@ -323,13 +342,34 @@ func (p *parser) parse() (e Expression, err error) {
 		// quoted value:
 		// 		- we make this quoted value a literal string and ignore keywords and whitespace
 		case tQUOTED:
+			// strip the quotes off because we don't need them
+			val := strings.ReplaceAll(token.val, "\"", "")
 			literal := &Literal{
-				val: token.val,
+				val: val,
 			}
 
 			if e == nil {
 				e = literal
-				break // breaks out of the switch, not the for loop
+				continue // breaks out of the switch and parse next token
+			}
+
+			e, err = e.insert(literal)
+			if err != nil {
+				return e, errors.Wrap(err, "unable to insert quoted string into expression")
+			}
+
+		// regexp value:
+		// 	- we make this regexp value a literal string and ignore everything in it, much like a quote
+		case tREGEXP:
+			// strip the quotes off because we don't need them
+			val := strings.ReplaceAll(token.val, "/", "")
+			literal := &RegexpLiteral{
+				Literal: Literal{val: val},
+			}
+
+			if e == nil {
+				e = literal
+				continue // breaks out of the switch and parse next token
 			}
 
 			e, err = e.insert(literal)
@@ -478,18 +518,16 @@ func (p *parser) parse() (e Expression, err error) {
 			p.hasMustNot = true
 
 		// boost operator
-		//     - if we see a carrot we get the boost term and wrap the right most left term in the boost
+		//     - if we see a carrot we get the boost term and wrap left term in the boost
 		case tCARROT:
 			next := p.next()
 
 			if next.typ != tLITERAL {
-
 				return e, errors.New("term boost must be follow by positive number")
 			}
 
 			f, err := toPositiveFloat(next.val)
 			if err != nil {
-
 				return e, errors.Wrap(err, "not able to parse boost number")
 			}
 
@@ -498,12 +536,46 @@ func (p *parser) parse() (e Expression, err error) {
 				return e, errors.Wrap(err, "unable to wrap expression in boost")
 			}
 
+		// fuzzy search operator
+		//     - if we see a tilde try to fuzzy try to wrap the left term in a fuzzy search with an optional edit distance
+		//     - according to https://lucene.apache.org/core/7_3_1/core/org/apache/lucene/search/FuzzyQuery.html#defaultMinSimilarity
+		//       the minSimilarity rating is deprecated so this can just be an edit distance.
+		case tTILDE:
+			next := p.next()
+
+			if next.typ != tLITERAL {
+				p.backup()
+				e, err = wrapInFuzzy(e, 1)
+				if err != nil {
+					return e, errors.Wrap(err, "not able to wrap expression in fuzzy search")
+				}
+				continue
+			}
+
+			i, err := toPositiveInt(next.val)
+			if err != nil {
+				return e, errors.Wrap(err, "not able to parse fuzzy distance")
+			}
+
+			e, err = wrapInFuzzy(e, i)
+			if err != nil {
+				return e, errors.Wrap(err, "unable to wrap expression in boost")
+			}
+
 			// TODO:
-			// fuzzy matching
 			// figuring out how to handle implicit AND/OR
 		}
 
 	}
+}
+
+func toPositiveInt(in string) (i int, err error) {
+	i, err = strconv.Atoi(in)
+	if err == nil && i > 0 {
+		return i, nil
+	}
+
+	return i, errors.New(fmt.Sprintf("[%v] is not a positive number", in))
 }
 
 func toPositiveFloat(in string) (f float32, err error) {
@@ -567,6 +639,18 @@ func wrapInBoost(e Expression, power float32) (Expression, error) {
 	e = &Boost{
 		expr:  e,
 		power: power,
+	}
+	return e, nil
+}
+
+func wrapInFuzzy(e Expression, distance int) (Expression, error) {
+	if e == nil {
+		return e, errors.New("carrot must follow another expression")
+	}
+
+	e = &Fuzzy{
+		expr:     e,
+		distance: distance,
 	}
 	return e, nil
 }

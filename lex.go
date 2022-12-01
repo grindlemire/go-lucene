@@ -30,6 +30,7 @@ const (
 	tERR tokType = iota
 	tLITERAL
 	tQUOTED
+	tREGEXP
 	tEQUAL
 	tAND
 	tOR
@@ -73,6 +74,7 @@ func (tt tokType) String() string {
 		tERR:     "tERR",
 		tLITERAL: "tLITERAL",
 		tQUOTED:  "tQUOTED",
+		tREGEXP:  "tREGEXP",
 		tEQUAL:   "tEQUAL",
 		tLPAREN:  "tLPAREN",
 		tRPAREN:  "tRPAREN",
@@ -157,6 +159,9 @@ func lexVal(l *lexer) tokenStateFn {
 	case r == '"' || r == '\'':
 		l.backup()
 		return lexQuote
+	case r == '/':
+		l.backup()
+		return lexRegexp
 	default:
 		l.errorf("error parsing token [%s]", string(r))
 	}
@@ -176,6 +181,24 @@ func lexQuote(l *lexer) tokenStateFn {
 			return l.emit(tQUOTED)
 		case r == eof:
 			return l.errorf("unterminated quote")
+		}
+	}
+}
+
+func lexRegexp(l *lexer) tokenStateFn {
+	// theoretically allow us to use anything to specify a regexp
+	open := l.next()
+
+	for {
+		switch r := l.next(); {
+		case isAlphaNumeric(r) || isWildcard(r) || isEscape(r):
+			// do nothing
+		case r == ' ' || r == '\t' || r == '\r' || r == '\n':
+			// do nothing
+		case r == open:
+			return l.emit(tREGEXP)
+		case r == eof:
+			return l.errorf("unterminated regexp")
 		}
 	}
 }
