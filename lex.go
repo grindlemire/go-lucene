@@ -184,7 +184,7 @@ func lexWord(l *lexer) tokenStateFn {
 loop:
 	for {
 		switch r := l.next(); {
-		case isAlphaNumeric(r) || isWildcard(r):
+		case isAlphaNumeric(r) || isWildcard(r) || r == '.':
 			// do nothing
 		case isEscape(r):
 			l.next() // just ignore the next character

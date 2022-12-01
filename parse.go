@@ -1,6 +1,7 @@
 package lucene
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -50,6 +51,10 @@ type Equals struct {
 	isMustNot bool
 }
 
+func (eq Equals) String() string {
+	return fmt.Sprintf("%v = %v", eq.term, eq.value)
+}
+
 func (eq *Equals) insert(e Expression) (Expression, error) {
 	literal, isLiteral := e.(*Literal)
 	if eq.term == "" && !isLiteral {
@@ -64,6 +69,11 @@ func (eq *Equals) insert(e Expression) (Expression, error) {
 
 		eq.term = str
 		return eq, nil
+	}
+
+	// if we are inserting a term into an equals then we are in the implicit boolean case
+	if eq.term != "" && eq.value != nil {
+		return &And{left: eq, right: e}, nil
 	}
 
 	eq.value = e
@@ -81,17 +91,14 @@ func (eq *Equals) insert(e Expression) (Expression, error) {
 	return eq, nil
 }
 
-// RangeInclusive ...
-type RangeInclusive struct {
-	term  string
-	start any
-	end   any
-}
-
 // And ...
 type And struct {
 	left  Expression
 	right Expression
+}
+
+func (a And) String() string {
+	return fmt.Sprintf("(%v) AND (%v)", a.left, a.right)
 }
 
 func (a *And) insert(e Expression) (Expression, error) {
@@ -114,6 +121,10 @@ type Or struct {
 	right Expression
 }
 
+func (o Or) String() string {
+	return fmt.Sprintf("(%v) OR (%v)", o.left, o.right)
+}
+
 func (o *Or) insert(e Expression) (Expression, error) {
 	if o.left == nil {
 		o.left = e
@@ -133,6 +144,10 @@ type Not struct {
 	expr Expression
 }
 
+func (n Not) String() string {
+	return fmt.Sprintf("NOT(%v)", n.expr)
+}
+
 func (n *Not) insert(e Expression) (Expression, error) {
 	n.expr = e
 	return n, nil
@@ -143,12 +158,18 @@ type Literal struct {
 	val any
 }
 
+func (l Literal) String() string {
+	return fmt.Sprintf("%v", l.val)
+}
+
 func (l *Literal) insert(e Expression) (Expression, error) {
 	switch exp := e.(type) {
 	case *Equals:
 		return exp.insert(l)
+	case *Literal, *Not, *Boost, *WildLiteral:
+		return &And{left: l, right: e}, nil
 	default:
-		return nil, errors.Errorf("unable to update expression with literal and [%v]", reflect.TypeOf(e))
+		return nil, errors.Errorf("unable to insert [%v] into literal expression", reflect.TypeOf(e))
 	}
 }
 
@@ -160,6 +181,10 @@ type Range struct {
 	Min       Expression
 	Max       Expression
 	Inclusive bool
+}
+
+func (r Range) String() string {
+	return fmt.Sprintf("[%s TO %s]", r.Min, r.Max)
 }
 
 func (r *Range) insert(e Expression) (Expression, error) {
@@ -181,6 +206,10 @@ type Must struct {
 	expr Expression
 }
 
+func (m Must) String() string {
+	return fmt.Sprintf("MUST(%v)", m.expr)
+}
+
 func (m *Must) insert(e Expression) (Expression, error) {
 	m.expr = e
 	return m, nil
@@ -191,9 +220,27 @@ type MustNot struct {
 	expr Expression
 }
 
+func (m MustNot) String() string {
+	return fmt.Sprintf("MUSTNOT(%v)", m.expr)
+}
+
 func (m *MustNot) insert(e Expression) (Expression, error) {
 	m.expr = e
 	return m, nil
+}
+
+// Boost ...
+type Boost struct {
+	expr  Expression
+	power float32
+}
+
+func (b Boost) String() string {
+	return fmt.Sprintf("Boost(%s^%v)", b.expr, b.power)
+}
+
+func (b *Boost) insert(e Expression) (Expression, error) {
+	panic("boost should never be inserted into")
 }
 
 type parser struct {
@@ -207,9 +254,12 @@ type parser struct {
 }
 
 func (p *parser) next() (t token) {
-	if p.tokIdx < len(p.tokens) {
-		t = p.tokens[p.tokIdx]
+	// fmt.Printf("NEXT CALLED: idx: %v | tokens: %v \n", p.tokIdx, p.tokens)
+	if p.tokIdx < len(p.tokens)-1 {
 		p.tokIdx++
+		t = p.tokens[p.tokIdx]
+
+		// fmt.Printf("AFTER GETTING CACHED TOKEN: VAL: %s | idx: %v | tokens: %v \n", t.val, p.tokIdx, p.tokens)
 		return t
 	}
 
@@ -217,11 +267,16 @@ func (p *parser) next() (t token) {
 	t = p.lex.nextToken()
 	p.tokens = append(p.tokens, t)
 	p.tokIdx++
+	// fmt.Printf("AFTER GETTING NEXT TOKEN: VAL: %s | idx: %v | tokens: %v \n", t.val, p.tokIdx, p.tokens)
+	// fmt.Printf("NEXT RETURNING %s\n", t.val)
 	return t
 
 }
 
 func (p *parser) backup() {
+	if p.tokIdx < 0 {
+		return
+	}
 	p.tokIdx--
 }
 
@@ -243,7 +298,9 @@ func (p *parser) parse() (e Expression, err error) {
 		if token.typ == tEOF {
 			return e, err
 		}
+		fmt.Printf("EXPRESSION IS [%-20v] => next token is [%s]\n", e, token)
 
+	state:
 		switch token.typ {
 		case tERR:
 			return e, errors.Errorf(token.val)
@@ -254,19 +311,20 @@ func (p *parser) parse() (e Expression, err error) {
 		// 		- we parse the literal to a real type rather than a string representation
 		// 		  and then transition the expression state based on seeing a literal.
 		case tLITERAL:
-			p.backup()
-			literal, err := p.parseLiteral()
+			expr, err := parseLiteral(token)
 			if err != nil {
 				return e, errors.Wrap(err, "unable to parse literal")
 			}
 			if e == nil {
-				e = literal
-				break // breaks out of the switch, not the for loop
+				e = expr
+				break state // breaks out of the switch, not the for loop
 			}
-			e, err = e.insert(literal)
+
+			e, err = e.insert(expr)
 			if err != nil {
 				return e, errors.Wrap(err, "unable to insert literal into expression")
 			}
+			fmt.Printf("FINISHED PARSING LITERAL [%s]. NEXT IS: %s\n", token.val, p.peek().val)
 
 		// quoted value:
 		// 		- we make this quoted value a literal string and ignore keywords and whitespace
@@ -290,7 +348,7 @@ func (p *parser) parse() (e Expression, err error) {
 		// 		  the expression state to handle the equal.
 		case tEQUAL, tCOLON:
 			if e == nil {
-				return e, errors.New("invalid syntax: can't start expression with '='")
+				return e, errors.New("invalid syntax: can't start expression with '= or :'")
 			}
 
 			// this is a hack but idk how to do it otherwise. The must and must nots must only
@@ -330,7 +388,7 @@ func (p *parser) parse() (e Expression, err error) {
 				return e, errors.Wrap(err, "unable to build AND clause")
 			}
 			and.right = right
-			e = and
+			return and, nil
 		case tOR:
 			or := &Or{
 				left: e,
@@ -340,7 +398,7 @@ func (p *parser) parse() (e Expression, err error) {
 				return e, errors.Wrap(err, "unable to build AND clause")
 			}
 			or.right = right
-			e = or
+			return or, nil
 
 		// subexpressions
 		// 		- if you see a left paren then recursively parse the expression.
@@ -361,6 +419,7 @@ func (p *parser) parse() (e Expression, err error) {
 
 			e = sub
 		case tRPAREN:
+			fmt.Printf("RETURNING FROM SUB EXPRESSION: | %s\n", e)
 			return e, nil
 
 		// range operators
@@ -424,13 +483,47 @@ func (p *parser) parse() (e Expression, err error) {
 		case tMINUS:
 			p.hasMustNot = true
 
+		// boost operator
+		//     - if we see a carrot we get the boost term and wrap the right most left term in the boost
+		case tCARROT:
+			next := p.next()
+
+			if next.typ != tLITERAL {
+				fmt.Printf("Boost not literal\n")
+				return e, errors.New("term boost must be follow by positive number")
+			}
+
+			f, err := toPositiveFloat(next.val)
+			if err != nil {
+				fmt.Printf("Boost not positive float\n")
+				return e, errors.Wrap(err, "not able to parse boost number")
+			}
+
+			e, err = wrapInBoost(e, f)
+			if err != nil {
+				return e, errors.Wrap(err, "unable to wrap expression in boost")
+			}
+
 			// TODO:
-			// potentially handle >, < for niceness
-			// term boosting
 			// fuzzy matching
+			// figuring out how to handle implicit AND/OR
 		}
 
 	}
+}
+
+func toPositiveFloat(in string) (f float32, err error) {
+	i, err := strconv.Atoi(in)
+	if err == nil && i > 0 {
+		return float32(i), nil
+	}
+
+	pf, err := strconv.ParseFloat(in, 64)
+	if err == nil && pf > 0 {
+		return float32(pf), nil
+	}
+
+	return f, errors.New(fmt.Sprintf("[%v] is not a positive number", in))
 }
 
 func (p *parser) parseBoolean(e Expression) (Expression, error) {
@@ -457,8 +550,8 @@ func (p *parser) parseBoolean(e Expression) (Expression, error) {
 	}
 }
 
-func (p *parser) parseLiteral() (e Expression, err error) {
-	val := p.next().val
+func parseLiteral(token token) (e Expression, err error) {
+	val := token.val
 	ival, err := strconv.Atoi(val)
 	if err == nil {
 		return &Literal{val: ival}, nil
@@ -472,10 +565,23 @@ func (p *parser) parseLiteral() (e Expression, err error) {
 
 }
 
+func wrapInBoost(e Expression, power float32) (Expression, error) {
+	if e == nil {
+		return e, errors.New("carrot must follow another expression")
+	}
+
+	e = &Boost{
+		expr:  e,
+		power: power,
+	}
+	return e, nil
+}
+
 // Parse will parse the lucene grammar out of a string
 func Parse(input string) (e Expression, err error) {
 	p := parser{
-		lex: lex(input),
+		lex:    lex(input),
+		tokIdx: -1,
 	}
 	return p.parse()
 }

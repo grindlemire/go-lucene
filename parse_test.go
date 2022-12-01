@@ -46,6 +46,20 @@ func TestParseLucene(t *testing.T) {
 				Wild("b?z"),
 			),
 		},
+		// "default_to_AND_with_literals": {
+		// 	input: "a b",
+		// 	expected: AND(
+		// 		Lit("a"),
+		// 		Lit("b"),
+		// 	),
+		// },
+		// "default_to_AND_with_subexpressions": {
+		// 	input: "a:b c:d",
+		// 	expected: AND(
+		// 		EQ(Lit("a"), Lit("b")),
+		// 		EQ(Lit("c"), Lit("d")),
+		// 	),
+		// },
 		"basic_and": {
 			input: "a AND b",
 			expected: AND(
@@ -165,13 +179,84 @@ func TestParseLucene(t *testing.T) {
 				Lit(`\(1\+1\)\:2`),
 			),
 		},
+		"boost_key_value": {
+			input: "a:b^2 AND foo",
+			expected: AND(
+				BOOST(EQ(Lit("a"), Lit("b")), 2),
+				Lit("foo"),
+			),
+		},
+		"boost_literal": {
+			input:    "foo^4",
+			expected: BOOST(Lit("foo"), 4),
+		},
+		"boost_literal_in_compound": {
+			input: "a:b AND foo^4",
+			expected: AND(
+				EQ(Lit("a"), Lit("b")),
+				BOOST(Lit("foo"), 4),
+			),
+		},
+		"boost_literal_leading": {
+			input: "foo^4 AND a:b",
+			expected: AND(
+				BOOST(Lit("foo"), 4),
+				EQ(Lit("a"), Lit("b")),
+			),
+		},
+		"boost_sub_expression": {
+			input: "(title:foo OR title:bar)^1.5 AND (body:foo OR body:bar)",
+			expected: AND(
+				BOOST(
+					OR(
+						EQ(Lit("title"), Lit("foo")),
+						EQ(Lit("title"), Lit("bar")),
+					),
+					1.5),
+				OR(
+					EQ(Lit("body"), Lit("foo")),
+					EQ(Lit("body"), Lit("bar")),
+				),
+			),
+		},
+		"nested_sub_expressions_with_boost": {
+			input: "((title:foo)^1.2 OR title:bar) AND (body:foo OR body:bar)",
+			expected: AND(
+				OR(
+					BOOST(EQ(Lit("title"), Lit("foo")), 1.2),
+					EQ(Lit("title"), Lit("bar")),
+				),
+
+				OR(
+					EQ(Lit("body"), Lit("foo")),
+					EQ(Lit("body"), Lit("bar")),
+				),
+			),
+		},
+		"nested_sub_expressions": {
+			input: "((title:foo OR title:bar) AND (body:foo OR body:bar)) OR k:v)",
+			expected: OR(
+				AND(
+					OR(
+						EQ(Lit("title"), Lit("foo")),
+						EQ(Lit("title"), Lit("bar")),
+					),
+
+					OR(
+						EQ(Lit("body"), Lit("foo")),
+						EQ(Lit("body"), Lit("bar")),
+					),
+				),
+				EQ(Lit("k"), Lit("v")),
+			),
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			e, err := Parse(tc.input)
 			require.NoError(t, err)
-			assert.Equal(t, tc.expected, e)
+			assert.Equal(t, tc.expected, e, "[%s] incorrect", e)
 		})
 	}
 }
@@ -269,5 +354,12 @@ func MUST(e Expression) *Must {
 func MUSTNOT(e Expression) *MustNot {
 	return &MustNot{
 		expr: e,
+	}
+}
+
+func BOOST(e Expression, power float32) *Boost {
+	return &Boost{
+		expr:  e,
+		power: power,
 	}
 }

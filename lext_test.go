@@ -125,6 +125,32 @@ func TestLex(t *testing.T) {
 				tok(tLESS, "<"),
 			},
 		},
+		"token_boost": {
+			in: "a:b^2 foo^4",
+			expected: []token{
+				tok(tLITERAL, "a"),
+				tok(tCOLON, ":"),
+				tok(tLITERAL, "b"),
+				tok(tCARROT, "^"),
+				tok(tLITERAL, "2"),
+				tok(tLITERAL, "foo"),
+				tok(tCARROT, "^"),
+				tok(tLITERAL, "4"),
+			},
+		},
+		"token_boost_floats": {
+			in: "a:b^2.1 foo^4.40",
+			expected: []token{
+				tok(tLITERAL, "a"),
+				tok(tCOLON, ":"),
+				tok(tLITERAL, "b"),
+				tok(tCARROT, "^"),
+				tok(tLITERAL, "2.1"),
+				tok(tLITERAL, "foo"),
+				tok(tCARROT, "^"),
+				tok(tLITERAL, "4.40"),
+			},
+		},
 		"entire_stream_tokenized": {
 			in: `(+k1:v1 AND -k2:v2) OR k3:"foo bar"^2 OR k4:a*~10`,
 			expected: []token{
