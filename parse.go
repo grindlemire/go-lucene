@@ -112,6 +112,11 @@ func (a *And) insert(e Expression) (Expression, error) {
 		return a, nil
 	}
 
+	// if we are inserting a term into a full and then we are doing an implicit compound operation
+	if a.left != nil && a.right != nil {
+		return &And{left: a, right: e}, nil
+	}
+
 	return nil, errors.New("attempting to insert an expression into a full AND clause")
 }
 
@@ -134,6 +139,11 @@ func (o *Or) insert(e Expression) (Expression, error) {
 	if o.right == nil {
 		o.right = e
 		return o, nil
+	}
+
+	// if we are inserting a term into a full and then we are doing an implicit compound operation
+	if o.left != nil && o.right != nil {
+		return &And{left: o, right: e}, nil
 	}
 
 	return nil, errors.New("attempting to insert an expression into a full OR clause")
@@ -166,10 +176,11 @@ func (l *Literal) insert(e Expression) (Expression, error) {
 	switch exp := e.(type) {
 	case *Equals:
 		return exp.insert(l)
-	case *Literal, *Not, *Boost, *WildLiteral:
-		return &And{left: l, right: e}, nil
+	// if we are inserting a term into a literal then we must be doing an implicit compound
 	default:
-		return nil, errors.Errorf("unable to insert [%v] into literal expression", reflect.TypeOf(e))
+		return &And{left: l, right: e}, nil
+		// default:
+		// 	return nil, errors.Errorf("unable to insert [%v] into literal expression", reflect.TypeOf(e))
 	}
 }
 
@@ -193,6 +204,11 @@ func (r Range) String() string {
 func (r *Range) insert(e Expression) (Expression, error) {
 	if r.Min == nil {
 		return nil, errors.New("should not be able to have a TO expression without a minimum")
+	}
+
+	// if we are inserting an expression into a full range query we must be trying to do a compound operation
+	if r.Min != nil && r.Max != nil {
+		return &And{left: r, right: e}, nil
 	}
 
 	switch exp := e.(type) {
@@ -243,7 +259,8 @@ func (b Boost) String() string {
 }
 
 func (b *Boost) insert(e Expression) (Expression, error) {
-	panic("boost should never be inserted into")
+	// if we are inserting a value into a boost then we must be doing a compound operation
+	return &And{left: b, right: e}, nil
 }
 
 // Fuzzy ...
@@ -260,7 +277,8 @@ func (b Fuzzy) String() string {
 }
 
 func (b *Fuzzy) insert(e Expression) (Expression, error) {
-	panic("Fuzzy should never be inserted into")
+	// if we are inserting a value into a fuzzy then we must be doing a compound operation
+	return &And{left: b, right: e}, nil
 }
 
 type parser struct {
@@ -308,11 +326,52 @@ func (p *parser) peek() (t token) {
 	return p.tokens[p.tokIdx]
 }
 
+func canAcceptNextToken(curr Expression, token token) bool {
+	if curr == nil {
+		return true
+	}
+	switch expr := curr.(type) {
+	case *Literal, *WildLiteral, *Range, *RegexpLiteral:
+		return true
+	case *Equals:
+		if expr.value == nil {
+			return token.typ == tLITERAL ||
+				token.typ == tQUOTED ||
+				token.typ == tREGEXP ||
+				token.typ == tLCURLY ||
+				token.typ == tLSQUARE ||
+				token.typ == tLPAREN
+		}
+		return token.typ == tAND ||
+			token.typ == tOR ||
+			token.typ == tCARROT ||
+			token.typ == tTILDE ||
+			token.typ == tRPAREN
+	default:
+		return token.typ == tAND ||
+			token.typ == tOR ||
+			token.typ == tRPAREN ||
+			token.typ == tCARROT ||
+			token.typ == tTILDE
+	}
+}
+
 func (p *parser) parse() (e Expression, err error) {
 	for {
 		token := p.next()
 		if token.typ == tEOF {
 			return e, err
+		}
+
+		fmt.Printf("Parsed Expression: %v\n", e)
+		if !canAcceptNextToken(e, token) {
+			p.backup()
+			sub, err := p.parse()
+			if err != nil {
+				return e, err
+			}
+
+			return e.insert(sub)
 		}
 
 		switch token.typ {
@@ -561,9 +620,6 @@ func (p *parser) parse() (e Expression, err error) {
 			if err != nil {
 				return e, errors.Wrap(err, "unable to wrap expression in boost")
 			}
-
-			// TODO:
-			// figuring out how to handle implicit AND/OR
 		}
 
 	}

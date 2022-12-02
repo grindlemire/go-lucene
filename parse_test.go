@@ -58,20 +58,20 @@ func TestParseLucene(t *testing.T) {
 				Lit("a"), REGEXP(`b "[c]`),
 			),
 		},
-		// "default_to_AND_with_literals": {
-		// 	input: "a b",
-		// 	expected: AND(
-		// 		Lit("a"),
-		// 		Lit("b"),
-		// 	),
-		// },
-		// "default_to_AND_with_subexpressions": {
-		// 	input: "a:b c:d",
-		// 	expected: AND(
-		// 		EQ(Lit("a"), Lit("b")),
-		// 		EQ(Lit("c"), Lit("d")),
-		// 	),
-		// },
+		"default_to_AND_with_literals": {
+			input: "a b",
+			expected: AND(
+				Lit("a"),
+				Lit("b"),
+			),
+		},
+		"default_to_AND_with_subexpressions": {
+			input: "a:b c:d",
+			expected: AND(
+				EQ(Lit("a"), Lit("b")),
+				EQ(Lit("c"), Lit("d")),
+			),
+		},
 		"basic_and": {
 			input: "a AND b",
 			expected: AND(
@@ -298,7 +298,21 @@ func TestParseLucene(t *testing.T) {
 				FUZZY(Lit("foo"), 4),
 			),
 		},
+		"fuzzy_literal_in_implicit_compound": {
+			input: "a:b foo~4",
+			expected: AND(
+				EQ(Lit("a"), Lit("b")),
+				FUZZY(Lit("foo"), 4),
+			),
+		},
 		"fuzzy_literal_leading": {
+			input: "foo~4 AND a:b",
+			expected: AND(
+				FUZZY(Lit("foo"), 4),
+				EQ(Lit("a"), Lit("b")),
+			),
+		},
+		"fuzzy_literal_leading_in_implicit_compound": {
 			input: "foo~4 AND a:b",
 			expected: AND(
 				FUZZY(Lit("foo"), 4),
