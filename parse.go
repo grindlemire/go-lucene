@@ -9,32 +9,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// k1:[1 TO 5] AND (k2:fo? OR k3:"foo bar") -k5:(boo ba bi*)
-// OR {
-// 	AND {
-// 		RANGE_INCLUSIVE {
-// 			k1,
-// 			1, 5
-// 		},
-// 		OR {
-// 			WILDCARD {
-// 				k2
-// 				"fo?"
-// 			}
-// 			EQUAL {
-// 				k3
-// 				"foo bar"
-// 			}
-// 		}
-// 	}
-// 	NOT {
-// 		WILDCARD {
-// 			k5
-// 			[ba*]
-// 		}
-// 	}
-// }
-
 // Expression ...
 type Expression interface {
 	// String() string
