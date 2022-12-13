@@ -253,7 +253,7 @@ func TestParseLucene(t *testing.T) {
 			),
 		},
 		"nested_sub_expressions": {
-			input: "((title:foo OR title:bar) AND (body:foo OR body:bar)) OR k:v)",
+			input: "((title:foo OR title:bar) AND (body:foo OR body:bar)) OR k:v",
 			expected: OR(
 				AND(
 					OR(
