@@ -377,6 +377,69 @@ func TestParseFailure(t *testing.T) {
 		"unbalanced_paren": {
 			input: "(a AND b))",
 		},
+		"unbalanced_nested_paren": {
+			input: "(a AND (b AND c)",
+		},
+		"equal_without_rhs": {
+			input: "a = ",
+		},
+		"equal_without_lhs": {
+			input: "= b",
+		},
+		"empty_parens_nil": {
+			input: "() = ()",
+		},
+		"and_without_rhs": {
+			input: "a AND",
+		},
+		"or_without_rhs": {
+			input: "a OR",
+		},
+		"not_without_subexpression_1": {
+			input: "NOT",
+		},
+		"not_without_subexpression_2": {
+			input: "NOT()",
+		},
+		"must_without_subexpression_1": {
+			input: "+",
+		},
+		"must_without_subexpression_2": {
+			input: "+()",
+		},
+		"mustnot_without_subexpression_1": {
+			input: "-",
+		},
+		"mustnot_without_subexpression_2": {
+			input: "-()",
+		},
+		"boost_without_subexpression_1": {
+			input: "^2",
+		},
+		"boost_without_subexpression_2": {
+			input: "()^2",
+		},
+		"fuzzy_without_subexpression_1": {
+			input: "~2",
+		},
+		"fuzzy_without_subexpression_2": {
+			input: "()~2",
+		},
+		"fuzzy_without_subexpression_3": {
+			input: "~",
+		},
+		"fuzzy_without_subexpression_4": {
+			input: "()~",
+		},
+		"range_without_min": {
+			input: "[ TO 5]",
+		},
+		"range_without_max": {
+			input: "[* TO ]",
+		},
+		"nested_validation_works": {
+			input: "(A=B AND C=(D OR E)) OR (NOT(+a:[* TO]))",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -385,6 +448,32 @@ func TestParseFailure(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func FuzzParse(f *testing.F) {
+	tcs := []string{
+		"A:B AND C:D",
+		"+foo OR (NOT(B))",
+		"A = bar",
+		"NOT(b = c)",
+		"z:[* TO 10]",
+		"x:[10 TO *] AND NOT(y:[1 TO 5]",
+		"(+a:b -c:d) OR (z:[1 TO *] NOT(foo))",
+		`+bbq:"woo"`,
+		`-bbq:"woo"`,
+	}
+	for _, tc := range tcs {
+		f.Add(tc)
+	}
+
+	f.Log("starting fuzz")
+	f.Fuzz(func(t *testing.T, in string) {
+		e, err := Parse(in)
+		if err == nil {
+			t.Logf("%s\n", e)
+		}
+	})
+
 }
 
 func EQ(a *Literal, b Expression) *Equals {

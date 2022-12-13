@@ -199,7 +199,7 @@ type Must struct {
 }
 
 func (m Must) String() string {
-	return fmt.Sprintf("MUST(%v)", m.expr)
+	return fmt.Sprintf("+%v", m.expr)
 }
 
 func (m *Must) insert(e Expression) (Expression, error) {
@@ -213,7 +213,7 @@ type MustNot struct {
 }
 
 func (m MustNot) String() string {
-	return fmt.Sprintf("MUSTNOT(%v)", m.expr)
+	return fmt.Sprintf("-%v", m.expr)
 }
 
 func (m *MustNot) insert(e Expression) (Expression, error) {
@@ -438,6 +438,7 @@ func (p *parser) parse() (e Expression, err error) {
 			if err != nil {
 				return e, err
 			}
+
 			not := &Not{
 				expr: sub,
 			}
@@ -446,7 +447,6 @@ func (p *parser) parse() (e Expression, err error) {
 				e = not
 				break
 			}
-
 			e.insert(not)
 		// boolean operators:
 		//		- these just wrap the existing terms
@@ -606,6 +606,98 @@ func (p *parser) parse() (e Expression, err error) {
 	}
 }
 
+func validate(expr Expression) (err error) {
+	switch e := expr.(type) {
+	case *Equals:
+		if e.term == "" || e.value == nil {
+			return errors.New("EQUALS operator must have both sides of the expression")
+		}
+		return validate(e.value)
+	case *And:
+		if e.left == nil || e.right == nil {
+			return errors.New("AND clause must have two sides")
+		}
+		err = validate(e.left)
+		if err != nil {
+			return err
+		}
+		err = validate(e.right)
+		if err != nil {
+			return err
+		}
+	case *Or:
+		if e.left == nil || e.right == nil {
+			return errors.New("OR clause must have two sides")
+		}
+		err = validate(e.left)
+		if err != nil {
+			return err
+		}
+		err = validate(e.right)
+		if err != nil {
+			return err
+		}
+	case *Not:
+		if e.expr == nil {
+			return errors.New("NOT expression must have a sub expression to negate")
+		}
+		return validate(e.expr)
+	case *Literal:
+		// do nothing
+	case *WildLiteral:
+		// do nothing
+	case *RegexpLiteral:
+		// do nothing
+	case *Range:
+		if e.Min == nil || e.Max == nil {
+			return errors.New("range clause must have a min and a max")
+		}
+		err = validate(e.Min)
+		if err != nil {
+			return err
+		}
+		err = validate(e.Max)
+		if err != nil {
+			return err
+		}
+	case *Must:
+		if e.expr == nil {
+			return errors.New("MUST expression must have a sub expression")
+		}
+		_, isMustNot := e.expr.(*MustNot)
+		_, isMust := e.expr.(*Must)
+		if isMust || isMustNot {
+			return errors.New("MUST cannot be repeated with itself or MUST NOT")
+		}
+		return validate(e.expr)
+	case *MustNot:
+		if e.expr == nil {
+			return errors.New("MUST NOT expression must have a sub expression")
+		}
+		_, isMustNot := e.expr.(*MustNot)
+		_, isMust := e.expr.(*Must)
+		if isMust || isMustNot {
+			return errors.New("MUST NOT cannot be repeated with itself or MUST")
+		}
+		return validate(e.expr)
+	case *Boost:
+		if e.expr == nil {
+			return errors.New("BOOST expression must have a subexpression")
+		}
+		return validate(e.expr)
+	case *Fuzzy:
+		if e.expr == nil {
+			return errors.New("FUZZY expression must have a subexpression")
+		}
+		return validate(e.expr)
+	default:
+		return fmt.Errorf("unable to validate Expression type: %s", reflect.TypeOf(e))
+	}
+
+	return nil
+
+}
+
 func toPositiveInt(in string) (i int, err error) {
 	i, err = strconv.Atoi(in)
 	if err == nil && i > 0 {
@@ -716,5 +808,15 @@ func Parse(input string) (e Expression, err error) {
 		lex:    lex(input),
 		tokIdx: -1,
 	}
-	return p.parse()
+	e, err = p.parse()
+	if err != nil {
+		return e, err
+	}
+
+	err = validate(e)
+	if err != nil {
+		return e, err
+	}
+
+	return e, nil
 }
