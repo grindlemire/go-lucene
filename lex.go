@@ -2,6 +2,7 @@ package lucene
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 )
@@ -102,18 +103,20 @@ type tokenStateFn func(*lexer) tokenStateFn
 type lexer struct {
 	input string // the input to parse
 
-	pos      int   // the position of the cursor
-	start    int   // the start of the current token
-	currItem token // the current item being worked on
-	atEOF    bool  // whether we have finished parsing the string or not
+	pos         int          // the position of the cursor
+	start       int          // the start of the current token
+	phraseStack map[rune]int // this tracks any symbol stacks are in the string
+	currItem    token        // the current item being worked on
+	atEOF       bool         // whether we have finished parsing the string or not
 
 }
 
 func lex(input string) *lexer {
 	return &lexer{
-		input: input,
-		pos:   0,
-		start: 0,
+		input:       input,
+		pos:         0,
+		start:       0,
+		phraseStack: map[rune]int{},
 	}
 }
 
@@ -133,10 +136,62 @@ func (l *lexer) nextToken() token {
 	return l.currItem
 }
 
+var phraseBoundaryPairings = map[rune]rune{
+	'(': '(',
+	')': '(',
+	'[': '[',
+	']': '[',
+	'{': '{',
+	'}': '{',
+}
+
+func (l *lexer) modifyPhraseStack(r rune) {
+	// get the matching rune that starts the stack
+	startRune := phraseBoundaryPairings[r]
+
+	count, found := l.phraseStack[startRune]
+	if !found {
+		l.phraseStack[startRune] = 1
+		return
+	}
+
+	// if we have a start rune then increment the stack by 1
+	if r == startRune {
+		count++
+		l.phraseStack[startRune] = count
+		return
+	}
+
+	count--
+	if count == 0 {
+		delete(l.phraseStack, startRune)
+		return
+	}
+
+	l.phraseStack[startRune] = count
+}
+
+func (l *lexer) checkPhraseStack() error {
+	if len(l.phraseStack) == 0 {
+		return nil
+	}
+
+	chars := []string{}
+	for k := range l.phraseStack {
+		chars = append(chars, string(k))
+	}
+
+	return fmt.Errorf("unterminated %s", strings.Join(chars, ", "))
+}
+
 func lexSpace(l *lexer) tokenStateFn {
 	for {
 		switch l.next() {
 		case eof:
+			err := l.checkPhraseStack()
+			if err != nil {
+				return l.errorf(err.Error())
+			}
 			return nil
 		case ' ', '\t', '\r', '\n':
 			continue
@@ -155,10 +210,11 @@ func lexVal(l *lexer) tokenStateFn {
 		l.backup()
 		return lexWord
 	case isSymbol(r):
+		l.modifyPhraseStack(r)
 		return l.emit(symbols[r])
 	case r == '"' || r == '\'':
 		l.backup()
-		return lexQuote
+		return lexPhrase
 	case r == '/':
 		l.backup()
 		return lexRegexp
@@ -168,7 +224,7 @@ func lexVal(l *lexer) tokenStateFn {
 	return nil
 }
 
-func lexQuote(l *lexer) tokenStateFn {
+func lexPhrase(l *lexer) tokenStateFn {
 	open := l.next()
 
 	for {

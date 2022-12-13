@@ -365,38 +365,24 @@ func TestParseLucene(t *testing.T) {
 		})
 	}
 }
-func TestParseLoose(t *testing.T) {
+func TestParseFailure(t *testing.T) {
 	type tc struct {
-		input    string
-		expected Expression
+		input string
 	}
 
 	tcs := map[string]tc{
-		"single_literal": {
-			input:    "a",
-			expected: Lit("a"),
+		"unpaired_paren": {
+			input: "(a AND b",
 		},
-		"basic_equal": {
-			input: "a = b",
-			expected: EQ(
-				Lit("a"),
-				Lit("b"),
-			),
-		},
-		"basic_and": {
-			input: "a AND b",
-			expected: AND(
-				Lit("a"),
-				Lit("b"),
-			),
+		"unbalanced_paren": {
+			input: "(a AND b))",
 		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			e, err := Parse(tc.input)
-			require.NoError(t, err)
-			assert.Equal(t, tc.expected, e)
+			_, err := Parse(tc.input)
+			require.Error(t, err)
 		})
 	}
 }

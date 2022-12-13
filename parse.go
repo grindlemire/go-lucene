@@ -1,12 +1,11 @@
 package lucene
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 // Expression ...
@@ -38,7 +37,7 @@ func (eq *Equals) insert(e Expression) (Expression, error) {
 	if eq.term == "" && isLiteral {
 		str, ok := literal.val.(string)
 		if !ok {
-			return nil, errors.Errorf("unable to insert non string [%v] into equals term", reflect.TypeOf(literal.val))
+			return nil, fmt.Errorf("unable to insert non string [%v] into equals term", reflect.TypeOf(literal.val))
 		}
 
 		eq.term = str
@@ -154,7 +153,7 @@ func (l *Literal) insert(e Expression) (Expression, error) {
 	default:
 		return &And{left: l, right: e}, nil
 		// default:
-		// 	return nil, errors.Errorf("unable to insert [%v] into literal expression", reflect.TypeOf(e))
+		// 	return nil, fmt.Errorf("unable to insert [%v] into literal expression", reflect.TypeOf(e)))
 	}
 }
 
@@ -190,7 +189,7 @@ func (r *Range) insert(e Expression) (Expression, error) {
 		r.Max = exp
 		return r, nil
 	default:
-		return nil, errors.Errorf("unable to insert [%v] expression as max in a range", reflect.TypeOf(exp))
+		return nil, fmt.Errorf("unable to insert [%v] expression as max in a range", reflect.TypeOf(exp))
 	}
 }
 
@@ -263,6 +262,9 @@ type parser struct {
 
 	hasMust    bool
 	hasMustNot bool
+
+	// this tracks how many open subexpressions we are in. It must be 0 at the end of the parse.
+	subExpressionCount int
 }
 
 func (p *parser) next() (t token) {
@@ -334,10 +336,9 @@ func (p *parser) parse() (e Expression, err error) {
 	for {
 		token := p.next()
 		if token.typ == tEOF {
-			return e, err
+			return e, p.checkExpressionStack()
 		}
 
-		fmt.Printf("Parsed Expression: %v\n", e)
 		if !canAcceptNextToken(e, token) {
 			p.backup()
 			sub, err := p.parse()
@@ -350,9 +351,12 @@ func (p *parser) parse() (e Expression, err error) {
 
 		switch token.typ {
 		case tERR:
-			return e, errors.Errorf(token.val)
-		case tEOF:
-			return e, nil
+			return e, errors.New(token.val)
+		// case tEOF:
+		// 	if err != nil {
+		// 		return e, fmt.Errorf("sub expression not complete: %w", err)
+		// 	}
+		// 	return e, nil
 
 		// literal value:
 		// 		- we parse the literal to a real type rather than a string representation
@@ -360,7 +364,7 @@ func (p *parser) parse() (e Expression, err error) {
 		case tLITERAL:
 			expr, err := parseLiteral(token)
 			if err != nil {
-				return e, errors.Wrap(err, "unable to parse literal")
+				return e, fmt.Errorf("unable to parse literal %w", err)
 			}
 			if e == nil {
 				e = expr
@@ -369,7 +373,7 @@ func (p *parser) parse() (e Expression, err error) {
 
 			e, err = e.insert(expr)
 			if err != nil {
-				return e, errors.Wrap(err, "unable to insert literal into expression")
+				return e, fmt.Errorf("unable to insert literal into expression: %w", err)
 			}
 
 		// quoted value:
@@ -388,7 +392,7 @@ func (p *parser) parse() (e Expression, err error) {
 
 			e, err = e.insert(literal)
 			if err != nil {
-				return e, errors.Wrap(err, "unable to insert quoted string into expression")
+				return e, fmt.Errorf("unable to insert quoted string into expression: %w", err)
 			}
 
 		// regexp value:
@@ -407,7 +411,7 @@ func (p *parser) parse() (e Expression, err error) {
 
 			e, err = e.insert(literal)
 			if err != nil {
-				return e, errors.Wrap(err, "unable to insert quoted string into expression")
+				return e, fmt.Errorf("unable to insert quoted string into expression: %w", err)
 			}
 
 		// equal operator:
@@ -422,7 +426,7 @@ func (p *parser) parse() (e Expression, err error) {
 			// apply to the equals directly following them
 			e, err = e.insert(&Equals{isMust: p.hasMust, isMustNot: p.hasMustNot})
 			if err != nil {
-				return e, errors.Wrap(err, "error updating expression with equals token")
+				return e, fmt.Errorf("error updating expression with equals token: %w", err)
 			}
 			p.hasMust = false
 			p.hasMustNot = false
@@ -452,7 +456,7 @@ func (p *parser) parse() (e Expression, err error) {
 			}
 			right, err := p.parse()
 			if err != nil {
-				return e, errors.Wrap(err, "unable to build AND clause")
+				return e, fmt.Errorf("unable to build AND clause: %w", err)
 			}
 			and.right = right
 			return and, nil
@@ -462,7 +466,7 @@ func (p *parser) parse() (e Expression, err error) {
 			}
 			right, err := p.parse()
 			if err != nil {
-				return e, errors.Wrap(err, "unable to build AND clause")
+				return e, fmt.Errorf("unable to build AND clause: %w", err)
 			}
 			or.right = right
 			return or, nil
@@ -471,11 +475,11 @@ func (p *parser) parse() (e Expression, err error) {
 		// 		- if you see a left paren then recursively parse the expression.
 		// 		- if you see a right paren we must be done with the current recursion
 		case tLPAREN:
+			p.updateExpressionStack(token.val)
 			sub, err := p.parse()
 			if err != nil {
-				return e, errors.Wrap(err, "unable to parse sub-expression")
+				return e, fmt.Errorf("unable to parse sub-expression: %w", err)
 			}
-
 			if e != nil {
 				e, err = e.insert(sub)
 				if err != nil {
@@ -486,7 +490,10 @@ func (p *parser) parse() (e Expression, err error) {
 
 			e = sub
 		case tRPAREN:
-
+			p.updateExpressionStack(token.val)
+			if p.subExpressionCount < 0 {
+				return e, errors.New("unbalanced closing paren")
+			}
 			return e, nil
 
 		// range operators
@@ -498,7 +505,7 @@ func (p *parser) parse() (e Expression, err error) {
 			}
 			sub, err := p.parse()
 			if err != nil {
-				return e, errors.Wrap(err, "unable to parse inclusive range")
+				return e, fmt.Errorf("unable to parse inclusive range: %w", err)
 			}
 			// we are inclusive so update that here
 			r, ok := sub.(*Range)
@@ -516,7 +523,7 @@ func (p *parser) parse() (e Expression, err error) {
 			}
 			sub, err := p.parse()
 			if err != nil {
-				return e, errors.Wrap(err, "unable to parse inclusive range")
+				return e, fmt.Errorf("unable to parse inclusive range: %w", err)
 			}
 			// we are inclusive so update that here
 			r, ok := sub.(*Range)
@@ -561,12 +568,12 @@ func (p *parser) parse() (e Expression, err error) {
 
 			f, err := toPositiveFloat(next.val)
 			if err != nil {
-				return e, errors.Wrap(err, "not able to parse boost number")
+				return e, fmt.Errorf("not able to parse boost number: %w", err)
 			}
 
 			e, err = wrapInBoost(e, f)
 			if err != nil {
-				return e, errors.Wrap(err, "unable to wrap expression in boost")
+				return e, fmt.Errorf("unable to wrap expression in boost: %w", err)
 			}
 
 		// fuzzy search operator
@@ -580,19 +587,19 @@ func (p *parser) parse() (e Expression, err error) {
 				p.backup()
 				e, err = wrapInFuzzy(e, 1)
 				if err != nil {
-					return e, errors.Wrap(err, "not able to wrap expression in fuzzy search")
+					return e, fmt.Errorf("not able to wrap expression in fuzzy search: %w", err)
 				}
 				continue
 			}
 
 			i, err := toPositiveInt(next.val)
 			if err != nil {
-				return e, errors.Wrap(err, "not able to parse fuzzy distance")
+				return e, fmt.Errorf("not able to parse fuzzy distance: %w", err)
 			}
 
 			e, err = wrapInFuzzy(e, i)
 			if err != nil {
-				return e, errors.Wrap(err, "unable to wrap expression in boost")
+				return e, fmt.Errorf("unable to wrap expression in boost: %w", err)
 			}
 		}
 
@@ -605,7 +612,7 @@ func toPositiveInt(in string) (i int, err error) {
 		return i, nil
 	}
 
-	return i, errors.New(fmt.Sprintf("[%v] is not a positive number", in))
+	return i, fmt.Errorf("[%v] is not a positive number", in)
 }
 
 func toPositiveFloat(in string) (f float32, err error) {
@@ -619,7 +626,7 @@ func toPositiveFloat(in string) (f float32, err error) {
 		return float32(pf), nil
 	}
 
-	return f, errors.New(fmt.Sprintf("[%v] is not a positive number", in))
+	return f, fmt.Errorf("[%v] is not a positive number", in)
 }
 
 func (p *parser) parseBoolean(e Expression) (Expression, error) {
@@ -632,7 +639,7 @@ func (p *parser) parseBoolean(e Expression) (Expression, error) {
 		token := p.next()
 		switch token.typ {
 		case tERR:
-			return nil, errors.Errorf(token.val)
+			return nil, fmt.Errorf(token.val)
 		case tEOF:
 			return nil, errors.New("unterminitated boolean expression")
 
@@ -644,6 +651,24 @@ func (p *parser) parseBoolean(e Expression) (Expression, error) {
 			return nil, errors.New("unable to insert a sub expression in a boolean")
 		}
 	}
+}
+
+func (p *parser) updateExpressionStack(s string) {
+	if s == "(" {
+		p.subExpressionCount++
+		return
+	}
+
+	p.subExpressionCount--
+	return
+}
+
+func (p *parser) checkExpressionStack() error {
+	if p.subExpressionCount != 0 {
+		return fmt.Errorf("unterminated paren")
+	}
+
+	return nil
 }
 
 func parseLiteral(token token) (e Expression, err error) {
