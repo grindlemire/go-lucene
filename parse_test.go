@@ -1,16 +1,18 @@
 package lucene
 
 import (
+	"reflect"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/grindlemire/go-lucene/expr"
 )
+
+const errTemplate = "%s:\n    wanted %v\n    got    %v"
 
 func TestParseLucene(t *testing.T) {
 	type tc struct {
 		input    string
-		expected Expression
+		expected expr.Expression
 	}
 
 	tcs := map[string]tc{
@@ -355,16 +357,37 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
+		"precedence_works": {
+			input: "a:b AND c:d OR e:f OR h:i AND j:k",
+			expected: OR(
+				AND(
+					EQ(Lit("a"), Lit("b")),
+					EQ(Lit("c"), Lit("d")),
+				),
+				OR(
+					EQ(Lit("e"), Lit("f")),
+					AND(
+						EQ(Lit("h"), Lit("i")),
+						EQ(Lit("j"), Lit("k")),
+					),
+				),
+			),
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			e, err := Parse(tc.input)
-			require.NoError(t, err)
-			assert.Equal(t, tc.expected, e, "[%s] incorrect", e)
+			parsed, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("wanted no error, got: %v", err)
+			}
+			if !reflect.DeepEqual(tc.expected, parsed) {
+				t.Fatalf(errTemplate, "error parsing", tc.expected, parsed)
+			}
 		})
 	}
 }
+
 func TestParseFailure(t *testing.T) {
 	type tc struct {
 		input string
@@ -445,7 +468,9 @@ func TestParseFailure(t *testing.T) {
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			_, err := Parse(tc.input)
-			require.Error(t, err)
+			if err == nil {
+				t.Fatalf("expected error but did not get one")
+			}
 		})
 	}
 }
@@ -465,94 +490,106 @@ func FuzzParse(f *testing.F) {
 	for _, tc := range tcs {
 		f.Add(tc)
 	}
-
-	f.Log("starting fuzz")
 	f.Fuzz(func(t *testing.T, in string) {
-		e, err := Parse(in)
-		if err == nil {
-			t.Logf("%s\n", e)
-		}
+		Parse(in)
 	})
 
 }
 
-func EQ(a *Literal, b Expression) *Equals {
-	return &Equals{
-		term:  a.val.(string),
-		value: b,
+func EQ(a *expr.Literal, b expr.Expression) *expr.Equals {
+	return &expr.Equals{
+		Term:  a.Value.(string),
+		Value: b,
 	}
 }
 
-func AND(a, b Expression) *And {
-	return &And{
-		left:  a,
-		right: b,
+func AND(a, b expr.Expression) *expr.And {
+	return &expr.And{
+		Left:  a,
+		Right: b,
 	}
 }
 
-func OR(a, b Expression) *Or {
-	return &Or{
-		left:  a,
-		right: b,
+func OR(a, b expr.Expression) *expr.Or {
+	return &expr.Or{
+		Left:  a,
+		Right: b,
 	}
 }
 
-func Lit(val any) *Literal {
-	return &Literal{
-		val: val,
+func Lit(val any) *expr.Literal {
+	return &expr.Literal{
+		Value: val,
 	}
 }
 
-func Wild(val any) *WildLiteral {
-	return &WildLiteral{
-		Literal{
-			val: val,
+func Wild(val any) *expr.WildLiteral {
+	return &expr.WildLiteral{
+		Literal: expr.Literal{
+			Value: val,
 		},
 	}
 }
 
-func Rang(min, max Expression, inclusive bool) *Range {
-	return &Range{
-		Min:       min,
-		Max:       max,
+func Rang(min, max expr.Expression, inclusive bool) *expr.Range {
+	lmin, ok := min.(*expr.Literal)
+	if !ok {
+		wmin, ok := min.(*expr.WildLiteral)
+		if !ok {
+			panic("must only pass a *expr.Literal or *WildLiteral to the Rang function")
+		}
+		lmin = &expr.Literal{Value: wmin.Value}
+	}
+
+	lmax, ok := max.(*expr.Literal)
+	if !ok {
+		wmax, ok := max.(*expr.WildLiteral)
+		if !ok {
+			panic("must only pass a *expr.Literal or *WildLiteral to the Rang function")
+		}
+		lmax = &expr.Literal{Value: wmax.Value}
+	}
+	return &expr.Range{
 		Inclusive: inclusive,
+		Min:       lmin,
+		Max:       lmax,
 	}
 }
 
-func NOT(e Expression) *Not {
-	return &Not{
-		expr: e,
+func NOT(e expr.Expression) *expr.Not {
+	return &expr.Not{
+		Sub: e,
 	}
 }
 
-func MUST(e Expression) *Must {
-	return &Must{
-		expr: e,
+func MUST(e expr.Expression) *expr.Must {
+	return &expr.Must{
+		Sub: e,
 	}
 }
 
-func MUSTNOT(e Expression) *MustNot {
-	return &MustNot{
-		expr: e,
+func MUSTNOT(e expr.Expression) *expr.MustNot {
+	return &expr.MustNot{
+		Sub: e,
 	}
 }
 
-func BOOST(e Expression, power float32) *Boost {
-	return &Boost{
-		expr:  e,
-		power: power,
+func BOOST(e expr.Expression, power float32) *expr.Boost {
+	return &expr.Boost{
+		Sub:   e,
+		Power: power,
 	}
 }
 
-func FUZZY(e Expression, distance int) *Fuzzy {
-	return &Fuzzy{
-		expr:     e,
-		distance: distance,
+func FUZZY(e expr.Expression, distance int) *expr.Fuzzy {
+	return &expr.Fuzzy{
+		Sub:      e,
+		Distance: distance,
 	}
 }
 
-func REGEXP(val any) *RegexpLiteral {
-	return &RegexpLiteral{
-		Literal: Literal{val},
+func REGEXP(val any) *expr.RegexpLiteral {
+	return &expr.RegexpLiteral{
+		Literal: expr.Literal{Value: val},
 	}
 }

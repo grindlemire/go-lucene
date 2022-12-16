@@ -1,10 +1,9 @@
 package lucene
 
 import (
+	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestLex(t *testing.T) {
@@ -196,7 +195,9 @@ func TestLex(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			tokens := consumeAll(tc.in)
 			tc.expected = finalizeExpected(tc.in, tc.expected)
-			assert.Equal(t, tc.expected, tokens)
+			if !reflect.DeepEqual(tc.expected, tokens) {
+				t.Fatalf(errTemplate, "token streams don't match", tc.expected, tokens)
+			}
 		})
 	}
 }
