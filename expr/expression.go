@@ -9,6 +9,7 @@ import (
 // Expression is an interface over all the different types of expressions
 // that we can parse out of lucene
 type Expression interface {
+	String() string
 	Insert(e Expression) (Expression, error)
 }
 
