@@ -117,6 +117,7 @@ func (p *bufParser) shouldShift(next token) bool {
 
 	curr := p.nonTerminals[len(p.nonTerminals)-1]
 
+	// TODO see if we really need all this extra edge logic
 	// if we have an open curly or the next one is we want to shift
 	if curr.typ == tLSQUARE || next.typ == tLSQUARE || curr.typ == tLCURLY || next.typ == tLCURLY {
 		return true
