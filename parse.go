@@ -1,19 +1,38 @@
 package lucene
 
 import (
-	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/grindlemire/go-lucene/expr"
 )
 
-// Parse will parse the lucene grammar out of a string
+// Grammar:
+// E ->
+// 		E:E
+// 		(E)
+// 		+E
+// 		-E
+// 		E~E
+// 		E^E
+// 		NOT E
+//      E AND E
+// 		E OR E
+// 		id
+// 		[id TO id]
+
+type stringer interface {
+	String() string
+}
+
+// Parse will parse using a buffer and the shift reduce algo
 func Parse(input string) (e expr.Expression, err error) {
-	p := parser{
-		lex:    lex(input),
-		tokIdx: -1,
+	p := &parser{
+		lex:          lex(input),
+		stack:        []stringer{},
+		nonTerminals: []token{{typ: tSTART}},
 	}
 	ex, err := p.parse()
 	if err != nil {
@@ -29,361 +48,558 @@ func Parse(input string) (e expr.Expression, err error) {
 }
 
 type parser struct {
-	// keep an internal representation of tokens in case we need to backtrack
-	tokIdx int
-	tokens []token
-	lex    *lexer
-
-	hasMust    bool
-	hasMustNot bool
-
-	// this tracks how many open subexpressions we are in. It must be 0 at the end of the parse.
-	subExpressionCount int
-}
-
-func (p *parser) next() (t token) {
-	if p.tokIdx < len(p.tokens)-1 {
-		p.tokIdx++
-		t = p.tokens[p.tokIdx]
-
-		return t
-	}
-
-	// if we have parsed all existing tokens get another
-	t = p.lex.nextToken()
-	p.tokens = append(p.tokens, t)
-	p.tokIdx++
-	return t
-
-}
-
-func (p *parser) backup() {
-	if p.tokIdx < 0 {
-		return
-	}
-	p.tokIdx--
-}
-
-func (p *parser) peek() (t token) {
-	// if we have parsed all existing tokens get another but don't increment the pointer
-	if p.tokIdx == len(p.tokens)-1 {
-		t = p.lex.nextToken()
-		p.tokens = append(p.tokens, t)
-		return t
-	}
-
-	// just return what is at the current pointer
-	return p.tokens[p.tokIdx]
+	lex          *lexer
+	stack        []stringer
+	nonTerminals []token
 }
 
 func (p *parser) parse() (e expr.Expression, err error) {
+
 	for {
-		token := p.next()
-		if token.typ == tEOF {
-			return e, p.checkExpressionStack()
+		// if should_shift
+		//     do_it
+		// else reduce
+		next := p.lex.peekNextToken()
+		fmt.Printf("NEXT TOKEN: %s\n", next)
+		if p.shouldAccept(next) {
+			if len(p.stack) != 1 {
+				return nil, fmt.Errorf("multiple expression left after parsing: %v", p.stack)
+			}
+			final, ok := p.stack[0].(expr.Expression)
+			if !ok {
+				return nil, fmt.Errorf("final parse didn't return an expression: %s [type: %s]", p.stack[0], reflect.TypeOf(final))
+			}
+			return final, nil
 		}
 
-		if !canAcceptNextToken(e, token) {
-			p.backup()
-			sub, err := p.parse()
-			if err != nil {
-				return e, err
-			}
-
-			return e.Insert(sub)
-		}
-
-		switch token.typ {
-		case tERR:
-			return e, errors.New(token.val)
-
-		// literal value:
-		// 		- we parse the literal to a real type rather than a string representation
-		// 		  and then transition the expression state based on seeing a literal.
-		case tLITERAL:
-			parsed, err := parseLiteral(token)
-			if err != nil {
-				return e, fmt.Errorf("unable to parse literal %w", err)
-			}
-			if e == nil {
-				e = parsed
-				continue // break out of switch and parse next token
-			}
-
-			e, err = e.Insert(parsed)
-			if err != nil {
-				return e, fmt.Errorf("unable to insert literal into expression: %w", err)
-			}
-
-		// quoted value:
-		// 		- we make this quoted value a literal string and ignore keywords and whitespace
-		case tQUOTED:
-			// strip the quotes off because we don't need them
-			val := strings.ReplaceAll(token.val, "\"", "")
-			literal := &expr.Literal{
-				Value: val,
-			}
-
-			if e == nil {
-				e = literal
-				continue // breaks out of the switch and parse next token
-			}
-
-			e, err = e.Insert(literal)
-			if err != nil {
-				return e, fmt.Errorf("unable to insert quoted string into expression: %w", err)
-			}
-
-		// regexp value:
-		// 	- we make this regexp value a literal string and ignore everything in it, much like a quote
-		case tREGEXP:
-			// strip the quotes off because we don't need them
-			val := strings.ReplaceAll(token.val, "/", "")
-			literal := &expr.RegexpLiteral{
-				Literal: expr.Literal{val},
-			}
-
-			if e == nil {
-				e = literal
-				continue // breaks out of the switch and parse next token
-			}
-
-			e, err = e.Insert(literal)
-			if err != nil {
-				return e, fmt.Errorf("unable to insert quoted string into expression: %w", err)
-			}
-
-		// equal operator:
-		//		- if we see an equal we enforce that we have literals and transition the
-		// 		  the expression state to handle the equal.
-		case tEQUAL, tCOLON:
-			if e == nil {
-				return e, errors.New("invalid syntax: can't start expression with '= or :'")
-			}
-
-			// this is a hack but idk how to do it otherwise. The must and must nots must only
-			// apply to the equals directly following them
-			e, err = e.Insert(&expr.Equals{IsMust: p.hasMust, IsMustNot: p.hasMustNot})
-			if err != nil {
-				return e, fmt.Errorf("error updating expression with equals token: %w", err)
-			}
-			p.hasMust = false
-			p.hasMustNot = false
-
-		// not operator
-		// 		- if we see a not then parse the following expression and wrap it with not
-		case tNOT:
-			sub, err := p.parse()
-			if err != nil {
-				return e, err
-			}
-
-			not := &expr.Not{
-				Sub: sub,
-			}
-
-			if e == nil {
-				e = not
-				break
-			}
-			e.Insert(not)
-		// boolean operators:
-		//		- these just wrap the existing terms
-		case tAND:
-			and := &expr.And{
-				Left: e,
-			}
-			right, err := p.parse()
-			if err != nil {
-				return e, fmt.Errorf("unable to build AND clause: %w", err)
-			}
-			and.Right = right
-			return and, nil
-		case tOR:
-			or := &expr.Or{
-				Left: e,
-			}
-			right, err := p.parse()
-			if err != nil {
-				return e, fmt.Errorf("unable to build AND clause: %w", err)
-			}
-			or.Right = right
-			return or, nil
-
-		// subexpressions
-		// 		- if you see a left paren then recursively parse the expression.
-		// 		- if you see a right paren we must be done with the current recursion
-		case tLPAREN:
-			p.updateExpressionStack(token.val)
-			sub, err := p.parse()
-			if err != nil {
-				return e, fmt.Errorf("unable to parse sub-expression: %w", err)
-			}
-			if e != nil {
-				e, err = e.Insert(sub)
+		if p.shouldShift(next) {
+			tok := p.shift()
+			if isTerminal(tok) {
+				// if we have a terminal parse it and put it on the stack
+				e, err := parseLiteral(tok)
 				if err != nil {
 					return e, err
 				}
-				break
-			}
 
-			e = sub
-		case tRPAREN:
-			p.updateExpressionStack(token.val)
-			if p.subExpressionCount < 0 {
-				return e, errors.New("unbalanced closing paren")
-			}
-			return e, nil
-
-		// range operators
-		//		- if you see a left square/curly bracket then parse the sub expression that has to be a range
-		// 		- then insert it into the existing expression (should only be for the equals expression)
-		case tLSQUARE:
-			if e == nil {
-				return e, errors.New("unable to insert range into empty expression")
-			}
-			sub, err := p.parse()
-			if err != nil {
-				return e, fmt.Errorf("unable to parse inclusive range: %w", err)
-			}
-			// we are inclusive so update that here
-			r, ok := sub.(*expr.Range)
-			if !ok {
-				return e, errors.New("brackets must surround a range query (hint: use the TO operator in the brackets)")
-			}
-			r.Inclusive = true
-			e, err = e.Insert(r)
-			if err != nil {
-				return e, err
-			}
-		case tLCURLY:
-			if e == nil {
-				return e, errors.New("unable to insert range into empty expression")
-			}
-			sub, err := p.parse()
-			if err != nil {
-				return e, fmt.Errorf("unable to parse inclusive range: %w", err)
-			}
-			// we are inclusive so update that here
-			r, ok := sub.(*expr.Range)
-			if !ok {
-				return e, errors.New("brackets must surround a range query (hint: use the TO operator in the brackets)")
-			}
-			r.Inclusive = false
-			e, err = e.Insert(r)
-			if err != nil {
-				return e, err
-			}
-		case tTO:
-			e, err = (&expr.Range{}).Insert(e)
-			if err != nil {
-				return nil, err
-			}
-		case tRSQUARE, tRCURLY:
-			return e, nil
-
-		// must and must not operators
-		// 		- if we see a plus or minus then we need to apply it to the next term only
-		case tPLUS:
-			p.hasMust = true
-		case tMINUS:
-			p.hasMustNot = true
-
-		// boost operator
-		//     - if we see a carrot we get the boost term and wrap left term in the boost
-		case tCARROT:
-			next := p.next()
-
-			if next.typ != tLITERAL {
-				return e, errors.New("term boost must be follow by positive number")
-			}
-
-			f, err := toPositiveFloat(next.val)
-			if err != nil {
-				return e, fmt.Errorf("not able to parse boost number: %w", err)
-			}
-
-			e, err = wrapInBoost(e, f)
-			if err != nil {
-				return e, fmt.Errorf("unable to wrap expression in boost: %w", err)
-			}
-
-		// fuzzy search operator
-		//     - if we see a tilde try to fuzzy try to wrap the left term in a fuzzy search with an optional edit distance
-		//     - according to https://lucene.apache.org/core/7_3_1/core/org/apache/lucene/search/FuzzyQuery.html#defaultMinSimilarity
-		//       the minSimilarity rating is deprecated so this can just be an edit distance.
-		case tTILDE:
-			next := p.next()
-
-			if next.typ != tLITERAL {
-				p.backup()
-				e, err = wrapInFuzzy(e, 1)
-				if err != nil {
-					return e, fmt.Errorf("not able to wrap expression in fuzzy search: %w", err)
-				}
+				fmt.Printf("PUSHING EXPR [%s] onto stack\n", e)
+				p.stack = push(p.stack, e)
 				continue
 			}
-
-			i, err := toPositiveInt(next.val)
-			if err != nil {
-				return e, fmt.Errorf("not able to parse fuzzy distance: %w", err)
-			}
-
-			e, err = wrapInFuzzy(e, i)
-			if err != nil {
-				return e, fmt.Errorf("unable to wrap expression in boost: %w", err)
-			}
+			// otherwise just push the token on the stack
+			fmt.Printf("PUSHING TOKEN [%s] onto stack\n", tok)
+			p.stack = push(p.stack, tok)
+			p.nonTerminals = append(p.nonTerminals, tok)
+			continue
 		}
-
+		fmt.Printf("NOT SHIFTING FOR %s\n", next)
+		err = p.reduce()
+		if err != nil {
+			return e, err
+		}
 	}
 }
 
-func (p *parser) updateExpressionStack(s string) {
-	if s == "(" {
-		p.subExpressionCount++
-		return
-	}
-
-	p.subExpressionCount--
-	return
+func (p *parser) shift() (tok token) {
+	return p.lex.nextToken()
 }
 
-func (p *parser) checkExpressionStack() error {
-	if p.subExpressionCount != 0 {
-		return fmt.Errorf("unterminated paren")
+func (p *parser) shouldShift(next token) bool {
+	if next.typ == tEOF {
+		return false
 	}
 
-	return nil
-}
+	if next.typ == tERR {
+		return false
+	}
 
-func canAcceptNextToken(curr expr.Expression, token token) bool {
-	if curr == nil {
+	curr := p.nonTerminals[len(p.nonTerminals)-1]
+
+	if isTerminal(next) && (curr.typ != tSTART) {
 		return true
 	}
-	switch cast := curr.(type) {
-	case *expr.Literal, *expr.WildLiteral, *expr.Range, *expr.RegexpLiteral:
+
+	// TODO see if we really need all this extra edge logic
+	// if we have an open curly or the next one is we want to shift
+	if curr.typ == tLSQUARE || next.typ == tLSQUARE || curr.typ == tLCURLY || next.typ == tLCURLY {
 		return true
-	case *expr.Equals:
-		if cast.Value == nil {
-			return token.typ == tLITERAL ||
-				token.typ == tQUOTED ||
-				token.typ == tREGEXP ||
-				token.typ == tLCURLY ||
-				token.typ == tLSQUARE ||
-				token.typ == tLPAREN
-		}
-		return token.typ == tAND ||
-			token.typ == tOR ||
-			token.typ == tCARROT ||
-			token.typ == tTILDE ||
-			token.typ == tRPAREN
-	default:
-		return token.typ == tAND ||
-			token.typ == tOR ||
-			token.typ == tRPAREN ||
-			token.typ == tCARROT ||
-			token.typ == tTILDE
 	}
+
+	// if we are at the end of a range always shift
+	if next.typ == tRSQUARE || next.typ == tRCURLY {
+		return true
+	}
+
+	// if we have a parsed expression surrounded by parens we want to shift
+	if curr.typ == tLPAREN && next.typ == tRPAREN {
+		return true
+	}
+
+	// if the current or next is left paren we always want to shift
+	if curr.typ == tLPAREN || next.typ == tLPAREN {
+		return true
+	}
+
+	// if we are ever attempting to move past a subexpr we need to parse it.
+	if curr.typ == tRPAREN || curr.typ == tRSQUARE || curr.typ == tRCURLY {
+		return false
+	}
+
+	fmt.Printf("CURR NON TERMINAL [%s] VAL: %d | NEXT [%s] VAL: %d | shouldshift? %v\n", curr, int(curr.typ), next, int(next.typ), hasLessPrecedance(curr, next))
+	return hasLessPrecedance(curr, next)
+}
+
+func (p *parser) shouldAccept(next token) bool {
+	return len(p.stack) == 1 &&
+		next.typ == tEOF
+}
+
+func (p *parser) reduce() (err error) {
+	// until_reduced
+	//    peek on top of stack
+	// 	  if can reduce
+	//       do it
+	//       return
+	fmt.Printf("REDUCING: %v\n", p.stack)
+	top := []stringer{}
+	for {
+		if len(p.stack) == 0 {
+			return fmt.Errorf("error parsing, no items left to reduce, current state: %v", top)
+		}
+		// pull the top off the stack
+		var s stringer
+		s, p.stack = pop(p.stack)
+		top = append([]stringer{s}, top...)
+
+		// try to reduce with all our reducers
+		var reduced bool
+		top, p.nonTerminals, reduced = tryReduce(top, p.nonTerminals)
+
+		// if we consumed some non terminals during the reduce it means we successfully reduced
+		if reduced {
+			// if we successfully reduced re-add it to the top of the stack and return
+			p.stack = append(p.stack, top...)
+			fmt.Printf("REDUCED SO NOW STACK IS: %s\n", p.stack)
+			return nil
+		}
+	}
+}
+
+func tryReduce(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	for _, reducer := range reducers {
+		elems, nonTerminals, reduced := reducer(elems, nonTerminals)
+		if reduced {
+			return elems, nonTerminals, true
+		}
+	}
+	return elems, nonTerminals, false
+}
+
+type reducer func(elems []stringer, nonTerminals []token) ([]stringer, []token, bool)
+
+var reducers = []reducer{
+	and,
+	or,
+	equal,
+	not,
+	sub,
+	must,
+	mustNot,
+	fuzzy,
+	boost,
+	rangeop,
+}
+
+func equal(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	if len(elems) != 3 {
+		// fmt.Printf("NOT EQUAL - len not correct\n")
+		return elems, nonTerminals, false
+	}
+
+	// ensure middle token is an equals
+	tok, ok := elems[1].(token)
+	if !ok || (tok.typ != tEQUAL && tok.typ != tCOLON) {
+		// fmt.Printf("NOT EQUAL - not tEQUAL or tCOLON\n")
+		return elems, nonTerminals, false
+	}
+
+	// make sure the left is a literal and right is an expression
+	left, ok := elems[0].(*expr.Literal)
+	if !ok {
+		// fmt.Printf("NOT EQUAL - left not literal\n")
+		return elems, nonTerminals, false
+	}
+	right, ok := elems[2].(expr.Expression)
+	if !ok {
+		// fmt.Printf("NOT EQUAL - right not expression\n")
+		return elems, nonTerminals, false
+	}
+
+	elems = []stringer{
+		expr.EQ(
+			left,
+			right,
+		),
+	}
+	fmt.Printf("IS EQUAL\n")
+	// we consumed one terminal, the =
+	return elems, drop(nonTerminals, 1), true
+}
+
+func and(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	// special case for when we have a default implicit AND
+	if len(elems) == 2 {
+		// make sure the left and right clauses are expressions
+		left, ok := elems[0].(expr.Expression)
+		if !ok {
+			// fmt.Printf("NOT AND - left not expr\n")
+			return elems, nonTerminals, false
+		}
+		right, ok := elems[1].(expr.Expression)
+		if !ok {
+			// fmt.Printf("NOT AND - right not expr\n")
+			return elems, nonTerminals, false
+		}
+
+		// we have a valid implicit AND clause. Replace it in the stack
+		elems = []stringer{
+			expr.AND(
+				left,
+				right,
+			),
+		}
+		fmt.Printf("IS AND\n")
+		// we add in the implicit AND terminal
+		return elems, append(nonTerminals, token{typ: tIMPLICIT_AND}), true
+	}
+
+	// if we don't have 3 items in the buffer it's not an AND clause
+	if len(elems) != 3 {
+		// fmt.Printf("NOT AND - len not correct\n")
+		return elems, nonTerminals, false
+	}
+
+	// if the middle token is not an AND token do nothing
+	operatorToken, ok := elems[1].(token)
+	if !ok || operatorToken.typ != tAND {
+		// fmt.Printf("NOT AND - operator wrong\n")
+		return elems, nonTerminals, false
+	}
+
+	// make sure the left and right clauses are expressions
+	left, ok := elems[0].(expr.Expression)
+	if !ok {
+		// fmt.Printf("NOT AND - left not expr\n")
+		return elems, nonTerminals, false
+	}
+	right, ok := elems[2].(expr.Expression)
+	if !ok {
+		// fmt.Printf("NOT AND - right not expr\n")
+		return elems, nonTerminals, false
+	}
+
+	// we have a valid AND clause. Replace it in the stack
+	elems = []stringer{
+		expr.AND(
+			left,
+			right,
+		),
+	}
+	fmt.Printf("IS AND\n")
+	// we consumed one terminal, the AND
+	return elems, drop(nonTerminals, 1), true
+}
+
+func or(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	// if we don't have 3 items in the buffer it's not an OR clause
+	if len(elems) != 3 {
+		// fmt.Printf("NOT OR - len not correct\n")
+		return elems, nonTerminals, false
+	}
+
+	// if the middle token is not an OR token do nothing
+	operatorToken, ok := elems[1].(token)
+	if !ok || operatorToken.typ != tOR {
+		// fmt.Printf("NOT OR - operator wrong\n")
+		return elems, nonTerminals, false
+	}
+
+	// make sure the left and right clauses are expressions
+	left, ok := elems[0].(expr.Expression)
+	if !ok {
+		// fmt.Printf("NOT OR - left not expr\n")
+		return elems, nonTerminals, false
+	}
+	right, ok := elems[2].(expr.Expression)
+	if !ok {
+		// fmt.Printf("NOT OR - right not expr\n")
+		return elems, nonTerminals, false
+	}
+
+	// we have a valid OR clause. Replace it in the stack
+	elems = []stringer{
+		expr.OR(
+			left,
+			right,
+		),
+	}
+	fmt.Printf("IS OR\n")
+	// we consumed one terminal, the OR
+	return elems, drop(nonTerminals, 1), true
+}
+
+func not(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	if len(elems) < 2 {
+		return elems, nonTerminals, false
+	}
+
+	// if the second to last token is not the NOT operator do nothing
+	operatorToken, ok := elems[len(elems)-2].(token)
+	if !ok || operatorToken.typ != tNOT {
+		return elems, nonTerminals, false
+	}
+
+	// make sure the thing to be negated is already a parsed
+	negated, ok := elems[len(elems)-1].(expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	elems = elems[:len(elems)-2]
+	elems = push(elems, expr.NOT(negated))
+	fmt.Printf("IS NOT\n")
+	// we consumed one terminal, the NOT
+	return elems, drop(nonTerminals, 1), true
+}
+
+func sub(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	// all the internal terms should have reduced by the time we hit this reducer
+	if len(elems) != 3 {
+		return elems, nonTerminals, false
+	}
+
+	open, ok := elems[0].(token)
+	if !ok || open.typ != tLPAREN {
+		return elems, nonTerminals, false
+	}
+
+	closed, ok := elems[len(elems)-1].(token)
+	if !ok || closed.typ != tRPAREN {
+		return elems, nonTerminals, false
+	}
+
+	fmt.Printf("IS SUB\n")
+	// we consumed two terminals, the ( and )
+	return []stringer{elems[1]}, drop(nonTerminals, 2), true
+}
+
+func must(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	if len(elems) != 2 {
+		return elems, nonTerminals, false
+	}
+
+	must, ok := elems[0].(token)
+	if !ok || must.typ != tPLUS {
+		return elems, nonTerminals, false
+	}
+
+	rest, ok := elems[1].(expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	// we consumed 1 terminal, the +
+	return []stringer{expr.MUST(rest)}, drop(nonTerminals, 1), true
+}
+
+func mustNot(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	if len(elems) != 2 {
+		return elems, nonTerminals, false
+	}
+
+	must, ok := elems[0].(token)
+	if !ok || must.typ != tMINUS {
+		return elems, nonTerminals, false
+	}
+
+	rest, ok := elems[1].(expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+	// we consumed one terminal, the -
+	return []stringer{expr.MUSTNOT(rest)}, drop(nonTerminals, 1), true
+}
+
+func fuzzy(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	// we are in the case with an implicit 1 fuzzy distance
+	if len(elems) == 2 {
+		must, ok := elems[1].(token)
+		if !ok || must.typ != tTILDE {
+			return elems, nonTerminals, false
+		}
+
+		rest, ok := elems[0].(expr.Expression)
+		if !ok {
+			return elems, nonTerminals, false
+		}
+
+		// we consumed one terminal, the ~
+		return []stringer{expr.FUZZY(rest, 1)}, drop(nonTerminals, 1), true
+	}
+
+	if len(elems) != 3 {
+		return elems, nonTerminals, false
+	}
+
+	must, ok := elems[1].(token)
+	if !ok || must.typ != tTILDE {
+		return elems, nonTerminals, false
+	}
+
+	rest, ok := elems[0].(expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	power, ok := elems[2].(*expr.Literal)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	ipower, err := strconv.Atoi(power.String())
+	if err != nil {
+		return elems, nonTerminals, false
+	}
+
+	// we consumed one terminal, the ~
+	return []stringer{expr.FUZZY(rest, ipower)}, drop(nonTerminals, 1), true
+}
+
+func boost(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	// we are in the case with an implicit 1 fuzzy distance
+	if len(elems) == 2 {
+		must, ok := elems[1].(token)
+		if !ok || must.typ != tCARROT {
+			return elems, nonTerminals, false
+		}
+
+		rest, ok := elems[0].(expr.Expression)
+		if !ok {
+			return elems, nonTerminals, false
+		}
+
+		// we consumed one terminal, the ^
+		return []stringer{expr.BOOST(rest, 1.0)}, drop(nonTerminals, 1), true
+	}
+
+	if len(elems) != 3 {
+		return elems, nonTerminals, false
+	}
+
+	must, ok := elems[1].(token)
+	if !ok || must.typ != tCARROT {
+		return elems, nonTerminals, false
+	}
+
+	rest, ok := elems[0].(expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	power, ok := elems[2].(*expr.Literal)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	fpower, err := toPositiveFloat(power.String())
+	if err != nil {
+		return elems, nonTerminals, false
+	}
+
+	// we consumed one terminal, the ^
+	return []stringer{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
+}
+
+func rangeop(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+	// we need a [, begin, TO, end, ] to have a range operator which is 5 elems
+	if len(elems) != 5 {
+		return elems, nonTerminals, false
+	}
+
+	open, ok := elems[0].(token)
+	if !ok || (open.typ != tLSQUARE && open.typ != tLCURLY) {
+		fmt.Printf("OPEN NOT RIGHT\n")
+		return elems, nonTerminals, false
+	}
+
+	closed, ok := elems[4].(token)
+	if !ok || (closed.typ != tRSQUARE && closed.typ != tRCURLY) {
+		fmt.Printf("CLOSED NOT RIGHT\n")
+		return elems, nonTerminals, false
+	}
+	fmt.Printf("ELEMS IN RANGE: %v\n", elems)
+
+	to, ok := elems[2].(token)
+	if !ok || to.typ != tTO {
+		fmt.Printf("NOT TO: 00%s00\n", elems[2])
+		return elems, nonTerminals, false
+	}
+
+	start, ok := elems[1].(expr.Expression)
+	if !ok {
+		fmt.Printf("NOT START\n")
+		return elems, nonTerminals, false
+	}
+
+	end, ok := elems[3].(expr.Expression)
+	if !ok {
+		fmt.Printf("NOT END\n")
+		return elems, nonTerminals, false
+	}
+
+	// we consumed three terminals, the [, TO, and ]
+	return []stringer{expr.Rang(
+		start, end, (open.typ == tLSQUARE && closed.typ == tRSQUARE),
+	)}, drop(nonTerminals, 3), true
+
+}
+
+func push(stack []stringer, s stringer) []stringer {
+	return append(stack, s)
+}
+
+func drop[T any](stack []T, i int) []T {
+	return stack[:len(stack)-i]
+}
+
+func pop[T any](stack []T) (T, []T) {
+	return stack[len(stack)-1], stack[:len(stack)-1]
+}
+
+func parseLiteral(token token) (e expr.Expression, err error) {
+	if token.typ == tQUOTED {
+		val := strings.ReplaceAll(token.val, "\"", "")
+		return &expr.Literal{Value: val}, nil
+	}
+
+	if token.typ == tREGEXP {
+		val := strings.ReplaceAll(token.val, "/", "")
+		return &expr.RegexpLiteral{
+			Literal: expr.Literal{Value: val},
+		}, nil
+	}
+
+	val := token.val
+	ival, err := strconv.Atoi(val)
+	if err == nil {
+		return &expr.Literal{Value: ival}, nil
+	}
+
+	if strings.ContainsAny(val, "*?") {
+		return &expr.WildLiteral{Literal: expr.Literal{Value: val}}, nil
+	}
+
+	return &expr.Literal{Value: val}, nil
+
 }
 
 func toPositiveInt(in string) (i int, err error) {
@@ -407,50 +623,4 @@ func toPositiveFloat(in string) (f float32, err error) {
 	}
 
 	return f, fmt.Errorf("[%v] is not a positive number", in)
-}
-
-func parseLiteral(token token) (e expr.Expression, err error) {
-	if token.typ == tREGEXP {
-		val := strings.ReplaceAll(token.val, "/", "")
-		return &expr.RegexpLiteral{
-			Literal: expr.Literal{Value: val},
-		}, nil
-	}
-
-	val := token.val
-	ival, err := strconv.Atoi(val)
-	if err == nil {
-		return &expr.Literal{Value: ival}, nil
-	}
-
-	if strings.ContainsAny(val, "*?") {
-		return &expr.WildLiteral{Literal: expr.Literal{Value: val}}, nil
-	}
-
-	return &expr.Literal{Value: val}, nil
-
-}
-
-func wrapInBoost(e expr.Expression, power float32) (expr.Expression, error) {
-	if e == nil {
-		return e, errors.New("carrot must follow another expression")
-	}
-
-	e = &expr.Boost{
-		Sub:   e,
-		Power: power,
-	}
-	return e, nil
-}
-
-func wrapInFuzzy(e expr.Expression, distance int) (expr.Expression, error) {
-	if e == nil {
-		return e, errors.New("carrot must follow another expression")
-	}
-
-	e = &expr.Fuzzy{
-		Sub:      e,
-		Distance: distance,
-	}
-	return e, nil
 }

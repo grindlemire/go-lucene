@@ -13,6 +13,104 @@ type Expression interface {
 	Insert(e Expression) (Expression, error)
 }
 
+func EQ(a Expression, b Expression) Expression {
+	return &Equals{
+		Term:  a.(*Literal).Value.(string),
+		Value: b,
+	}
+}
+
+func AND(a, b Expression) Expression {
+	return &And{
+		Left:  a,
+		Right: b,
+	}
+}
+
+func OR(a, b Expression) Expression {
+	return &Or{
+		Left:  a,
+		Right: b,
+	}
+}
+
+func Lit(val any) Expression {
+	return &Literal{
+		Value: val,
+	}
+}
+
+func Wild(val any) Expression {
+	return &WildLiteral{
+		Literal: Literal{
+			Value: val,
+		},
+	}
+}
+
+func Rang(min, max Expression, inclusive bool) Expression {
+	lmin, ok := min.(*Literal)
+	if !ok {
+		wmin, ok := min.(*WildLiteral)
+		if !ok {
+			panic("must only pass a *Literal or *WildLiteral to the Rang function")
+		}
+		lmin = &Literal{Value: wmin.Value}
+	}
+
+	lmax, ok := max.(*Literal)
+	if !ok {
+		wmax, ok := max.(*WildLiteral)
+		if !ok {
+			panic("must only pass a *Literal or *WildLiteral to the Rang function")
+		}
+		lmax = &Literal{Value: wmax.Value}
+	}
+	return &Range{
+		Inclusive: inclusive,
+		Min:       lmin,
+		Max:       lmax,
+	}
+}
+
+func NOT(e Expression) Expression {
+	return &Not{
+		Sub: e,
+	}
+}
+
+func MUST(e Expression) Expression {
+	return &Must{
+		Sub: e,
+	}
+}
+
+func MUSTNOT(e Expression) Expression {
+	return &MustNot{
+		Sub: e,
+	}
+}
+
+func BOOST(e Expression, power float32) Expression {
+	return &Boost{
+		Sub:   e,
+		Power: power,
+	}
+}
+
+func FUZZY(e Expression, distance int) Expression {
+	return &Fuzzy{
+		Sub:      e,
+		Distance: distance,
+	}
+}
+
+func REGEXP(val any) Expression {
+	return &RegexpLiteral{
+		Literal: Literal{Value: val},
+	}
+}
+
 // Validate validates the expression is correctly structured.
 func Validate(ex Expression) (err error) {
 	switch e := ex.(type) {

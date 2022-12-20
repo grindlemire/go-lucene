@@ -18,358 +18,357 @@ func TestParseLucene(t *testing.T) {
 	tcs := map[string]tc{
 		"single_literal": {
 			input:    "a",
-			expected: Lit("a"),
+			expected: expr.Lit("a"),
 		},
-		"basic_equal": {
+		"basic_expr.equal": {
 			input: "a:b",
-			expected: EQ(
-				Lit("a"),
-				Lit("b"),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Lit("b"),
 			),
 		},
-		"basic_equal_with_number": {
+		"basic_expr.equal_with_number": {
 			input: "a:5",
-			expected: EQ(
-				Lit("a"),
-				Lit(5),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Lit(5),
 			),
 		},
-		"basic_wild_equal_with_*": {
+		"basic_wild_expr.equal_with_*": {
 			input: "a:b*",
-			expected: EQ(
-				Lit("a"),
-				Wild("b*"),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Wild("b*"),
 			),
 		},
-		"basic_wild_equal_with_?": {
+		"basic_wild_expr.equal_with_?": {
 			input: "a:b?z",
-			expected: EQ(
-				Lit("a"),
-				Wild("b?z"),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Wild("b?z"),
 			),
 		},
 		"regexp": {
 			input: "a:/b [c]/",
-			expected: EQ(
-				Lit("a"), REGEXP("b [c]"),
+			expected: expr.EQ(
+				expr.Lit("a"), expr.REGEXP("b [c]"),
 			),
 		},
 		"regexp_with_keywords": {
 			input: `a:/b "[c]/`,
-			expected: EQ(
-				Lit("a"), REGEXP(`b "[c]`),
+			expected: expr.EQ(
+				expr.Lit("a"), expr.REGEXP(`b "[c]`),
 			),
 		},
 		"default_to_AND_with_literals": {
 			input: "a b",
-			expected: AND(
-				Lit("a"),
-				Lit("b"),
+			expected: expr.AND(
+				expr.Lit("a"),
+				expr.Lit("b"),
 			),
 		},
 		"default_to_AND_with_subexpressions": {
 			input: "a:b c:d",
-			expected: AND(
-				EQ(Lit("a"), Lit("b")),
-				EQ(Lit("c"), Lit("d")),
+			expected: expr.AND(
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
+				expr.EQ(expr.Lit("c"), expr.Lit("d")),
 			),
 		},
 		"basic_and": {
 			input: "a AND b",
-			expected: AND(
-				Lit("a"),
-				Lit("b"),
+			expected: expr.AND(
+				expr.Lit("a"),
+				expr.Lit("b"),
 			),
 		},
 		"and_with_nesting": {
 			input: "a:foo AND b:bar",
-			expected: AND(
-				EQ(Lit("a"), Lit("foo")),
-				EQ(Lit("b"), Lit("bar")),
+			expected: expr.AND(
+				expr.EQ(expr.Lit("a"), expr.Lit("foo")),
+				expr.EQ(expr.Lit("b"), expr.Lit("bar")),
 			),
 		},
 		"basic_or": {
 			input: "a OR b",
-			expected: OR(
-				Lit("a"),
-				Lit("b"),
+			expected: expr.OR(
+				expr.Lit("a"),
+				expr.Lit("b"),
 			),
 		},
 		"range_operator_inclusive": {
 			input: "a:[1 TO 5]",
-			expected: EQ(
-				Lit("a"),
-				Rang(Lit(1), Lit(5), true),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Rang(expr.Lit(1), expr.Lit(5), true),
 			),
 		},
 		"range_operator_inclusive_unbound": {
 			input: `a:[* TO 200]`,
-			expected: EQ(
-				Lit("a"),
-				Rang(Wild("*"), Lit(200), true),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Rang(expr.Wild("*"), expr.Lit(200), true),
 			),
 		},
 		"range_operator_exclusive": {
 			input: `a:{"ab" TO "az"}`,
-			expected: EQ(
-				Lit("a"),
-				Rang(Lit("ab"), Lit("az"), false),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Rang(expr.Lit("ab"), expr.Lit("az"), false),
 			),
 		},
 		"range_operator_exclusive_unbound": {
 			input: `a:{2 TO *}`,
-			expected: EQ(
-				Lit("a"),
-				Rang(Lit(2), Wild("*"), false),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Rang(expr.Lit(2), expr.Wild("*"), false),
 			),
 		},
 		"or_with_nesting": {
 			input: "a:foo OR b:bar",
-			expected: OR(
-				EQ(Lit("a"), Lit("foo")),
-				EQ(Lit("b"), Lit("bar")),
+			expected: expr.OR(
+				expr.EQ(expr.Lit("a"), expr.Lit("foo")),
+				expr.EQ(expr.Lit("b"), expr.Lit("bar")),
 			),
 		},
 		"basic_not": {
 			input:    "NOT b",
-			expected: NOT(Lit("b")),
+			expected: expr.NOT(expr.Lit("b")),
 		},
 		"nested_not": {
 			input: "a:foo OR NOT b:bar",
-			expected: OR(
-				EQ(Lit("a"), Lit("foo")),
-				NOT(EQ(Lit("b"), Lit("bar"))),
+			expected: expr.OR(
+				expr.EQ(expr.Lit("a"), expr.Lit("foo")),
+				expr.NOT(expr.EQ(expr.Lit("b"), expr.Lit("bar"))),
 			),
 		},
 		"term_grouping": {
 			input: "(a:foo OR b:bar) AND c:baz",
-			expected: AND(
-				OR(
-					EQ(Lit("a"), Lit("foo")),
-					EQ(Lit("b"), Lit("bar")),
+			expected: expr.AND(
+				expr.OR(
+					expr.EQ(expr.Lit("a"), expr.Lit("foo")),
+					expr.EQ(expr.Lit("b"), expr.Lit("bar")),
 				),
-				EQ(Lit("c"), Lit("baz")),
+				expr.EQ(expr.Lit("c"), expr.Lit("baz")),
 			),
 		},
 		"value_grouping": {
 			input: "a:(foo OR baz OR bar)",
-			expected: EQ(
-				Lit("a"),
-				OR(
-					Lit("foo"),
-					OR(
-						Lit("baz"),
-						Lit("bar"),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.OR(
+					expr.OR(
+						expr.Lit("foo"),
+						expr.Lit("baz"),
 					),
+					expr.Lit("bar"),
 				),
 			),
 		},
 		"basic_must": {
 			input: "+a:b",
-			expected: MUST(
-				EQ(Lit("a"), Lit("b")),
+			expected: expr.MUST(
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
 			),
 		},
 		"basic_must_not": {
 			input: "-a:b",
-			expected: MUSTNOT(
-				EQ(Lit("a"), Lit("b")),
+			expected: expr.MUSTNOT(
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
 			),
 		},
 		"basic_nested_must_not": {
 			input: "d:e AND (-a:b AND +f:e)",
-			expected: AND(
-				EQ(Lit("d"), Lit("e")),
-				AND(
-					MUSTNOT(EQ(Lit("a"), Lit("b"))),
-					MUST(EQ(Lit("f"), Lit("e"))),
+			expected: expr.AND(
+				expr.EQ(expr.Lit("d"), expr.Lit("e")),
+				expr.AND(
+					expr.MUSTNOT(expr.EQ(expr.Lit("a"), expr.Lit("b"))),
+					expr.MUST(expr.EQ(expr.Lit("f"), expr.Lit("e"))),
 				),
 			),
 		},
 		"basic_escaping": {
 			input: `a:\(1\+1\)\:2`,
-			expected: EQ(
-				Lit("a"),
-				Lit(`\(1\+1\)\:2`),
+			expected: expr.EQ(
+				expr.Lit("a"),
+				expr.Lit(`\(1\+1\)\:2`),
 			),
 		},
 		"boost_key_value": {
 			input: "a:b^2 AND foo",
-			expected: AND(
-				BOOST(EQ(Lit("a"), Lit("b")), 2),
-				Lit("foo"),
+			expected: expr.AND(
+				expr.BOOST(expr.EQ(expr.Lit("a"), expr.Lit("b")), 2),
+				expr.Lit("foo"),
 			),
 		},
 		"boost_literal": {
 			input:    "foo^4",
-			expected: BOOST(Lit("foo"), 4),
+			expected: expr.BOOST(expr.Lit("foo"), 4),
 		},
 		"boost_literal_in_compound": {
 			input: "a:b AND foo^4",
-			expected: AND(
-				EQ(Lit("a"), Lit("b")),
-				BOOST(Lit("foo"), 4),
+			expected: expr.AND(
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
+				expr.BOOST(expr.Lit("foo"), 4),
 			),
 		},
 		"boost_literal_leading": {
 			input: "foo^4 AND a:b",
-			expected: AND(
-				BOOST(Lit("foo"), 4),
-				EQ(Lit("a"), Lit("b")),
+			expected: expr.AND(
+				expr.BOOST(expr.Lit("foo"), 4),
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
 			),
 		},
 		"boost_quoted_literal": {
 			input: `"foo bar"^4 AND a:b`,
-			expected: AND(
-				BOOST(Lit("foo bar"), 4),
-				EQ(Lit("a"), Lit("b")),
+			expected: expr.AND(
+				expr.BOOST(expr.Lit("foo bar"), 4),
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
 			),
 		},
 		"boost_sub_expression": {
 			input: "(title:foo OR title:bar)^1.5 AND (body:foo OR body:bar)",
-			expected: AND(
-				BOOST(
-					OR(
-						EQ(Lit("title"), Lit("foo")),
-						EQ(Lit("title"), Lit("bar")),
+			expected: expr.AND(
+				expr.BOOST(
+					expr.OR(
+						expr.EQ(expr.Lit("title"), expr.Lit("foo")),
+						expr.EQ(expr.Lit("title"), expr.Lit("bar")),
 					),
 					1.5),
-				OR(
-					EQ(Lit("body"), Lit("foo")),
-					EQ(Lit("body"), Lit("bar")),
+				expr.OR(
+					expr.EQ(expr.Lit("body"), expr.Lit("foo")),
+					expr.EQ(expr.Lit("body"), expr.Lit("bar")),
 				),
 			),
 		},
 		"nested_sub_expressions_with_boost": {
 			input: "((title:foo)^1.2 OR title:bar) AND (body:foo OR body:bar)",
-			expected: AND(
-				OR(
-					BOOST(EQ(Lit("title"), Lit("foo")), 1.2),
-					EQ(Lit("title"), Lit("bar")),
+			expected: expr.AND(
+				expr.OR(
+					expr.BOOST(expr.EQ(expr.Lit("title"), expr.Lit("foo")), 1.2),
+					expr.EQ(expr.Lit("title"), expr.Lit("bar")),
 				),
 
-				OR(
-					EQ(Lit("body"), Lit("foo")),
-					EQ(Lit("body"), Lit("bar")),
+				expr.OR(
+					expr.EQ(expr.Lit("body"), expr.Lit("foo")),
+					expr.EQ(expr.Lit("body"), expr.Lit("bar")),
 				),
 			),
 		},
 		"nested_sub_expressions": {
 			input: "((title:foo OR title:bar) AND (body:foo OR body:bar)) OR k:v",
-			expected: OR(
-				AND(
-					OR(
-						EQ(Lit("title"), Lit("foo")),
-						EQ(Lit("title"), Lit("bar")),
+			expected: expr.OR(
+				expr.AND(
+					expr.OR(
+						expr.EQ(expr.Lit("title"), expr.Lit("foo")),
+						expr.EQ(expr.Lit("title"), expr.Lit("bar")),
 					),
 
-					OR(
-						EQ(Lit("body"), Lit("foo")),
-						EQ(Lit("body"), Lit("bar")),
+					expr.OR(
+						expr.EQ(expr.Lit("body"), expr.Lit("foo")),
+						expr.EQ(expr.Lit("body"), expr.Lit("bar")),
 					),
 				),
-				EQ(Lit("k"), Lit("v")),
+				expr.EQ(expr.Lit("k"), expr.Lit("v")),
 			),
 		},
 		"fuzzy_key_value": {
 			input: "a:b~2 AND foo",
-			expected: AND(
-				FUZZY(EQ(Lit("a"), Lit("b")), 2),
-				Lit("foo"),
+			expected: expr.AND(
+				expr.FUZZY(expr.EQ(expr.Lit("a"), expr.Lit("b")), 2),
+				expr.Lit("foo"),
 			),
 		},
 		"fuzzy_key_value_default": {
 			input: "a:b~ AND foo",
-			expected: AND(
-				FUZZY(EQ(Lit("a"), Lit("b")), 1),
-				Lit("foo"),
+			expected: expr.AND(
+				expr.FUZZY(expr.EQ(expr.Lit("a"), expr.Lit("b")), 1),
+				expr.Lit("foo"),
 			),
 		},
 		"fuzzy_literal": {
 			input:    "foo~4",
-			expected: FUZZY(Lit("foo"), 4),
+			expected: expr.FUZZY(expr.Lit("foo"), 4),
 		},
 		"fuzzy_literal_default": {
 			input:    "foo~",
-			expected: FUZZY(Lit("foo"), 1),
+			expected: expr.FUZZY(expr.Lit("foo"), 1),
 		},
 		"fuzzy_literal_in_compound": {
 			input: "a:b AND foo~4",
-			expected: AND(
-				EQ(Lit("a"), Lit("b")),
-				FUZZY(Lit("foo"), 4),
+			expected: expr.AND(
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
+				expr.FUZZY(expr.Lit("foo"), 4),
 			),
 		},
 		"fuzzy_literal_in_implicit_compound": {
 			input: "a:b foo~4",
-			expected: AND(
-				EQ(Lit("a"), Lit("b")),
-				FUZZY(Lit("foo"), 4),
+			expected: expr.AND(
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
+				expr.FUZZY(expr.Lit("foo"), 4),
 			),
 		},
 		"fuzzy_literal_leading": {
 			input: "foo~4 AND a:b",
-			expected: AND(
-				FUZZY(Lit("foo"), 4),
-				EQ(Lit("a"), Lit("b")),
+			expected: expr.AND(
+				expr.FUZZY(expr.Lit("foo"), 4),
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
 			),
 		},
 		"fuzzy_literal_leading_in_implicit_compound": {
 			input: "foo~4 AND a:b",
-			expected: AND(
-				FUZZY(Lit("foo"), 4),
-				EQ(Lit("a"), Lit("b")),
+			expected: expr.AND(
+				expr.FUZZY(expr.Lit("foo"), 4),
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
 			),
 		},
 		"fuzzy_quoted_literal": {
 			input: `"foo bar"~4 AND a:b`,
-			expected: AND(
-				FUZZY(Lit("foo bar"), 4),
-				EQ(Lit("a"), Lit("b")),
+			expected: expr.AND(
+				expr.FUZZY(expr.Lit("foo bar"), 4),
+				expr.EQ(expr.Lit("a"), expr.Lit("b")),
 			),
 		},
 		"fuzzy_sub_expression": {
 			input: "(title:foo OR title:bar)~2 AND (body:foo OR body:bar)",
-			expected: AND(
-				FUZZY(
-					OR(
-						EQ(Lit("title"), Lit("foo")),
-						EQ(Lit("title"), Lit("bar")),
+			expected: expr.AND(
+				expr.FUZZY(
+					expr.OR(
+						expr.EQ(expr.Lit("title"), expr.Lit("foo")),
+						expr.EQ(expr.Lit("title"), expr.Lit("bar")),
 					),
 					2),
-				OR(
-					EQ(Lit("body"), Lit("foo")),
-					EQ(Lit("body"), Lit("bar")),
+				expr.OR(
+					expr.EQ(expr.Lit("body"), expr.Lit("foo")),
+					expr.EQ(expr.Lit("body"), expr.Lit("bar")),
 				),
 			),
 		},
-		"nested_sub_expressions_with_fuzzy": {
+		"nested_sub_expressions_with_expr.fuzzy": {
 			input: "((title:foo)~ OR title:bar) AND (body:foo OR body:bar)",
-			expected: AND(
-				OR(
-					FUZZY(EQ(Lit("title"), Lit("foo")), 1),
-					EQ(Lit("title"), Lit("bar")),
+			expected: expr.AND(
+				expr.OR(
+					expr.FUZZY(expr.EQ(expr.Lit("title"), expr.Lit("foo")), 1),
+					expr.EQ(expr.Lit("title"), expr.Lit("bar")),
 				),
 
-				OR(
-					EQ(Lit("body"), Lit("foo")),
-					EQ(Lit("body"), Lit("bar")),
+				expr.OR(
+					expr.EQ(expr.Lit("body"), expr.Lit("foo")),
+					expr.EQ(expr.Lit("body"), expr.Lit("bar")),
 				),
 			),
 		},
 		"precedence_works": {
 			input: "a:b AND c:d OR e:f OR h:i AND j:k",
-			expected: OR(
-				AND(
-					EQ(Lit("a"), Lit("b")),
-					EQ(Lit("c"), Lit("d")),
-				),
-				OR(
-					EQ(Lit("e"), Lit("f")),
-					AND(
-						EQ(Lit("h"), Lit("i")),
-						EQ(Lit("j"), Lit("k")),
+			expected: expr.OR(
+				expr.OR(
+					expr.AND(
+						expr.EQ(expr.Lit("a"), expr.Lit("b")),
+						expr.EQ(expr.Lit("c"), expr.Lit("d")),
 					),
+					expr.EQ(expr.Lit("e"), expr.Lit("f"))),
+				expr.AND(
+					expr.EQ(expr.Lit("h"), expr.Lit("i")),
+					expr.EQ(expr.Lit("j"), expr.Lit("k")),
 				),
 			),
 		},
@@ -461,7 +460,7 @@ func TestParseFailure(t *testing.T) {
 			input: "[* TO ]",
 		},
 		"nested_validation_works": {
-			input: "(A=B AND C=(D OR E)) OR (NOT(+a:[* TO]))",
+			input: "(A=B AND C=(D OR E)) OR (expr.NOT(+a:[* TO]))",
 		},
 	}
 
@@ -478,12 +477,12 @@ func TestParseFailure(t *testing.T) {
 func FuzzParse(f *testing.F) {
 	tcs := []string{
 		"A:B AND C:D",
-		"+foo OR (NOT(B))",
+		"+foo OR (expr.NOT(B))",
 		"A = bar",
 		"NOT(b = c)",
 		"z:[* TO 10]",
-		"x:[10 TO *] AND NOT(y:[1 TO 5]",
-		"(+a:b -c:d) OR (z:[1 TO *] NOT(foo))",
+		"x:[10 TO *] AND expr.NOT(y:[1 TO 5]",
+		"(+a:b -c:d) OR (z:[1 TO *] expr.NOT(foo))",
 		`+bbq:"woo"`,
 		`-bbq:"woo"`,
 	}
@@ -494,4 +493,204 @@ func FuzzParse(f *testing.F) {
 		Parse(in)
 	})
 
+}
+
+func TestBufParse(t *testing.T) {
+	type tc struct {
+		input string
+		want  expr.Expression
+	}
+
+	tcs := map[string]tc{
+		"basic_inclusive_range": {
+			input: "a:[* TO 5]",
+			want:  expr.EQ(expr.Lit("a"), expr.Rang(expr.Lit("*"), expr.Lit(5), true)),
+		},
+		"basic_exclusive_range": {
+			input: "a:{* TO 5}",
+			want:  expr.EQ(expr.Lit("a"), expr.Rang(expr.Lit("*"), expr.Lit(5), false)),
+		},
+		"range_over_strings": {
+			input: "a:{foo TO bar}",
+			want:  expr.EQ(expr.Lit("a"), expr.Rang(expr.Lit("foo"), expr.Lit("bar"), false)),
+		},
+		"basic_fuzzy": {
+			input: "b AND a~",
+			want:  expr.AND(expr.Lit("b"), expr.FUZZY(expr.Lit("a"), 1)),
+		},
+		"fuzzy_power": {
+			input: "b AND a~10",
+			want:  expr.AND(expr.Lit("b"), expr.FUZZY(expr.Lit("a"), 10)),
+		},
+		"basic_boost": {
+			input: "b AND a^",
+			want:  expr.AND(expr.Lit("b"), expr.BOOST(expr.Lit("a"), 1.0)),
+		},
+		"boost_power": {
+			input: "b AND a^10",
+			want:  expr.AND(expr.Lit("b"), expr.BOOST(expr.Lit("a"), 10.0)),
+		},
+		"most_basic": {
+			input: "a AND b",
+			want: expr.AND(
+				expr.Lit("a"),
+				expr.Lit("b"),
+			),
+		},
+		"test_expr": {
+			input: "a OR b AND c OR d",
+			want: expr.OR(
+				expr.OR(
+					expr.Lit("a"),
+					expr.AND(expr.Lit("b"), expr.Lit("c")),
+				),
+				expr.Lit("d"),
+			),
+		},
+		"test_not": {
+			input: "NOT a OR b AND NOT c OR d",
+			want: expr.OR(
+				expr.OR(
+					expr.NOT(expr.Lit("a")),
+					expr.AND(expr.Lit("b"), expr.NOT(expr.Lit("c"))),
+				),
+				expr.Lit("d"),
+			),
+		},
+		"test_expr.equals": {
+			input: "a:az OR b:bz AND NOT c:z OR d",
+			want: expr.OR(
+				expr.OR(
+					expr.EQ(expr.Lit("a"), expr.Lit("az")),
+					expr.AND(
+						expr.EQ(expr.Lit("b"), expr.Lit("bz")),
+						expr.NOT(
+							expr.EQ(expr.Lit("c"), expr.Lit("z")),
+						),
+					),
+				),
+				expr.Lit("d"),
+			),
+		},
+		"test_parens": {
+			input: "a AND (c OR d)",
+			want: expr.AND(
+				expr.Lit("a"),
+				expr.OR(
+					expr.Lit("c"),
+					expr.Lit("d"),
+				),
+			),
+		},
+		"test_full_precedance": {
+			input: "a OR b AND c:[* to -1] OR d AND NOT +e:f",
+			want: expr.OR(
+				expr.OR(
+					expr.Lit("a"),
+					expr.AND(expr.Lit("b"), expr.EQ(expr.Lit("c"), expr.Rang(expr.Lit("*"), expr.Lit(-1), true))),
+				),
+				expr.AND(
+					expr.Lit("d"),
+					expr.NOT(expr.MUST(expr.EQ(expr.Lit("e"), expr.Lit("f")))),
+				),
+			),
+		},
+		"test_full_precedance_with_suffixes": {
+			input: "a OR b AND c OR d~ AND NOT +(e:f)^10",
+			want: expr.OR(
+				expr.OR(
+					expr.Lit("a"),
+					expr.AND(expr.Lit("b"), expr.Lit("c")),
+				),
+				expr.AND(
+					expr.FUZZY(expr.Lit("d"), 1),
+					expr.NOT(
+						expr.BOOST(
+							expr.MUST(
+								expr.EQ(expr.Lit("e"), expr.Lit("f")),
+							),
+							10.0,
+						),
+					),
+				),
+			),
+		},
+		"test_not_expr": {
+			input: "(NOT a OR b) AND NOT(c OR d)",
+			want: expr.AND(
+				expr.OR(expr.NOT(expr.Lit("a")), expr.Lit("b")),
+				expr.NOT(expr.OR(expr.Lit("c"), expr.Lit("d"))),
+			),
+		},
+		"single_literal": {
+			input: "a",
+			want:  expr.Lit("a"),
+		},
+		"basic_expr.equal": {
+			input: "a:b",
+			want: expr.EQ(
+				expr.Lit("a"),
+				expr.Lit("b"),
+			),
+		},
+		"basic_expr.equal_with_number": {
+			input: "a:5",
+			want: expr.EQ(
+				expr.Lit("a"),
+				expr.Lit(5),
+			),
+		},
+		"basic_wild_expr.equal_with_*": {
+			input: "a:b*",
+			want: expr.EQ(
+				expr.Lit("a"),
+				expr.Wild("b*"),
+			),
+		},
+		"basic_wild_expr.equal_with_?": {
+			input: "a:b?z",
+			want: expr.EQ(
+				expr.Lit("a"),
+				expr.Wild("b?z"),
+			),
+		},
+		"regexp": {
+			input: "a:/b [c]/",
+			want: expr.EQ(
+				expr.Lit("a"), expr.REGEXP("b [c]"),
+			),
+		},
+		"regexp_with_keywords": {
+			input: `a:/b "[c]/`,
+			want: expr.EQ(
+				expr.Lit("a"), expr.REGEXP(`b "[c]`),
+			),
+		},
+		"basic_not": {
+			input: "NOT b",
+			want:  expr.NOT(expr.Lit("b")),
+		},
+		"nested_not": {
+			input: "a:foo OR NOT b:bar AND NOT c:baz",
+			want: expr.OR(
+				expr.EQ(expr.Lit("a"), expr.Lit("foo")),
+				expr.AND(
+					expr.NOT(expr.EQ(expr.Lit("b"), expr.Lit("bar"))),
+					expr.NOT(expr.EQ(expr.Lit("c"), expr.Lit("baz"))),
+				),
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("wanted no error, got: %v", err)
+			}
+			if !reflect.DeepEqual(tc.want, got) {
+				t.Fatalf(errTemplate, "error parsing", tc.want, got)
+			}
+		})
+	}
 }

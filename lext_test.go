@@ -16,6 +16,23 @@ func TestLex(t *testing.T) {
 			in:       "",
 			expected: []token{tok(tEOF, "EOF")},
 		},
+		"negatives": {
+			in:       "-1",
+			expected: []token{tok(tLITERAL, "-1")},
+		},
+		"negatives_mixed_with_minus": {
+			in: "a:-1 AND -b:c",
+			expected: []token{
+				tok(tLITERAL, "a"),
+				tok(tCOLON, ":"),
+				tok(tLITERAL, "-1"),
+				tok(tAND, "AND"),
+				tok(tMINUS, "-"),
+				tok(tLITERAL, "b"),
+				tok(tCOLON, ":"),
+				tok(tLITERAL, "c"),
+			},
+		},
 		"literals": {
 			in:       "abc",
 			expected: []token{tok(tLITERAL, "abc")},

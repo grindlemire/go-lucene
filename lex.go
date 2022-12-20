@@ -2,6 +2,7 @@ package lucene
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 )
@@ -60,6 +61,9 @@ const (
 	// start and end operators
 	tEOF
 	tSTART
+
+	// a special type that handles implicit AND clauses
+	tIMPLICIT_AND
 )
 
 var symbols = map[rune]tokType{
@@ -71,12 +75,13 @@ var symbols = map[rune]tokType{
 	'}': tRCURLY,
 	':': tCOLON,
 	'+': tPLUS,
-	'-': tMINUS,
 	'=': tEQUAL,
 	'>': tGREATER,
 	'~': tTILDE,
 	'^': tCARROT,
 	'<': tLESS,
+	// minus is not included because we have to special case it for negative numbers
+	// '-': tMINUS,
 }
 
 func (tt tokType) String() string {
@@ -217,6 +222,14 @@ func lexVal(l *lexer) tokenStateFn {
 		return lexWord
 	case isSymbol(r):
 		return l.emit(symbols[r])
+	// special case minus sign since it can be a negative number or a minus
+	case r == '-':
+		if !unicode.IsDigit(l.peek()) {
+			return l.emit(tMINUS)
+		}
+		l.backup()
+		return lexWord
+
 	case r == '"' || r == '\'':
 		l.backup()
 		return lexPhrase
@@ -268,7 +281,7 @@ func lexWord(l *lexer) tokenStateFn {
 loop:
 	for {
 		switch r := l.next(); {
-		case isAlphaNumeric(r) || isWildcard(r) || r == '.':
+		case isAlphaNumeric(r) || isWildcard(r) || r == '.' || r == '-':
 			// do nothing
 		case isEscape(r):
 			l.next() // just ignore the next character
@@ -278,7 +291,7 @@ loop:
 		}
 	}
 
-	switch l.currWord() {
+	switch strings.ToUpper(l.currWord()) {
 	case "AND":
 		return l.emit(tAND)
 	case "OR":
