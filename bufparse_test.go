@@ -14,6 +14,29 @@ func TestBufParse(t *testing.T) {
 	}
 
 	tcs := map[string]tc{
+		"basic_fuzzy": {
+			input: "b AND a~",
+			want:  AND(Lit("b"), FUZZY(Lit("a"), 1)),
+		},
+		"fuzzy_power": {
+			input: "b AND a~10",
+			want:  AND(Lit("b"), FUZZY(Lit("a"), 10)),
+		},
+		"basic_boost": {
+			input: "b AND a^",
+			want:  AND(Lit("b"), BOOST(Lit("a"), 1.0)),
+		},
+		"boost_power": {
+			input: "b AND a^10",
+			want:  AND(Lit("b"), BOOST(Lit("a"), 10.0)),
+		},
+		"most_basic": {
+			input: "a AND b",
+			want: AND(
+				Lit("a"),
+				Lit("b"),
+			),
+		},
 		"test_expr": {
 			input: "a OR b AND c OR d",
 			want: OR(
@@ -22,6 +45,74 @@ func TestBufParse(t *testing.T) {
 					AND(Lit("b"), Lit("c")),
 				),
 				Lit("d"),
+			),
+		},
+		"test_not": {
+			input: "NOT a OR b AND NOT c OR d",
+			want: OR(
+				OR(
+					NOT(Lit("a")),
+					AND(Lit("b"), NOT(Lit("c"))),
+				),
+				Lit("d"),
+			),
+		},
+		"test_equals": {
+			input: "a:az OR b:bz AND NOT c:z OR d",
+			want: OR(
+				OR(
+					EQ(Lit("a"), Lit("az")),
+					AND(
+						EQ(Lit("b"), Lit("bz")),
+						NOT(
+							EQ(Lit("c"), Lit("z")),
+						),
+					),
+				),
+				Lit("d"),
+			),
+		},
+		"test_parens": {
+			input: "a AND (c OR d)",
+			want: AND(
+				Lit("a"),
+				OR(
+					Lit("c"),
+					Lit("d"),
+				),
+			),
+		},
+		"test_full_precedance": {
+			input: "a OR b AND c OR d AND NOT +e:f",
+			want: OR(
+				OR(
+					Lit("a"),
+					AND(Lit("b"), Lit("c")),
+				),
+				AND(
+					Lit("d"),
+					NOT(MUST(EQ(Lit("e"), Lit("f")))),
+				),
+			),
+		},
+		"test_full_precedance_with_suffixes": {
+			input: "a OR b AND c OR d~ AND NOT +(e:f)^10",
+			want: OR(
+				OR(
+					Lit("a"),
+					AND(Lit("b"), Lit("c")),
+				),
+				AND(
+					FUZZY(Lit("d"), 1),
+					NOT(
+						MUST(
+							BOOST(
+								EQ(Lit("e"), Lit("f")),
+								10.0,
+							),
+						),
+					),
+				),
 			),
 		},
 		"test_not_expr": {

@@ -410,6 +410,13 @@ func toPositiveFloat(in string) (f float32, err error) {
 }
 
 func parseLiteral(token token) (e expr.Expression, err error) {
+	if token.typ == tREGEXP {
+		val := strings.ReplaceAll(token.val, "/", "")
+		return &expr.RegexpLiteral{
+			Literal: expr.Literal{Value: val},
+		}, nil
+	}
+
 	val := token.val
 	ival, err := strconv.Atoi(val)
 	if err == nil {
@@ -417,7 +424,7 @@ func parseLiteral(token token) (e expr.Expression, err error) {
 	}
 
 	if strings.ContainsAny(val, "*?") {
-		return &expr.WildLiteral{expr.Literal{Value: val}}, nil
+		return &expr.WildLiteral{Literal: expr.Literal{Value: val}}, nil
 	}
 
 	return &expr.Literal{Value: val}, nil

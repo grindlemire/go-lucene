@@ -26,30 +26,40 @@ func (i token) String() string {
 
 type tokType int
 
+// precedance : > ) > + > - > ~ > ^ > NOT > AND > OR > (
+
 const (
+	// terminal characters
 	tERR tokType = iota
 	tLITERAL
 	tQUOTED
 	tREGEXP
+
+	// precedance of operators. Order matters here
 	tEQUAL
-	tAND
-	tOR
-	tNOT
-	tLPAREN
-	tRPAREN
-	tLSQUARE
-	tRSQUARE
-	tLCURLY
-	tRCURLY
-	tTO
 	tCOLON
 	tPLUS
 	tMINUS
-	tGREATER
-	tLESS
 	tTILDE
 	tCARROT
+	tNOT
+	tAND
+	tOR
+	tRPAREN
+	tLPAREN
+
+	// TODO figure out how these fit in here
+	tLCURLY
+	tRCURLY
+	tTO
+	tLSQUARE
+	tRSQUARE
+	tGREATER
+	tLESS
+
+	// start and end operators
 	tEOF
+	tSTART
 )
 
 var symbols = map[rune]tokType{
@@ -94,7 +104,48 @@ func (tt tokType) String() string {
 		tTILDE:   "tTILDE",
 		tCARROT:  "tCARROT",
 		tEOF:     "tEOF",
+		tSTART:   "tSTART",
 	}[tt]
+}
+
+func isTerminal(tok token) bool {
+	return map[tokType]bool{
+		tERR:     true,
+		tLITERAL: true,
+		tQUOTED:  true,
+		tREGEXP:  true,
+		tEQUAL:   false,
+		tLPAREN:  false,
+		tRPAREN:  false,
+		tAND:     false,
+		tOR:      false,
+		tNOT:     false,
+		tLSQUARE: false,
+		tRSQUARE: false,
+		tLCURLY:  false,
+		tRCURLY:  false,
+		tTO:      false,
+		tCOLON:   false,
+		tPLUS:    false,
+		tMINUS:   false,
+		tGREATER: false,
+		tLESS:    false,
+		tTILDE:   false,
+		tCARROT:  false,
+		tEOF:     true,
+		tSTART:   false,
+	}[tok.typ]
+}
+
+func hasLessPrecedance(current token, next token) bool {
+	// left associative. If we see another one just do our current one now
+	if current.typ == next.typ {
+		return false
+	}
+
+	// fmt.Printf("%s > %s | %d > %d\n", current.typ, next.typ, int(current.typ), int(next.typ))
+	// lower numbers mean higher precedance
+	return current.typ > next.typ
 }
 
 type tokenStateFn func(*lexer) tokenStateFn
@@ -102,20 +153,18 @@ type tokenStateFn func(*lexer) tokenStateFn
 type lexer struct {
 	input string // the input to parse
 
-	pos         int          // the position of the cursor
-	start       int          // the start of the current token
-	phraseStack map[rune]int // this tracks any symbol stacks are in the string
-	currItem    token        // the current item being worked on
-	atEOF       bool         // whether we have finished parsing the string or not
+	pos      int   // the position of the cursor
+	start    int   // the start of the current token
+	currItem token // the current item being worked on
+	atEOF    bool  // whether we have finished parsing the string or not
 
 }
 
 func lex(input string) *lexer {
 	return &lexer{
-		input:       input,
-		pos:         0,
-		start:       0,
-		phraseStack: map[rune]int{},
+		input: input,
+		pos:   0,
+		start: 0,
 	}
 }
 
@@ -133,6 +182,16 @@ func (l *lexer) nextToken() token {
 	}
 
 	return l.currItem
+}
+
+// note this is intentionally not a pointer because we don't want any changes to
+// take affect here.
+func (l lexer) peekNextToken() token {
+	if l.currItem.typ == tEOF {
+		return l.currItem
+	}
+
+	return l.nextToken()
 }
 
 func lexSpace(l *lexer) tokenStateFn {

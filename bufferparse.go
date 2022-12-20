@@ -3,10 +3,24 @@ package lucene
 import (
 	"fmt"
 	"reflect"
-	"strings"
+	"strconv"
 
 	"github.com/grindlemire/go-lucene/expr"
 )
+
+// Grammar:
+// E ->
+// 		E:E
+// 		(E)
+// 		+E
+// 		-E
+// 		E~E
+// 		E^E
+// 		NOT E
+//      E AND E
+// 		E OR E
+// 		id
+// 		[id TO id]
 
 type stringer interface {
 	String() string
@@ -15,8 +29,9 @@ type stringer interface {
 // BufParse will parse using a buffer and the shift reduce algo
 func BufParse(input string) (e expr.Expression, err error) {
 	p := &bufParser{
-		lex:   lex(input),
-		stack: []stringer{},
+		lex:          lex(input),
+		stack:        []stringer{},
+		nonTerminals: []token{{typ: tSTART}},
 	}
 	ex, err := p.parse()
 	if err != nil {
@@ -32,43 +47,51 @@ func BufParse(input string) (e expr.Expression, err error) {
 }
 
 type bufParser struct {
-	lex   *lexer
-	stack []stringer
+	lex          *lexer
+	stack        []stringer
+	nonTerminals []token
 }
 
 func (p *bufParser) parse() (e expr.Expression, err error) {
 
 	for {
-		// shift out of the lexer
-		tok := p.shift()
-		// if no more input then return
-		if tok.typ == tEOF || tok.typ == tRPAREN {
+		// if should_shift
+		//     do_it
+		// else reduce
+		next := p.lex.peekNextToken()
+		fmt.Printf("NEXT TOKEN: %s\n", next)
+		if p.shouldAccept(next) {
 			if len(p.stack) != 1 {
-				return e, fmt.Errorf("unable to parse expression. Stack: %v", p.stack)
+				return nil, fmt.Errorf("multiple expression left after parsing: %v", p.stack)
 			}
-			e, ok := p.stack[0].(expr.Expression)
+			final, ok := p.stack[0].(expr.Expression)
 			if !ok {
-				return e, fmt.Errorf("root node not an expression, got [%s]", reflect.TypeOf(p.stack[1]))
+				return nil, fmt.Errorf("final parse didn't return an expression: %s [type: %s]", p.stack[0], reflect.TypeOf(final))
 			}
-			return e, nil
+			return final, nil
 		}
 
-		// if we have a left paren then we are diving into a subexpression so recurse
-		if tok.typ == tLPAREN {
-			e, err := (&bufParser{p.lex, []stringer{}}).parse()
-			if err != nil {
-				return e, err
+		if p.shouldShift(next) {
+			tok := p.shift()
+			if isTerminal(tok) {
+				// if we have a terminal parse it and put it on the stack
+				e, err := parseLiteral(tok)
+				if err != nil {
+					return e, err
+				}
+
+				fmt.Printf("PUSHING EXPR [%s] onto stack\n", e)
+				p.stack = push(p.stack, e)
+				continue
 			}
-			p.stack = push(p.stack, e)
-		} else {
-			// otherwise match the token
+			// otherwise just push the token on the stack
+			fmt.Printf("PUSHING TOKEN [%s] onto stack\n", tok)
 			p.stack = push(p.stack, tok)
+			p.nonTerminals = append(p.nonTerminals, tok)
+			continue
 		}
-
-		fmt.Printf("--------\nSTACK IS NOW: %+v\n", p.stack)
-
-		// run reduce functions
-		err = p.reduce(tok)
+		fmt.Printf("NOT SHIFTING FOR %s\n", next)
+		err = p.reduce()
 		if err != nil {
 			return e, err
 		}
@@ -79,210 +102,378 @@ func (p *bufParser) shift() (tok token) {
 	return p.lex.nextToken()
 }
 
-type reducer func(p *bufParser) (matched bool, err error)
+func (p *bufParser) shouldShift(next token) bool {
+	if next.typ == tEOF {
+		return false
+	}
+
+	if next.typ == tERR {
+		return false
+	}
+
+	if isTerminal(next) {
+		return true
+	}
+
+	curr := p.nonTerminals[len(p.nonTerminals)-1]
+
+	// if we have a parsed expression surrounded by parens we want to shift
+	if curr.typ == tLPAREN && next.typ == tRPAREN {
+		return true
+	}
+
+	// if the current or next is left paren we always want to shift
+	if curr.typ == tLPAREN || next.typ == tLPAREN {
+		return true
+	}
+
+	// if we are ever attempting to move past a subexpr we need to parse it
+	if curr.typ == tRPAREN {
+		return false
+	}
+
+	fmt.Printf("CURR NON TERMINAL [%s] VAL: %d | NEXT [%s] VAL: %d | shouldshift? %v\n", curr, int(curr.typ), next, int(next.typ), hasLessPrecedance(curr, next))
+	return hasLessPrecedance(curr, next)
+}
+
+func (p *bufParser) shouldAccept(next token) bool {
+	return len(p.stack) == 1 &&
+		next.typ == tEOF
+}
+
+func (p *bufParser) reduce() (err error) {
+	// until_reduced
+	//    peek on top of stack
+	// 	  if can reduce
+	//       do it
+	//       return
+	fmt.Printf("REDUCING: %v\n", p.stack)
+	top := []stringer{}
+	for {
+		if len(p.stack) == 0 {
+			return fmt.Errorf("error parsing, no items left to reduce, current state: %v", top)
+		}
+		// pull the top off the stack
+		var s stringer
+		s, p.stack = pop(p.stack)
+		top = append([]stringer{s}, top...)
+
+		// try to reduce with all our reducers
+		var reduced bool
+		top, reduced = tryReduce(top)
+		if reduced {
+			// if we successfully reduced re-add it to the top of the stack and return
+			p.stack = append(p.stack, top...)
+			_, p.nonTerminals = pop(p.nonTerminals)
+			fmt.Printf("REDUCED SO NOW STACK IS: %s\n", p.stack)
+			return nil
+		}
+	}
+}
+
+func tryReduce(elems []stringer) ([]stringer, bool) {
+	for _, reducer := range reducers {
+		elems, matched := reducer(elems)
+		if matched {
+			return elems, matched
+		}
+	}
+	return elems, false
+}
+
+type reducer func(elems []stringer) ([]stringer, bool)
 
 var reducers = []reducer{
 	and,
 	or,
-	literal,
 	equal,
 	not,
+	sub,
+	must,
+	mustNot,
+	fuzzy,
+	boost,
 }
 
-func equal(p *bufParser) (matched bool, err error) {
-	if len(p.stack) != 3 {
+func equal(elems []stringer) ([]stringer, bool) {
+	if len(elems) != 3 {
 		// fmt.Printf("NOT EQUAL - len not correct\n")
-		return false, nil
+		return elems, false
 	}
 
 	// ensure middle token is an equals
-	tok, ok := p.stack[1].(token)
+	tok, ok := elems[1].(token)
 	if !ok || (tok.typ != tEQUAL && tok.typ != tCOLON) {
 		// fmt.Printf("NOT EQUAL - not tEQUAL or tCOLON\n")
-		return false, nil
+		return elems, false
 	}
 
 	// make sure the left is a literal and right is an expression
-	left, ok := p.stack[0].(*expr.Literal)
+	left, ok := elems[0].(*expr.Literal)
 	if !ok {
 		// fmt.Printf("NOT EQUAL - left not literal\n")
-		return false, nil
+		return elems, false
 	}
-	right, ok := p.stack[2].(expr.Expression)
+	right, ok := elems[2].(expr.Expression)
 	if !ok {
 		// fmt.Printf("NOT EQUAL - right not expression\n")
-		return false, nil
+		return elems, false
 	}
 
-	p.stack = []stringer{
+	elems = []stringer{
 		EQ(
 			left,
 			right,
 		),
 	}
 	fmt.Printf("IS EQUAL\n")
-	return true, nil
+	return elems, true
 }
 
-func literal(p *bufParser) (matched bool, err error) {
-	// we have to have at least one item in the stack
-	if len(p.stack) < 1 {
-		// fmt.Printf("NOT LITERAL - empty\n")
-		return false, nil
-	}
-
-	// don't process unless its a raw token
-	tok, ok := p.stack[len(p.stack)-1].(token)
-	if !ok {
-		// fmt.Printf("NOT LITERAL - not token\n")
-		return false, nil
-	}
-
-	switch tok.typ {
-	case tLITERAL, tQUOTED:
-		_, p.stack = pop(p.stack)
-
-		e, err := parseLiteral(tok)
-		if err != nil {
-			return false, err
-		}
-
-		p.stack = push(p.stack, e)
-		fmt.Printf("IS LITERAL\n")
-		// TODO, do we need to parse floats here?
-		return true, nil
-	case tREGEXP:
-		// strip the quotes off because we don't need them
-		val := strings.ReplaceAll(tok.val, "/", "")
-		_, p.stack = pop(p.stack)
-		p.stack = push(p.stack, REGEXP(val))
-		fmt.Printf("IS REGEXP LITERAL\n")
-		return true, nil
-	default:
-		// fmt.Printf("NOT LITERAL - not tLITERAL, tQUOTED, tREGEXP\n")
-		return false, nil
-	}
-}
-
-func and(p *bufParser) (matched bool, err error) {
+func and(elems []stringer) ([]stringer, bool) {
 	// if we don't have 3 items in the buffer it's not an AND clause
-	if len(p.stack) != 3 {
+	if len(elems) != 3 {
 		// fmt.Printf("NOT AND - len not correct\n")
-		return false, nil
+		return elems, false
 	}
 
 	// if the middle token is not an AND token do nothing
-	operatorToken, ok := p.stack[1].(token)
+	operatorToken, ok := elems[1].(token)
 	if !ok || operatorToken.typ != tAND {
 		// fmt.Printf("NOT AND - operator wrong\n")
-		return false, nil
+		return elems, false
 	}
 
 	// make sure the left and right clauses are expressions
-	left, ok := p.stack[0].(expr.Expression)
+	left, ok := elems[0].(expr.Expression)
 	if !ok {
 		// fmt.Printf("NOT AND - left not expr\n")
-		return false, nil
+		return elems, false
 	}
-	right, ok := p.stack[2].(expr.Expression)
+	right, ok := elems[2].(expr.Expression)
 	if !ok {
 		// fmt.Printf("NOT AND - right not expr\n")
-		return false, nil
+		return elems, false
 	}
 
 	// we have a valid AND clause. Replace it in the stack
-	p.stack = []stringer{
+	elems = []stringer{
 		AND(
 			left,
 			right,
 		),
 	}
 	fmt.Printf("IS AND\n")
-	return true, nil
+	return elems, true
 }
 
-func or(p *bufParser) (matched bool, err error) {
+func or(elems []stringer) ([]stringer, bool) {
 	// if we don't have 3 items in the buffer it's not an OR clause
-	if len(p.stack) != 3 {
+	if len(elems) != 3 {
 		// fmt.Printf("NOT OR - len not correct\n")
-		return false, nil
+		return elems, false
 	}
 
 	// if the middle token is not an OR token do nothing
-	operatorToken, ok := p.stack[1].(token)
+	operatorToken, ok := elems[1].(token)
 	if !ok || operatorToken.typ != tOR {
 		// fmt.Printf("NOT OR - operator wrong\n")
-		return false, nil
+		return elems, false
 	}
 
 	// make sure the left and right clauses are expressions
-	left, ok := p.stack[0].(expr.Expression)
+	left, ok := elems[0].(expr.Expression)
 	if !ok {
 		// fmt.Printf("NOT OR - left not expr\n")
-		return false, nil
+		return elems, false
 	}
-	right, ok := p.stack[2].(expr.Expression)
+	right, ok := elems[2].(expr.Expression)
 	if !ok {
 		// fmt.Printf("NOT OR - right not expr\n")
-		return false, nil
+		return elems, false
 	}
 
 	// we have a valid OR clause. Replace it in the stack
-	p.stack = []stringer{
+	elems = []stringer{
 		OR(
 			left,
 			right,
 		),
 	}
 	fmt.Printf("IS OR\n")
-	return true, nil
+	return elems, true
 }
 
-func not(p *bufParser) (matched bool, err error) {
-	if len(p.stack) < 2 {
-		return false, nil
+func not(elems []stringer) ([]stringer, bool) {
+	if len(elems) < 2 {
+		return elems, false
 	}
 
 	// if the second to last token is not the NOT operator do nothing
-	operatorToken, ok := p.stack[len(p.stack)-2].(token)
+	operatorToken, ok := elems[len(elems)-2].(token)
 	if !ok || operatorToken.typ != tNOT {
-		return false, nil
+		return elems, false
 	}
 
 	// make sure the thing to be negated is already a parsed
-	negated, ok := p.stack[len(p.stack)-1].(expr.Expression)
+	negated, ok := elems[len(elems)-1].(expr.Expression)
 	if !ok {
-		return false, nil
+		return elems, false
 	}
 
-	p.stack = p.stack[:len(p.stack)-2]
-	p.stack = push(p.stack, NOT(negated))
+	elems = elems[:len(elems)-2]
+	elems = push(elems, NOT(negated))
 	fmt.Printf("IS NOT\n")
-	return true, nil
+	return elems, true
 }
 
-func (p *bufParser) reduce(tok token) (err error) {
-	for i := 0; i < len(reducers); i++ {
-		matched, err := reducers[i](p)
-		if err != nil {
-			return err
-		}
-		// if we matched we need to recheck all our reducers to see
-		// if we can further reduce the expression. This is a clever
-		// short cut so we don't have to go back to the outer loop.
-		if matched {
-			fmt.Printf("--- rerunning with %v\n", p.stack)
-			i = -1
-		}
+func sub(elems []stringer) ([]stringer, bool) {
+	// all the internal terms should have reduced by the time we hit this reducer
+	if len(elems) != 3 {
+		return elems, false
 	}
-	return nil
+
+	open, ok := elems[0].(token)
+	if !ok || open.typ != tLPAREN {
+		return elems, false
+	}
+
+	closed, ok := elems[len(elems)-1].(token)
+	if !ok || closed.typ != tRPAREN {
+		return elems, false
+	}
+
+	fmt.Printf("IS SUB\n")
+	return []stringer{elems[1]}, true
+}
+
+func must(elems []stringer) ([]stringer, bool) {
+	if len(elems) != 2 {
+		return elems, false
+	}
+
+	must, ok := elems[0].(token)
+	if !ok || must.typ != tPLUS {
+		return elems, false
+	}
+
+	rest, ok := elems[1].(expr.Expression)
+	if !ok {
+		return elems, false
+	}
+
+	return []stringer{MUST(rest)}, true
+}
+
+func mustNot(elems []stringer) ([]stringer, bool) {
+	if len(elems) != 2 {
+		return elems, false
+	}
+
+	must, ok := elems[0].(token)
+	if !ok || must.typ != tMINUS {
+		return elems, false
+	}
+
+	rest, ok := elems[1].(expr.Expression)
+	if !ok {
+		return elems, false
+	}
+
+	return []stringer{MUSTNOT(rest)}, true
+}
+
+func fuzzy(elems []stringer) ([]stringer, bool) {
+	// we are in the case with an implicit 1 fuzzy distance
+	if len(elems) == 2 {
+		must, ok := elems[1].(token)
+		if !ok || must.typ != tTILDE {
+			return elems, false
+		}
+
+		rest, ok := elems[0].(expr.Expression)
+		if !ok {
+			return elems, false
+		}
+
+		return []stringer{FUZZY(rest, 1)}, true
+	}
+
+	if len(elems) != 3 {
+		return elems, false
+	}
+
+	must, ok := elems[1].(token)
+	if !ok || must.typ != tTILDE {
+		return elems, false
+	}
+
+	rest, ok := elems[0].(expr.Expression)
+	if !ok {
+		return elems, false
+	}
+
+	power, ok := elems[2].(*expr.Literal)
+	if !ok {
+		return elems, false
+	}
+
+	ipower, err := strconv.Atoi(power.String())
+	if err != nil {
+		return elems, false
+	}
+
+	return []stringer{FUZZY(rest, ipower)}, true
+}
+
+func boost(elems []stringer) ([]stringer, bool) {
+	// we are in the case with an implicit 1 fuzzy distance
+	if len(elems) == 2 {
+		must, ok := elems[1].(token)
+		if !ok || must.typ != tCARROT {
+			return elems, false
+		}
+
+		rest, ok := elems[0].(expr.Expression)
+		if !ok {
+			return elems, false
+		}
+
+		return []stringer{BOOST(rest, 1.0)}, true
+	}
+
+	if len(elems) != 3 {
+		return elems, false
+	}
+
+	must, ok := elems[1].(token)
+	if !ok || must.typ != tCARROT {
+		return elems, false
+	}
+
+	rest, ok := elems[0].(expr.Expression)
+	if !ok {
+		return elems, false
+	}
+
+	power, ok := elems[2].(*expr.Literal)
+	if !ok {
+		return elems, false
+	}
+
+	fpower, err := toPositiveFloat(power.String())
+	if err != nil {
+		return elems, false
+	}
+
+	return []stringer{BOOST(rest, fpower)}, true
 }
 
 func push(stack []stringer, s stringer) []stringer {
 	return append(stack, s)
 }
 
-func pop(stack []stringer) (stringer, []stringer) {
+func pop[T any](stack []T) (T, []T) {
 	return stack[len(stack)-1], stack[:len(stack)-1]
 }
 
