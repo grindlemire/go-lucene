@@ -103,7 +103,11 @@ type Range struct {
 }
 
 func (r Range) String() string {
-	return fmt.Sprintf("[%s TO %s]", r.Min, r.Max)
+	if r.Inclusive {
+		return fmt.Sprintf("[%s TO %s]", r.Min, r.Max)
+	}
+	return fmt.Sprintf("{%s TO %s}", r.Min, r.Max)
+
 }
 
 // Insert ...

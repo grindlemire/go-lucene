@@ -117,6 +117,16 @@ func (p *bufParser) shouldShift(next token) bool {
 
 	curr := p.nonTerminals[len(p.nonTerminals)-1]
 
+	// if we have an open curly or the next one is we want to shift
+	if curr.typ == tLSQUARE || next.typ == tLSQUARE || curr.typ == tLCURLY || next.typ == tLCURLY {
+		return true
+	}
+
+	// if we are at the end of a range always shift
+	if next.typ == tRSQUARE || next.typ == tRCURLY {
+		return true
+	}
+
 	// if we have a parsed expression surrounded by parens we want to shift
 	if curr.typ == tLPAREN && next.typ == tRPAREN {
 		return true
@@ -127,7 +137,7 @@ func (p *bufParser) shouldShift(next token) bool {
 		return true
 	}
 
-	// if we are ever attempting to move past a subexpr we need to parse it
+	// if we are ever attempting to move past a subexpr we need to parse it.
 	if curr.typ == tRPAREN {
 		return false
 	}
@@ -193,6 +203,7 @@ var reducers = []reducer{
 	mustNot,
 	fuzzy,
 	boost,
+	rangeop,
 }
 
 func equal(elems []stringer) ([]stringer, bool) {
@@ -467,6 +478,50 @@ func boost(elems []stringer) ([]stringer, bool) {
 	}
 
 	return []stringer{BOOST(rest, fpower)}, true
+}
+
+func rangeop(elems []stringer) ([]stringer, bool) {
+	// we need a [, begin, TO, end, ] to have a range operator which is 5 elems
+	if len(elems) != 5 {
+		return elems, false
+	}
+
+	fmt.Printf("ELEMS IN RANGE: %v\n", elems)
+
+	open, ok := elems[0].(token)
+	if !ok || (open.typ != tLSQUARE && open.typ != tLCURLY) {
+		fmt.Printf("OPEN NOT RIGHT\n")
+		return elems, false
+	}
+
+	closed, ok := elems[4].(token)
+	if !ok || (closed.typ != tRSQUARE && closed.typ != tRCURLY) {
+		fmt.Printf("CLOSED NOT RIGHT\n")
+		return elems, false
+	}
+
+	to, ok := elems[2].(token)
+	if !ok || to.typ != tTO {
+		fmt.Printf("NOT TO: 00%s00\n", elems[2])
+		return elems, false
+	}
+
+	start, ok := elems[1].(expr.Expression)
+	if !ok {
+		fmt.Printf("NOT START\n")
+		return elems, false
+	}
+
+	end, ok := elems[3].(expr.Expression)
+	if !ok {
+		fmt.Printf("NOT END\n")
+		return elems, false
+	}
+
+	return []stringer{Rang(
+		start, end, (open.typ == tLSQUARE && closed.typ == tRSQUARE),
+	)}, true
+
 }
 
 func push(stack []stringer, s stringer) []stringer {

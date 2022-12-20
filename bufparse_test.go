@@ -14,6 +14,18 @@ func TestBufParse(t *testing.T) {
 	}
 
 	tcs := map[string]tc{
+		"basic_inclusive_range": {
+			input: "a:[* TO 5]",
+			want:  EQ(Lit("a"), Rang(Lit("*"), Lit(5), true)),
+		},
+		"basic_exclusive_range": {
+			input: "a:{* TO 5}",
+			want:  EQ(Lit("a"), Rang(Lit("*"), Lit(5), false)),
+		},
+		"range_over_strings": {
+			input: "a:{foo TO bar}",
+			want:  EQ(Lit("a"), Rang(Lit("foo"), Lit("bar"), false)),
+		},
 		"basic_fuzzy": {
 			input: "b AND a~",
 			want:  AND(Lit("b"), FUZZY(Lit("a"), 1)),
@@ -83,11 +95,11 @@ func TestBufParse(t *testing.T) {
 			),
 		},
 		"test_full_precedance": {
-			input: "a OR b AND c OR d AND NOT +e:f",
+			input: "a OR b AND c:[* to -1] OR d AND NOT +e:f",
 			want: OR(
 				OR(
 					Lit("a"),
-					AND(Lit("b"), Lit("c")),
+					AND(Lit("b"), EQ(Lit("c"), Rang(Lit("*"), Lit(-1), true))),
 				),
 				AND(
 					Lit("d"),
