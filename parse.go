@@ -81,6 +81,15 @@ func (p *parser) parse() (e expr.Expression, err error) {
 					return e, err
 				}
 
+				if len(p.stack) > 0 {
+					_, isTopLiteral := p.stack[len(p.stack)-1].(*expr.Literal)
+					if isTopLiteral {
+						// if we have a literal as the previous parsed thing then
+						// we must be in an implicit AND and should reduce
+						p.stack = push(p.stack, token{typ: tAND})
+					}
+				}
+
 				fmt.Printf("PUSHING EXPR [%s] onto stack\n", e)
 				p.stack = push(p.stack, e)
 				continue
@@ -114,7 +123,7 @@ func (p *parser) shouldShift(next token) bool {
 
 	curr := p.nonTerminals[len(p.nonTerminals)-1]
 
-	if isTerminal(next) && (curr.typ != tSTART) {
+	if isTerminal(next) {
 		return true
 	}
 
@@ -246,31 +255,31 @@ func equal(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 }
 
 func and(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
-	// special case for when we have a default implicit AND
-	if len(elems) == 2 {
-		// make sure the left and right clauses are expressions
-		left, ok := elems[0].(expr.Expression)
-		if !ok {
-			// fmt.Printf("NOT AND - left not expr\n")
-			return elems, nonTerminals, false
-		}
-		right, ok := elems[1].(expr.Expression)
-		if !ok {
-			// fmt.Printf("NOT AND - right not expr\n")
-			return elems, nonTerminals, false
-		}
+	// // special case for when we have a default implicit AND
+	// if len(elems) == 2 {
+	// 	// make sure the left and right clauses are expressions
+	// 	left, ok := elems[0].(expr.Expression)
+	// 	if !ok {
+	// 		// fmt.Printf("NOT AND - left not expr\n")
+	// 		return elems, nonTerminals, false
+	// 	}
+	// 	right, ok := elems[1].(expr.Expression)
+	// 	if !ok {
+	// 		// fmt.Printf("NOT AND - right not expr\n")
+	// 		return elems, nonTerminals, false
+	// 	}
 
-		// we have a valid implicit AND clause. Replace it in the stack
-		elems = []stringer{
-			expr.AND(
-				left,
-				right,
-			),
-		}
-		fmt.Printf("IS AND\n")
-		// we add in the implicit AND terminal
-		return elems, append(nonTerminals, token{typ: tIMPLICIT_AND}), true
-	}
+	// 	// we have a valid implicit AND clause. Replace it in the stack
+	// 	elems = []stringer{
+	// 		expr.AND(
+	// 			left,
+	// 			right,
+	// 		),
+	// 	}
+	// 	fmt.Printf("IS AND\n")
+	// 	// we add in the implicit AND terminal
+	// 	return elems, append(nonTerminals, token{typ: tIMPLICIT_AND}), true
+	// }
 
 	// if we don't have 3 items in the buffer it's not an AND clause
 	if len(elems) != 3 {
