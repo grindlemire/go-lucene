@@ -54,8 +54,8 @@ func (n Not) String() string {
 // Range represents a range operator in lucene that spans a minimum to a maximum value and an
 // inclusivity.
 type Range struct {
-	Min       *Literal
-	Max       *Literal
+	Min       Expression
+	Max       Expression
 	Inclusive bool
 }
 

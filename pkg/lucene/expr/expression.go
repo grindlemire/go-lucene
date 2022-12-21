@@ -24,13 +24,12 @@ import (
 // that we can parse out of lucene
 type Expression interface {
 	String() string
-	// Insert(e Expression) (Expression, error)
 }
 
 // Eq creates a new equals expression
-func Eq(a Expression, b Expression) Expression {
+func Eq(a string, b Expression) Expression {
 	return &Equals{
-		Term:  a.(*Literal).Value.(string),
+		Term:  a,
 		Value: b,
 	}
 }
@@ -69,27 +68,10 @@ func Wild(val any) Expression {
 
 // Rang creates a new range expression
 func Rang(min, max Expression, inclusive bool) Expression {
-	lmin, ok := min.(*Literal)
-	if !ok {
-		wmin, ok := min.(*WildLiteral)
-		if !ok {
-			panic("must only pass a *Literal or *WildLiteral to the Rang function")
-		}
-		lmin = &Literal{Value: wmin.Value}
-	}
-
-	lmax, ok := max.(*Literal)
-	if !ok {
-		wmax, ok := max.(*WildLiteral)
-		if !ok {
-			panic("must only pass a *Literal or *WildLiteral to the Rang function")
-		}
-		lmax = &Literal{Value: wmax.Value}
-	}
 	return &Range{
 		Inclusive: inclusive,
-		Min:       lmin,
-		Max:       lmax,
+		Min:       min,
+		Max:       max,
 	}
 }
 
@@ -192,6 +174,21 @@ func Validate(ex Expression) (err error) {
 		if err != nil {
 			return err
 		}
+
+		switch v := e.Min.(type) {
+		case *Literal, *WildLiteral:
+			// do nothing
+		default:
+			return fmt.Errorf("range clause must have a literal or wildcard min not %s", reflect.TypeOf(v))
+		}
+
+		switch v := e.Max.(type) {
+		case *Literal, *WildLiteral:
+			// do nothing
+		default:
+			return fmt.Errorf("range clause must have a literal or wildcard max not %s", reflect.TypeOf(v))
+		}
+
 	case *Must:
 		if e.Sub == nil {
 			return errors.New("MUST expression must have a sub expression")

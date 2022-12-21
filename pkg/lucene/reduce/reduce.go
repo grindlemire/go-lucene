@@ -60,7 +60,7 @@ func equal(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 
 	elems = []any{
 		expr.Eq(
-			left,
+			left.String(),
 			right,
 		),
 	}
