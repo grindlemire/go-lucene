@@ -64,7 +64,6 @@ func (r Range) String() string {
 		return fmt.Sprintf("[%s TO %s]", r.Min, r.Max)
 	}
 	return fmt.Sprintf("{%s TO %s}", r.Min, r.Max)
-
 }
 
 // Must represents a lucene MUST operator that indicates an expression must be present.

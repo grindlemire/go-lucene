@@ -485,7 +485,6 @@ func FuzzParse(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in string) {
 		Parse(in)
 	})
-
 }
 
 func TestBufParse(t *testing.T) {

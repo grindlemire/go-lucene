@@ -339,7 +339,6 @@ func rangeop(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return []any{expr.Rang(
 		start, end, (open.Typ == lex.TLSquare && closed.Typ == lex.TRSquare),
 	)}, drop(nonTerminals, 3), true
-
 }
 
 func drop[T any](stack []T, i int) []T {

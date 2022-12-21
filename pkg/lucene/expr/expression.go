@@ -224,5 +224,4 @@ func Validate(ex Expression) (err error) {
 	}
 
 	return nil
-
 }

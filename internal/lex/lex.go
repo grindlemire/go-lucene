@@ -173,7 +173,6 @@ type Lexer struct {
 	start    int   // the start of the current token
 	currItem Token // the current item being worked on
 	atEOF    bool  // whether we have finished parsing the string or not
-
 }
 
 // Lex creates a lexer for an input string

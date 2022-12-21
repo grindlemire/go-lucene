@@ -47,7 +47,11 @@ func (p *parser) parse() (e expr.Expression, err error) {
 			}
 			final, ok := p.stack[0].(expr.Expression)
 			if !ok {
-				return nil, fmt.Errorf("final parse didn't return an expression: %s [type: %s]", p.stack[0], reflect.TypeOf(final))
+				return nil, fmt.Errorf(
+					"final parse didn't return an expression: %s [type: %s]",
+					p.stack[0],
+					reflect.TypeOf(final),
+				)
 			}
 			return final, nil
 		}
