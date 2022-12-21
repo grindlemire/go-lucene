@@ -6,20 +6,40 @@ import (
 	"reflect"
 )
 
+// Lucene Grammar:
+// E ->
+// 		E:E
+// 		(E)
+// 		+E
+// 		-E
+// 		E~E
+// 		E^E
+// 		NOT E
+//      E AND E
+// 		E OR E
+// 		id
+// 		[id TO id]
+
 // Expression is an interface over all the different types of expressions
 // that we can parse out of lucene
 type Expression interface {
 	String() string
-	Insert(e Expression) (Expression, error)
 }
 
-func Eq(a Expression, b Expression) Expression {
+// Expr is a struct over an expression so we can unmarshal into it
+type Expr struct {
+	Expression
+}
+
+// Eq creates a new equals expression
+func Eq(a string, b Expression) Expression {
 	return &Equals{
-		Term:  a.(*Literal).Value.(string),
+		Term:  a,
 		Value: b,
 	}
 }
 
+// AND creates an AND expression
 func AND(a, b Expression) Expression {
 	return &And{
 		Left:  a,
@@ -27,6 +47,7 @@ func AND(a, b Expression) Expression {
 	}
 }
 
+// OR creates a new OR expression
 func OR(a, b Expression) Expression {
 	return &Or{
 		Left:  a,
@@ -34,12 +55,14 @@ func OR(a, b Expression) Expression {
 	}
 }
 
+// Lit creates a new literal
 func Lit(val any) Expression {
 	return &Literal{
 		Value: val,
 	}
 }
 
+// Wild creates a new literal that contains wildcards
 func Wild(val any) Expression {
 	return &WildLiteral{
 		Literal: Literal{
@@ -48,49 +71,37 @@ func Wild(val any) Expression {
 	}
 }
 
+// Rang creates a new range expression
 func Rang(min, max Expression, inclusive bool) Expression {
-	lmin, ok := min.(*Literal)
-	if !ok {
-		wmin, ok := min.(*WildLiteral)
-		if !ok {
-			panic("must only pass a *Literal or *WildLiteral to the Rang function")
-		}
-		lmin = &Literal{Value: wmin.Value}
-	}
-
-	lmax, ok := max.(*Literal)
-	if !ok {
-		wmax, ok := max.(*WildLiteral)
-		if !ok {
-			panic("must only pass a *Literal or *WildLiteral to the Rang function")
-		}
-		lmax = &Literal{Value: wmax.Value}
-	}
 	return &Range{
 		Inclusive: inclusive,
-		Min:       lmin,
-		Max:       lmax,
+		Min:       min,
+		Max:       max,
 	}
 }
 
+// NOT wraps an expression in a Not
 func NOT(e Expression) Expression {
 	return &Not{
 		Sub: e,
 	}
 }
 
+// MUST wraps an expression in a Must
 func MUST(e Expression) Expression {
 	return &Must{
 		Sub: e,
 	}
 }
 
+// MUSTNOT wraps an expression in a MustNot
 func MUSTNOT(e Expression) Expression {
 	return &MustNot{
 		Sub: e,
 	}
 }
 
+// BOOST wraps an expression in a boost
 func BOOST(e Expression, power float32) Expression {
 	return &Boost{
 		Sub:   e,
@@ -98,6 +109,7 @@ func BOOST(e Expression, power float32) Expression {
 	}
 }
 
+// FUZZY wraps an expression in a fuzzy
 func FUZZY(e Expression, distance int) Expression {
 	return &Fuzzy{
 		Sub:      e,
@@ -105,6 +117,7 @@ func FUZZY(e Expression, distance int) Expression {
 	}
 }
 
+// REGEXP creates a new regular expression literal
 func REGEXP(val any) Expression {
 	return &RegexpLiteral{
 		Literal: Literal{Value: val},
@@ -166,6 +179,21 @@ func Validate(ex Expression) (err error) {
 		if err != nil {
 			return err
 		}
+
+		switch v := e.Min.(type) {
+		case *Literal, *WildLiteral:
+			// do nothing
+		default:
+			return fmt.Errorf("range clause must have a literal or wildcard min not %s", reflect.TypeOf(v))
+		}
+
+		switch v := e.Max.(type) {
+		case *Literal, *WildLiteral:
+			// do nothing
+		default:
+			return fmt.Errorf("range clause must have a literal or wildcard max not %s", reflect.TypeOf(v))
+		}
+
 	case *Must:
 		if e.Sub == nil {
 			return errors.New("MUST expression must have a sub expression")
@@ -201,5 +229,4 @@ func Validate(ex Expression) (err error) {
 	}
 
 	return nil
-
 }
