@@ -26,6 +26,11 @@ type Expression interface {
 	String() string
 }
 
+// Expr is a struct over an expression so we can unmarshal into it
+type Expr struct {
+	Expression
+}
+
 // Eq creates a new equals expression
 func Eq(a string, b Expression) Expression {
 	return &Equals{
