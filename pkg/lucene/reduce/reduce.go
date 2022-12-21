@@ -1,13 +1,29 @@
-package lucene
+package reduce
 
 import (
+	"fmt"
 	"strconv"
 
-	"github.com/grindlemire/go-lucene/expr"
+	"github.com/grindlemire/go-lucene/internal/lex"
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
-type reducer func(elems []stringer, nonTerminals []token) ([]stringer, []token, bool)
+// Reduce will reduce the elems and nonTerminals stacks using the available reducers and return
+// those slices modified to contain the reduced expressions. The elems will contain the reduced
+// expression the the nonTerminals will contain the modified stack of nonTerminals yet to be reduced.
+func Reduce(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+	for _, reducer := range reducers {
+		elems, nonTerminals, reduced := reducer(elems, nonTerminals)
+		if reduced {
+			return elems, nonTerminals, true
+		}
+	}
+	return elems, nonTerminals, false
+}
 
+type reducer func(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool)
+
+// reducers are the reducers that will be executed during the grammar parsing
 var reducers = []reducer{
 	and,
 	or,
@@ -21,14 +37,14 @@ var reducers = []reducer{
 	rangeop,
 }
 
-func equal(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func equal(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
 	}
 
-	// ensure middle token is an equals
-	tok, ok := elems[1].(token)
-	if !ok || (tok.typ != tEQUAL && tok.typ != tCOLON) {
+	// ensure the middle token is an equals
+	tok, ok := elems[1].(lex.Token)
+	if !ok || (tok.Typ != lex.TEqual && tok.Typ != lex.TColon) {
 		return elems, nonTerminals, false
 	}
 
@@ -42,7 +58,7 @@ func equal(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	elems = []stringer{
+	elems = []any{
 		expr.Eq(
 			left,
 			right,
@@ -52,15 +68,15 @@ func equal(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	return elems, drop(nonTerminals, 1), true
 }
 
-func and(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func and(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// if we don't have 3 items in the buffer it's not an AND clause
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
 	}
 
 	// if the middle token is not an AND token do nothing
-	operatorToken, ok := elems[1].(token)
-	if !ok || operatorToken.typ != tAND {
+	operatorToken, ok := elems[1].(lex.Token)
+	if !ok || operatorToken.Typ != lex.TAnd {
 		return elems, nonTerminals, false
 	}
 
@@ -75,7 +91,7 @@ func and(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	}
 
 	// we have a valid AND clause. Replace it in the stack
-	elems = []stringer{
+	elems = []any{
 		expr.AND(
 			left,
 			right,
@@ -85,15 +101,15 @@ func and(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	return elems, drop(nonTerminals, 1), true
 }
 
-func or(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func or(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// if we don't have 3 items in the buffer it's not an OR clause
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
 	}
 
 	// if the middle token is not an OR token do nothing
-	operatorToken, ok := elems[1].(token)
-	if !ok || operatorToken.typ != tOR {
+	operatorToken, ok := elems[1].(lex.Token)
+	if !ok || operatorToken.Typ != lex.TOr {
 		return elems, nonTerminals, false
 	}
 
@@ -108,7 +124,7 @@ func or(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	}
 
 	// we have a valid OR clause. Replace it in the stack
-	elems = []stringer{
+	elems = []any{
 		expr.OR(
 			left,
 			right,
@@ -118,14 +134,14 @@ func or(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	return elems, drop(nonTerminals, 1), true
 }
 
-func not(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func not(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	if len(elems) < 2 {
 		return elems, nonTerminals, false
 	}
 
 	// if the second to last token is not the NOT operator do nothing
-	operatorToken, ok := elems[len(elems)-2].(token)
-	if !ok || operatorToken.typ != tNOT {
+	operatorToken, ok := elems[len(elems)-2].(lex.Token)
+	if !ok || operatorToken.Typ != lex.TNot {
 		return elems, nonTerminals, false
 	}
 
@@ -141,33 +157,33 @@ func not(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	return elems, drop(nonTerminals, 1), true
 }
 
-func sub(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func sub(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// all the internal terms should have reduced by the time we hit this reducer
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
 	}
 
-	open, ok := elems[0].(token)
-	if !ok || open.typ != tLPAREN {
+	open, ok := elems[0].(lex.Token)
+	if !ok || open.Typ != lex.TLParen {
 		return elems, nonTerminals, false
 	}
 
-	closed, ok := elems[len(elems)-1].(token)
-	if !ok || closed.typ != tRPAREN {
+	closed, ok := elems[len(elems)-1].(lex.Token)
+	if !ok || closed.Typ != lex.TRParen {
 		return elems, nonTerminals, false
 	}
 
 	// we consumed two terminals, the ( and )
-	return []stringer{elems[1]}, drop(nonTerminals, 2), true
+	return []any{elems[1]}, drop(nonTerminals, 2), true
 }
 
-func must(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func must(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	if len(elems) != 2 {
 		return elems, nonTerminals, false
 	}
 
-	must, ok := elems[0].(token)
-	if !ok || must.typ != tPLUS {
+	must, ok := elems[0].(lex.Token)
+	if !ok || must.Typ != lex.TPlus {
 		return elems, nonTerminals, false
 	}
 
@@ -177,16 +193,16 @@ func must(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	}
 
 	// we consumed 1 terminal, the +
-	return []stringer{expr.MUST(rest)}, drop(nonTerminals, 1), true
+	return []any{expr.MUST(rest)}, drop(nonTerminals, 1), true
 }
 
-func mustNot(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func mustNot(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	if len(elems) != 2 {
 		return elems, nonTerminals, false
 	}
 
-	must, ok := elems[0].(token)
-	if !ok || must.typ != tMINUS {
+	must, ok := elems[0].(lex.Token)
+	if !ok || must.Typ != lex.TMinus {
 		return elems, nonTerminals, false
 	}
 
@@ -195,14 +211,14 @@ func mustNot(elems []stringer, nonTerminals []token) ([]stringer, []token, bool)
 		return elems, nonTerminals, false
 	}
 	// we consumed one terminal, the -
-	return []stringer{expr.MUSTNOT(rest)}, drop(nonTerminals, 1), true
+	return []any{expr.MUSTNOT(rest)}, drop(nonTerminals, 1), true
 }
 
-func fuzzy(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func fuzzy(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// we are in the case with an implicit 1 fuzzy distance
 	if len(elems) == 2 {
-		must, ok := elems[1].(token)
-		if !ok || must.typ != tTILDE {
+		must, ok := elems[1].(lex.Token)
+		if !ok || must.Typ != lex.TTilde {
 			return elems, nonTerminals, false
 		}
 
@@ -212,15 +228,15 @@ func fuzzy(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 		}
 
 		// we consumed one terminal, the ~
-		return []stringer{expr.FUZZY(rest, 1)}, drop(nonTerminals, 1), true
+		return []any{expr.FUZZY(rest, 1)}, drop(nonTerminals, 1), true
 	}
 
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
 	}
 
-	must, ok := elems[1].(token)
-	if !ok || must.typ != tTILDE {
+	must, ok := elems[1].(lex.Token)
+	if !ok || must.Typ != lex.TTilde {
 		return elems, nonTerminals, false
 	}
 
@@ -240,14 +256,14 @@ func fuzzy(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	}
 
 	// we consumed one terminal, the ~
-	return []stringer{expr.FUZZY(rest, ipower)}, drop(nonTerminals, 1), true
+	return []any{expr.FUZZY(rest, ipower)}, drop(nonTerminals, 1), true
 }
 
-func boost(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// we are in the case with an implicit 1 fuzzy distance
 	if len(elems) == 2 {
-		must, ok := elems[1].(token)
-		if !ok || must.typ != tCARROT {
+		must, ok := elems[1].(lex.Token)
+		if !ok || must.Typ != lex.TCarrot {
 			return elems, nonTerminals, false
 		}
 
@@ -257,15 +273,15 @@ func boost(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 		}
 
 		// we consumed one terminal, the ^
-		return []stringer{expr.BOOST(rest, 1.0)}, drop(nonTerminals, 1), true
+		return []any{expr.BOOST(rest, 1.0)}, drop(nonTerminals, 1), true
 	}
 
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
 	}
 
-	must, ok := elems[1].(token)
-	if !ok || must.typ != tCARROT {
+	must, ok := elems[1].(lex.Token)
+	if !ok || must.Typ != lex.TCarrot {
 		return elems, nonTerminals, false
 	}
 
@@ -285,27 +301,27 @@ func boost(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
 	}
 
 	// we consumed one terminal, the ^
-	return []stringer{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
+	return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
 }
 
-func rangeop(elems []stringer, nonTerminals []token) ([]stringer, []token, bool) {
+func rangeop(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// we need a [, begin, TO, end, ] to have a range operator which is 5 elems
 	if len(elems) != 5 {
 		return elems, nonTerminals, false
 	}
 
-	open, ok := elems[0].(token)
-	if !ok || (open.typ != tLSQUARE && open.typ != tLCURLY) {
+	open, ok := elems[0].(lex.Token)
+	if !ok || (open.Typ != lex.TLSquare && open.Typ != lex.TLCurly) {
 		return elems, nonTerminals, false
 	}
 
-	closed, ok := elems[4].(token)
-	if !ok || (closed.typ != tRSQUARE && closed.typ != tRCURLY) {
+	closed, ok := elems[4].(lex.Token)
+	if !ok || (closed.Typ != lex.TRSquare && closed.Typ != lex.TRCurly) {
 		return elems, nonTerminals, false
 	}
 
-	to, ok := elems[2].(token)
-	if !ok || to.typ != tTO {
+	to, ok := elems[2].(lex.Token)
+	if !ok || to.Typ != lex.TTO {
 		return elems, nonTerminals, false
 	}
 
@@ -320,8 +336,26 @@ func rangeop(elems []stringer, nonTerminals []token) ([]stringer, []token, bool)
 	}
 
 	// we consumed three terminals, the [, TO, and ]
-	return []stringer{expr.Rang(
-		start, end, (open.typ == tLSQUARE && closed.typ == tRSQUARE),
+	return []any{expr.Rang(
+		start, end, (open.Typ == lex.TLSquare && closed.Typ == lex.TRSquare),
 	)}, drop(nonTerminals, 3), true
 
+}
+
+func drop[T any](stack []T, i int) []T {
+	return stack[:len(stack)-i]
+}
+
+func toPositiveFloat(in string) (f float32, err error) {
+	i, err := strconv.Atoi(in)
+	if err == nil && i > 0 {
+		return float32(i), nil
+	}
+
+	pf, err := strconv.ParseFloat(in, 64)
+	if err == nil && pf > 0 {
+		return float32(pf), nil
+	}
+
+	return f, fmt.Errorf("[%v] is not a positive number", in)
 }

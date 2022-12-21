@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/grindlemire/go-lucene/expr"
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
 const errTemplate = "%s:\n    wanted %v\n    got    %v"
