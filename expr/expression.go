@@ -13,7 +13,7 @@ type Expression interface {
 	Insert(e Expression) (Expression, error)
 }
 
-func EQ(a Expression, b Expression) Expression {
+func Eq(a Expression, b Expression) Expression {
 	return &Equals{
 		Term:  a.(*Literal).Value.(string),
 		Value: b,
