@@ -67,6 +67,10 @@ func TestParseLucene(t *testing.T) {
 				expr.Lit("b"),
 			),
 		},
+		"basic_default_AND": {
+			input:    "a b",
+			expected: expr.AND(expr.Lit("a"), expr.Lit("b")),
+		},
 		"default_to_AND_with_subexpressions": {
 			input: "a:b c:d",
 			expected: expr.AND(

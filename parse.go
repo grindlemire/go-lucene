@@ -82,11 +82,21 @@ func (p *parser) parse() (e expr.Expression, err error) {
 				}
 
 				if len(p.stack) > 0 {
-					_, isTopLiteral := p.stack[len(p.stack)-1].(*expr.Literal)
-					if isTopLiteral {
+					_, isTopToken := p.stack[len(p.stack)-1].(token)
+					if !isTopToken {
+						fmt.Printf("TOP ISNT TOKEN SO IT MUST BE AN IMPLICIT AND\n")
+						implAnd := token{typ: tAND, val: "AND"}
+						if !p.shouldShift(implAnd) {
+							err = p.reduce()
+							if err != nil {
+								return e, err
+							}
+						}
+
 						// if we have a literal as the previous parsed thing then
 						// we must be in an implicit AND and should reduce
-						p.stack = push(p.stack, token{typ: tAND})
+						p.stack = append(p.stack, implAnd)
+						p.nonTerminals = append(p.nonTerminals, implAnd)
 					}
 				}
 
