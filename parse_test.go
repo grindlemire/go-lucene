@@ -364,10 +364,10 @@ func TestParseLucene(t *testing.T) {
 				t.Fatalf("wanted no error, got: %v", err)
 			}
 			if !reflect.DeepEqual(tc.expected, parsed) {
-				ws, _ := json.Marshal(tc.expected)
-				js, _ := json.Marshal(parsed)
-				fmt.Printf("GOT:  %s\n", js)
-				fmt.Printf("WANT: %s\n", ws)
+				ws, _ := json.MarshalIndent(tc.expected, "", "  ")
+				js, _ := json.MarshalIndent(parsed, "", "  ")
+				fmt.Printf("GOT:  \n%s\n-------------\n", js)
+				fmt.Printf("WANT: \n%s\n\n", ws)
 				t.Fatalf(errTemplate, "parsed expression doesn't match expected", tc.expected, parsed)
 			}
 		})

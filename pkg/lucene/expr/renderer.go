@@ -4,7 +4,7 @@ import "fmt"
 
 type renderer func(*Expression) string
 
-var renderers = map[Expr]renderer{
+var renderers = map[Operation]renderer{
 	Equals:  renderEquals,
 	And:     renderBasic,
 	Or:      renderBasic,
@@ -24,11 +24,11 @@ func renderEquals(e *Expression) string {
 }
 
 func renderBasic(e *Expression) string {
-	return fmt.Sprintf("%s %s %s", e.Left, toJSON[e.Expr], e.Right)
+	return fmt.Sprintf("%s %s %s", e.Left, toJSON[e.Op], e.Right)
 }
 
 func renderWrapper(e *Expression) string {
-	return fmt.Sprintf("%s(%s)", toJSON[e.Expr], e.Left)
+	return fmt.Sprintf("%s(%s)", toJSON[e.Op], e.Left)
 }
 
 func renderMustNot(e *Expression) string {

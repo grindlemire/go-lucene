@@ -245,13 +245,18 @@ func fuzzy(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	distance, ok := elems[2].(int)
+	distance, ok := elems[2].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
+	idistance, err := strconv.Atoi(distance.String())
+	if err != nil {
+		return elems, nonTerminals, false
+	}
+
 	// we consumed one terminal, the ~
-	return []any{expr.FUZZY(rest, distance)}, drop(nonTerminals, 1), true
+	return []any{expr.FUZZY(rest, idistance)}, drop(nonTerminals, 1), true
 }
 
 func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
@@ -275,8 +280,8 @@ func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	must, ok := elems[1].(lex.Token)
-	if !ok || must.Typ != lex.TCarrot {
+	boost, ok := elems[1].(lex.Token)
+	if !ok || boost.Typ != lex.TCarrot {
 		return elems, nonTerminals, false
 	}
 
@@ -285,13 +290,18 @@ func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	power, ok := elems[2].(float64)
+	power, ok := elems[2].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
+	fpower, err := toPositiveFloat(power.String())
+	if err != nil {
+		return elems, nonTerminals, false
+	}
+
 	// we consumed one terminal, the ^
-	return []any{expr.BOOST(rest, power)}, drop(nonTerminals, 1), true
+	return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
 }
 
 func rangeop(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
@@ -335,16 +345,16 @@ func drop[T any](stack []T, i int) []T {
 	return stack[:len(stack)-i]
 }
 
-func toPositiveFloat(in string) (f float32, err error) {
+func toPositiveFloat(in string) (f float64, err error) {
 	i, err := strconv.Atoi(in)
 	if err == nil && i > 0 {
-		return float32(i), nil
+		return float64(i), nil
 	}
 
 	pf, err := strconv.ParseFloat(in, 64)
 	if err == nil && pf > 0 {
-		return float32(pf), nil
+		return float64(pf), nil
 	}
 
-	return f, fmt.Errorf("[%v] is not a positive number", in)
+	return f, fmt.Errorf("[%v] is not a positive float", in)
 }

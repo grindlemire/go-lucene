@@ -33,7 +33,7 @@ func main() {
 	var e1 expr.Expression
 	err = json.Unmarshal(s, &e1)
 	if err != nil {
-		fmt.Printf("Error unmarshalling to json: %s\n", err)
+		fmt.Printf("Error unmarshalling from json: %s\n", err)
 		os.Exit(1)
 	}
 

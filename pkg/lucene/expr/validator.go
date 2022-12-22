@@ -8,7 +8,7 @@ import (
 
 type validator = func(*Expression) (err error)
 
-var validators = map[Expr]validator{
+var validators = map[Operation]validator{
 	Equals:  validateEquals,
 	And:     validateAnd,
 	Or:      validateOr,
@@ -28,7 +28,7 @@ func validateEquals(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Expr != Equals {
+	if e.Op != Equals {
 		return errors.New("EQUALS validation error: must have equals operator")
 	}
 
@@ -102,7 +102,7 @@ func validateRange(e *Expression) (err error) {
 	}
 
 	if e.Right == nil {
-		return errors.New("AND validation: max value must not be nil")
+		return errors.New("RANGE validation: max value must not be nil")
 	}
 
 	return nil

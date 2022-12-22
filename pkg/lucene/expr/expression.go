@@ -1,7 +1,9 @@
 package expr
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Lucene Grammar:
@@ -21,34 +23,130 @@ import (
 // Expression is an interface over all the different types of expressions
 // that we can parse out of lucene
 type Expression struct {
-	Left  any  `json:"left"`
-	Expr  Expr `json:"op"`
-	Right any  `json:"right"`
+	Left  any       `json:"left"`
+	Op    Operation `json:"-"`
+	Right any       `json:"right,omitempty"`
 
 	// these are operator specific states we have to track
-	rangeInclusive bool    `json:"-"`
-	boostPower     float64 `json:"-"`
-	fuzzyDistance  int     `json:"-"`
+	rangeInclusive bool
+	boostPower     float64
+	fuzzyDistance  int
 }
 
 func (e Expression) String() string {
-	return renderers[e.Expr](&e)
+	if e.Op == Undefined {
+		return ""
+	}
+	return renderers[e.Op](&e)
+}
+
+// // MarshalJSON ...
+// func (e *Expression) MarshalJSON() ([]byte, error) {
+// 	type Alias Expression
+// 	return json.Marshal(&struct {
+// 		*Alias
+// 		Operation string `json:"operation"`
+// 	}{
+// 		Alias:     (*Alias)(e),
+// 		Operation: toJSON[e.Op],
+// 	})
+// }
+
+// // UnmarshalJSON ...
+// func (e *Expression) UnmarshalJSON(data []byte) error {
+// 	type Alias Expression
+// 	aux := &struct {
+// 		*Alias
+// 		Operation string `json:"operation"`
+// 	}{
+// 		Alias: (*Alias)(e),
+// 	}
+
+// 	if err := json.Unmarshal(data, aux); err != nil {
+// 		return err
+// 	}
+
+// 	e.Op = fromJSON[aux.Operation]
+// 	return nil
+// }
+
+// MarshalJSON is a custom JSON serialization for the Expression
+func (e Expression) MarshalJSON() (out []byte, err error) {
+	// if we are in a leaf node just marshal the value
+	if e.Op == Literal || e.Op == Wild || e.Op == Regexp {
+		return json.Marshal(e.Left)
+	}
+
+	type custom struct {
+		Left      json.RawMessage `json:"left"`
+		Operation string          `json:"operation"`
+		Right     json.RawMessage `json:"right,omitempty"`
+	}
+
+	leftRaw, err := json.Marshal(e.Left)
+	if err != nil {
+		return out, err
+	}
+
+	rightRaw, err := json.Marshal(e.Right)
+	if err != nil {
+		return out, err
+	}
+
+	c := custom{
+		Left:      leftRaw,
+		Operation: toJSON[e.Op],
+		Right:     rightRaw,
+	}
+	return json.Marshal(c)
+}
+
+// UnmarshalJSON is a custom JSON deserialization for the Expression
+func (e *Expression) UnmarshalJSON(data []byte) (err error) {
+	fmt.Printf("INCOMING: %s\n", data)
+	if !strings.Contains(string(data), "{") {
+		e = Lit(string(data))
+		fmt.Printf("LITERAL E NOW: %s\n", e)
+		return nil
+	}
+
+	type custom struct {
+		Left      json.RawMessage `json:"left"`
+		Operation string          `json:"operation"`
+		Right     json.RawMessage `json:"right,omitempty"`
+	}
+
+	var c custom
+	err = json.Unmarshal(data, &c)
+	if err != nil {
+		return err
+	}
+
+	var leftExpr Expression
+	err = json.Unmarshal(c.Left, &leftExpr)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("LEFT IS [%+v] | PARSED FROM: [%s]\n", leftExpr, c.Left)
+
+	var rightExpr Expression
+	err = json.Unmarshal(c.Right, &rightExpr)
+	if err != nil {
+		return err
+	}
+
+	e.Left = leftExpr
+	e.Op = fromJSON[c.Operation]
+	e.Right = rightExpr
+	fmt.Printf("PARSED AT THIS LEVEL: %s\n", e)
+	return nil
 }
 
 // expr creates a general new expression
-func expr(left any, op Expr, right ...any) *Expression {
+func expr(left any, op Operation, right ...any) *Expression {
 	e := &Expression{
 		Left: left,
-		Expr: op,
-	}
-	// if right is present and non nil then add it to the expression
-	if len(right) == 1 && right[0] != nil {
-		e.Right = right[0]
-	}
-
-	// support passing a range with inclusivity
-	if op == Range && len(right) == 2 && isBool(right[1]) {
-		e.rangeInclusive = right[1].(bool)
+		Op:   op,
 	}
 
 	// support changing boost power
@@ -57,6 +155,7 @@ func expr(left any, op Expr, right ...any) *Expression {
 		if len(right) == 1 && isFloat(right[0]) {
 			e.boostPower = right[0].(float64)
 		}
+		return e
 	}
 
 	// support changing fuzzy distance
@@ -65,7 +164,19 @@ func expr(left any, op Expr, right ...any) *Expression {
 		if len(right) == 1 && isInt(right[0]) {
 			e.fuzzyDistance = right[0].(int)
 		}
+		return e
 	}
+
+	// support passing a range with inclusivity
+	if op == Range && len(right) == 2 && isBool(right[1]) {
+		e.rangeInclusive = right[1].(bool)
+	}
+
+	// if right is present and non nil then add it to the expression
+	if len(right) >= 1 && right[0] != nil {
+		e.Right = right[0]
+	}
+
 	return e
 }
 
@@ -137,9 +248,9 @@ func Validate(in any) (err error) {
 		return nil
 	}
 
-	fn, found := validators[e.Expr]
+	fn, found := validators[e.Op]
 	if !found {
-		return fmt.Errorf("unsupported operator %v", e.Expr)
+		return fmt.Errorf("unsupported operator %v", e.Op)
 	}
 	err = fn(e)
 	if err != nil {
