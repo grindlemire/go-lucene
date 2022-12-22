@@ -1,8 +1,10 @@
 package expr
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -37,147 +39,16 @@ func (e Expression) String() string {
 	if e.Op == Undefined {
 		return ""
 	}
-	return renderers[e.Op](&e)
+	return renderers[e.Op](&e, false)
 }
 
-// // MarshalJSON ...
-// func (e *Expression) MarshalJSON() ([]byte, error) {
-// 	type Alias Expression
-// 	return json.Marshal(&struct {
-// 		*Alias
-// 		Operation string `json:"operation"`
-// 	}{
-// 		Alias:     (*Alias)(e),
-// 		Operation: toJSON[e.Op],
-// 	})
-// }
-
-// // UnmarshalJSON ...
-// func (e *Expression) UnmarshalJSON(data []byte) error {
-// 	type Alias Expression
-// 	aux := &struct {
-// 		*Alias
-// 		Operation string `json:"operation"`
-// 	}{
-// 		Alias: (*Alias)(e),
-// 	}
-
-// 	if err := json.Unmarshal(data, aux); err != nil {
-// 		return err
-// 	}
-
-// 	e.Op = fromJSON[aux.Operation]
-// 	return nil
-// }
-
-// MarshalJSON is a custom JSON serialization for the Expression
-func (e Expression) MarshalJSON() (out []byte, err error) {
-	// if we are in a leaf node just marshal the value
-	if e.Op == Literal || e.Op == Wild || e.Op == Regexp {
-		return json.Marshal(e.Left)
+// GoString prints a verbose string representation. Useful for debugging exactly
+// what types were parsed. You can print this format using %#v
+func (e Expression) GoString() string {
+	if e.Op == Undefined {
+		return ""
 	}
-
-	type custom struct {
-		Left      json.RawMessage `json:"left"`
-		Operation string          `json:"operation"`
-		Right     json.RawMessage `json:"right,omitempty"`
-	}
-
-	leftRaw, err := json.Marshal(e.Left)
-	if err != nil {
-		return out, err
-	}
-
-	rightRaw, err := json.Marshal(e.Right)
-	if err != nil {
-		return out, err
-	}
-
-	c := custom{
-		Left:      leftRaw,
-		Operation: toJSON[e.Op],
-		Right:     rightRaw,
-	}
-	return json.Marshal(c)
-}
-
-// UnmarshalJSON is a custom JSON deserialization for the Expression
-func (e *Expression) UnmarshalJSON(data []byte) (err error) {
-	fmt.Printf("INCOMING: %s\n", data)
-	if !strings.Contains(string(data), "{") {
-		e = Lit(string(data))
-		fmt.Printf("LITERAL E NOW: %s\n", e)
-		return nil
-	}
-
-	type custom struct {
-		Left      json.RawMessage `json:"left"`
-		Operation string          `json:"operation"`
-		Right     json.RawMessage `json:"right,omitempty"`
-	}
-
-	var c custom
-	err = json.Unmarshal(data, &c)
-	if err != nil {
-		return err
-	}
-
-	var leftExpr Expression
-	err = json.Unmarshal(c.Left, &leftExpr)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("LEFT IS [%+v] | PARSED FROM: [%s]\n", leftExpr, c.Left)
-
-	var rightExpr Expression
-	err = json.Unmarshal(c.Right, &rightExpr)
-	if err != nil {
-		return err
-	}
-
-	e.Left = leftExpr
-	e.Op = fromJSON[c.Operation]
-	e.Right = rightExpr
-	fmt.Printf("PARSED AT THIS LEVEL: %s\n", e)
-	return nil
-}
-
-// expr creates a general new expression
-func expr(left any, op Operation, right ...any) *Expression {
-	e := &Expression{
-		Left: left,
-		Op:   op,
-	}
-
-	// support changing boost power
-	if op == Boost {
-		e.boostPower = 1.0
-		if len(right) == 1 && isFloat(right[0]) {
-			e.boostPower = right[0].(float64)
-		}
-		return e
-	}
-
-	// support changing fuzzy distance
-	if op == Fuzzy {
-		e.fuzzyDistance = 1
-		if len(right) == 1 && isInt(right[0]) {
-			e.fuzzyDistance = right[0].(int)
-		}
-		return e
-	}
-
-	// support passing a range with inclusivity
-	if op == Range && len(right) == 2 && isBool(right[1]) {
-		e.rangeInclusive = right[1].(bool)
-	}
-
-	// if right is present and non nil then add it to the expression
-	if len(right) >= 1 && right[0] != nil {
-		e.Right = right[0]
-	}
-
-	return e
+	return renderers[e.Op](&e, true)
 }
 
 // Lit represents a literal expression
@@ -263,4 +134,167 @@ func Validate(in any) (err error) {
 	}
 
 	return Validate(e.Right)
+}
+
+// expr creates a general new expression
+func expr(left any, op Operation, right ...any) *Expression {
+	e := &Expression{
+		Left: left,
+		Op:   op,
+	}
+
+	// support changing boost power
+	if op == Boost {
+		e.boostPower = 1.0
+		if len(right) == 1 && isFloat(right[0]) {
+			e.boostPower = right[0].(float64)
+		}
+		return e
+	}
+
+	// support changing fuzzy distance
+	if op == Fuzzy {
+		e.fuzzyDistance = 1
+		if len(right) == 1 && isInt(right[0]) {
+			e.fuzzyDistance = right[0].(int)
+		}
+		return e
+	}
+
+	// support passing a range with inclusivity
+	if op == Range && len(right) == 2 && isBool(right[1]) {
+		e.rangeInclusive = right[1].(bool)
+	}
+
+	// if right is present and non nil then add it to the expression
+	if len(right) >= 1 && right[0] != nil {
+		e.Right = right[0]
+	}
+
+	return e
+}
+
+// MarshalJSON is a custom JSON serialization for the Expression
+func (e Expression) MarshalJSON() (out []byte, err error) {
+	// if we are in a leaf node just marshal the value
+	if e.Op == Literal || e.Op == Wild || e.Op == Regexp {
+		return json.Marshal(e.Left)
+	}
+
+	// if e.Op == Regexp {
+	// 	strRight, ok := e.Right.(string)
+	// 	if !ok {
+	// 		return out, err
+	// 	}
+
+	// 	strRight = "/" + strRight + "/"
+	// 	e.Right = strRight
+	// }
+
+	leftRaw, err := json.Marshal(e.Left)
+	if err != nil {
+		return out, err
+	}
+
+	rightRaw, err := json.Marshal(e.Right)
+	if err != nil {
+		return out, err
+	}
+
+	serializable := struct {
+		Left      json.RawMessage `json:"left"`
+		Operation string          `json:"operation"`
+		Right     json.RawMessage `json:"right,omitempty"`
+	}{
+		Left:      leftRaw,
+		Operation: toJSON[e.Op],
+		Right:     rightRaw,
+	}
+	return json.Marshal(serializable)
+}
+
+// UnmarshalJSON is a custom JSON deserialization for the Expression
+func (e *Expression) UnmarshalJSON(data []byte) (err error) {
+	type serializable struct {
+		Left      json.RawMessage `json:"left"`
+		Operation string          `json:"operation"`
+		Right     json.RawMessage `json:"right,omitempty"`
+	}
+
+	var c serializable
+	err = json.Unmarshal(data, &c)
+	if err != nil {
+		return err
+	}
+
+	e.Left, err = unmarshalExpression(c.Left)
+	if err != nil {
+		return err
+	}
+
+	e.Right, err = unmarshalExpression(c.Right)
+	if err != nil {
+		return err
+	}
+
+	e.Op = fromJSON[c.Operation]
+	return nil
+}
+
+// unmarshal different edge cases for literals in the expression
+func unmarshalExpression(in json.RawMessage) (e *Expression, err error) {
+	// if it looks like a sub object then parse it as an expression
+	if isJSONObject(in) {
+		e = &Expression{}
+		err = json.Unmarshal(in, e)
+		if err != nil {
+			return e, err
+		}
+		return e, nil
+	}
+
+	// check if it is a float
+	f, err := strconv.ParseFloat(string(in), 64)
+	if err == nil {
+		return Lit(f), nil
+	}
+
+	// check if it is an int
+	i, err := strconv.Atoi(string(in))
+	if err == nil {
+		return Lit(i), nil
+	}
+
+	// we know it is some sort of string so decode it
+	var s string
+	err = json.Unmarshal(in, &s)
+	if err != nil {
+		return e, err
+	}
+
+	fmt.Printf("UNMARSHALLING STRING: %s\n", s)
+	// if it has leading and trailing /'s then it probably is a regex.
+	// Note this needs to be checked before the wildcard check as a regex
+	// can contain * and ?.
+	// TODO this should probably check for escaping
+	if s[0] == '/' && s[len(s)-1] == '/' {
+		return REGEXP(s), nil
+	}
+
+	// if it contains a * or ? then it probably is a wildcard expression
+	// TODO this should probably check for escaping
+	if strings.ContainsAny(s, "*?") {
+		return WILD(s), nil
+	}
+
+	return Lit(s), nil
+}
+
+func isJSONObject(in json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(in)
+	if len(trimmed) == 0 {
+		return false
+	}
+
+	return trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}'
 }

@@ -105,6 +105,14 @@ func validateRange(e *Expression) (err error) {
 		return errors.New("RANGE validation: max value must not be nil")
 	}
 
+	if !isLiteralExpr(e.Left) {
+		return errors.New("RANGE validation: min value must be a literal")
+	}
+
+	if !isLiteralExpr(e.Right) {
+		return errors.New("RANGE validation: max value must be a literal")
+	}
+
 	return nil
 }
 
@@ -230,6 +238,11 @@ func validateRegexp(e *Expression) (err error) {
 	}
 
 	return nil
+}
+
+func isLiteralExpr(in any) bool {
+	e, isExpr := in.(*Expression)
+	return isExpr && (e.Op == Literal || e.Op == Wild || e.Op == Regexp) && isLiteral(e.Left)
 }
 
 func isLiteral(in any) bool {

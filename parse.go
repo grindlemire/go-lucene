@@ -199,11 +199,11 @@ func (p *parser) reduce() (err error) {
 
 func parseLiteral(token lex.Token) (e any, err error) {
 	if token.Typ == lex.TQuoted {
-		return expr.WILD(strings.ReplaceAll(token.Val, "\"", "")), nil
+		return expr.Lit(strings.ReplaceAll(token.Val, "\"", "")), nil
 	}
 
 	if token.Typ == lex.TRegexp {
-		return expr.REGEXP(strings.ReplaceAll(token.Val, "/", "")), nil
+		return expr.REGEXP(token.Val), nil
 	}
 
 	ival, err := strconv.Atoi(token.Val)
@@ -214,6 +214,10 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	fval, err := strconv.ParseFloat(token.Val, 64)
 	if err == nil {
 		return expr.Lit(fval), nil
+	}
+
+	if strings.ContainsAny(token.Val, "*?") {
+		return expr.WILD(token.Val), nil
 	}
 
 	return expr.Lit(token.Val), nil

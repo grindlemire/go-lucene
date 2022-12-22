@@ -20,7 +20,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Parsed input: %s\n", e)
+	fmt.Printf("Parsed  input: %s\n", e)
+	fmt.Printf("Verbose input: %#v\n", e)
 
 	s, err := json.MarshalIndent(e, "", "  ")
 	if err != nil {
@@ -38,4 +39,5 @@ func main() {
 	}
 
 	fmt.Printf("Reparsed input: %v\n", e1)
+	fmt.Printf("Verbose  input: %#v\n", e1)
 }
