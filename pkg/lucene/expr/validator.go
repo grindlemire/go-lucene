@@ -8,7 +8,7 @@ import (
 
 type validator = func(*Expression) (err error)
 
-var validators = map[Operation]validator{
+var validators = map[Operator]validator{
 	Equals:  validateEquals,
 	And:     validateAnd,
 	Or:      validateOr,

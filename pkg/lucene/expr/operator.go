@@ -1,11 +1,11 @@
 package expr
 
-// Operation is an enum over the different valid lucene operations
-type Operation int
+// Operator is an enum over the different valid lucene operations
+type Operator int
 
 // operations that can be used
 const (
-	Undefined Operation = iota
+	Undefined Operator = iota
 	And
 	Or
 	Equals
@@ -20,7 +20,7 @@ const (
 	Regexp
 )
 
-var fromJSON = map[string]Operation{
+var fromJSON = map[string]Operator{
 	"AND":      And,
 	"OR":       Or,
 	"EQUALS":   Equals,
@@ -35,7 +35,7 @@ var fromJSON = map[string]Operation{
 	"REGEXP":   Regexp,
 }
 
-var toJSON = map[Operation]string{
+var toJSON = map[Operator]string{
 	And:     "AND",
 	Or:      "OR",
 	Equals:  "EQUALS",

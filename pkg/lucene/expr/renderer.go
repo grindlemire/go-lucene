@@ -7,7 +7,7 @@ import (
 
 type renderer func(e *Expression, verbose bool) string
 
-var renderers = map[Operation]renderer{
+var renderers = map[Operator]renderer{
 	Equals:  renderEquals,
 	And:     renderBasic,
 	Or:      renderBasic,

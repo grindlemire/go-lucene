@@ -25,9 +25,9 @@ import (
 // Expression is an interface over all the different types of expressions
 // that we can parse out of lucene
 type Expression struct {
-	Left  any       `json:"left"`
-	Op    Operation `json:"-"`
-	Right any       `json:"right,omitempty"`
+	Left  any      `json:"left"`
+	Op    Operator `json:"-"`
+	Right any      `json:"right,omitempty"`
 
 	// these are operator specific states we have to track
 	rangeInclusive bool
@@ -137,11 +137,10 @@ func Validate(in any) (err error) {
 }
 
 // expr creates a general new expression
-func expr(left any, op Operation, right ...any) *Expression {
-	e := &Expression{
-		Left: left,
-		Op:   op,
-	}
+func expr(left any, op Operator, right ...any) *Expression {
+	e := ptr(empty())
+	e.Left = left
+	e.Op = op
 
 	// support changing boost power
 	if op == Boost {
@@ -174,6 +173,16 @@ func expr(left any, op Operation, right ...any) *Expression {
 	return e
 }
 
+type jsonExpression struct {
+	Left     json.RawMessage `json:"left"`
+	Operator string          `json:"operator"`
+	Right    json.RawMessage `json:"right,omitempty"`
+
+	RangeExclusive *bool    `json:"exclusive,omitempty"`
+	FuzzyDistance  *int     `json:"distance,omitempty"`
+	BoostPower     *float64 `json:"power,omitempty"`
+}
+
 // MarshalJSON is a custom JSON serialization for the Expression
 func (e Expression) MarshalJSON() (out []byte, err error) {
 	// if we are in a leaf node just marshal the value
@@ -181,47 +190,54 @@ func (e Expression) MarshalJSON() (out []byte, err error) {
 		return json.Marshal(e.Left)
 	}
 
-	// if e.Op == Regexp {
-	// 	strRight, ok := e.Right.(string)
-	// 	if !ok {
-	// 		return out, err
-	// 	}
-
-	// 	strRight = "/" + strRight + "/"
-	// 	e.Right = strRight
-	// }
-
 	leftRaw, err := json.Marshal(e.Left)
 	if err != nil {
 		return out, err
 	}
 
-	rightRaw, err := json.Marshal(e.Right)
-	if err != nil {
-		return out, err
+	c := jsonExpression{
+		Left:     leftRaw,
+		Operator: toJSON[e.Op],
 	}
 
-	serializable := struct {
-		Left      json.RawMessage `json:"left"`
-		Operation string          `json:"operation"`
-		Right     json.RawMessage `json:"right,omitempty"`
-	}{
-		Left:      leftRaw,
-		Operation: toJSON[e.Op],
-		Right:     rightRaw,
+	// this is dumb but we need it so our "null" is not event given. Otherwise the json serialization
+	// will persist a null value.
+	if e.Right != nil {
+		rightRaw, err := json.Marshal(e.Right)
+		if err != nil {
+			return out, err
+		}
+		c.Right = rightRaw
 	}
-	return json.Marshal(serializable)
+
+	if e.boostPower != 1.0 {
+		c.BoostPower = &e.boostPower
+	}
+
+	if e.fuzzyDistance != 1 {
+		c.FuzzyDistance = &e.fuzzyDistance
+	}
+
+	if !e.rangeInclusive {
+		c.RangeExclusive = ptr(true)
+	}
+
+	return json.Marshal(c)
 }
 
 // UnmarshalJSON is a custom JSON deserialization for the Expression
 func (e *Expression) UnmarshalJSON(data []byte) (err error) {
-	type serializable struct {
-		Left      json.RawMessage `json:"left"`
-		Operation string          `json:"operation"`
-		Right     json.RawMessage `json:"right,omitempty"`
+	// initalize our default values, e cannot be nil here.
+	*e = empty()
+	// if this does not look like an object it must be a literal
+	if !isJSONObject(json.RawMessage(data)) {
+		expr, err := unmarshalExpression(json.RawMessage(data))
+		// this is required because apparently you can't swap pointers to your receiver mid method
+		*e = *expr
+		return err
 	}
 
-	var c serializable
+	var c jsonExpression
 	err = json.Unmarshal(data, &c)
 	if err != nil {
 		return err
@@ -232,20 +248,45 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		return err
 	}
 
-	e.Right, err = unmarshalExpression(c.Right)
-	if err != nil {
-		return err
+	if len(c.Right) > 0 {
+		e.Right, err = unmarshalExpression(c.Right)
+		if err != nil {
+			return err
+		}
 	}
 
-	e.Op = fromJSON[c.Operation]
+	e.Op = fromJSON[c.Operator]
+
+	if e.Op == Range {
+		e.rangeInclusive = true
+		// yes this can be reduced but this is more readble
+		if c.RangeExclusive != nil && *c.RangeExclusive {
+			e.rangeInclusive = false
+		}
+	}
+
+	if e.Op == Fuzzy {
+		e.fuzzyDistance = 1
+		if c.FuzzyDistance != nil {
+			e.fuzzyDistance = *c.FuzzyDistance
+		}
+	}
+
+	if e.Op == Boost {
+		e.boostPower = 1.0
+		if c.BoostPower != nil {
+			e.boostPower = *c.BoostPower
+		}
+	}
 	return nil
 }
 
 // unmarshal different edge cases for literals in the expression
 func unmarshalExpression(in json.RawMessage) (e *Expression, err error) {
+	e = ptr(empty())
+
 	// if it looks like a sub object then parse it as an expression
 	if isJSONObject(in) {
-		e = &Expression{}
 		err = json.Unmarshal(in, e)
 		if err != nil {
 			return e, err
@@ -253,16 +294,16 @@ func unmarshalExpression(in json.RawMessage) (e *Expression, err error) {
 		return e, nil
 	}
 
+	// check if it is an int first because all ints can be parsed as floats
+	i, err := strconv.Atoi(string(in))
+	if err == nil {
+		return Lit(i), nil
+	}
+
 	// check if it is a float
 	f, err := strconv.ParseFloat(string(in), 64)
 	if err == nil {
 		return Lit(f), nil
-	}
-
-	// check if it is an int
-	i, err := strconv.Atoi(string(in))
-	if err == nil {
-		return Lit(i), nil
 	}
 
 	// we know it is some sort of string so decode it
@@ -272,7 +313,6 @@ func unmarshalExpression(in json.RawMessage) (e *Expression, err error) {
 		return e, err
 	}
 
-	fmt.Printf("UNMARSHALLING STRING: %s\n", s)
 	// if it has leading and trailing /'s then it probably is a regex.
 	// Note this needs to be checked before the wildcard check as a regex
 	// can contain * and ?.
@@ -297,4 +337,16 @@ func isJSONObject(in json.RawMessage) bool {
 	}
 
 	return trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}'
+}
+
+func empty() Expression {
+	return Expression{
+		rangeInclusive: true,
+		fuzzyDistance:  1,
+		boostPower:     1.0,
+	}
+}
+
+func ptr[T any](in T) *T {
+	return &in
 }
