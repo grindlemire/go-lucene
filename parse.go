@@ -13,7 +13,7 @@ import (
 
 // Parse will parse using a buffer and the shift reduce algorithm. It scales rather well since
 // it is a one pass algorithm with no backtracking.
-func Parse(input string) (e expr.Expression, err error) {
+func Parse(input string) (e *expr.Expression, err error) {
 	p := &parser{
 		lex:          lex.Lex(input),
 		stack:        []any{},
@@ -38,16 +38,16 @@ type parser struct {
 	nonTerminals []lex.Token
 }
 
-func (p *parser) parse() (e expr.Expression, err error) {
+func (p *parser) parse() (e *expr.Expression, err error) {
 	for {
 		next := p.lex.Peek()
 		if p.shouldAccept(next) {
 			if len(p.stack) != 1 {
-				return nil, fmt.Errorf("multiple expression left after parsing: %v", p.stack)
+				return e, fmt.Errorf("multiple expression left after parsing: %v", p.stack)
 			}
-			final, ok := p.stack[0].(expr.Expression)
+			final, ok := p.stack[0].(*expr.Expression)
 			if !ok {
-				return nil, fmt.Errorf(
+				return e, fmt.Errorf(
 					"final parse didn't return an expression: %s [type: %s]",
 					p.stack[0],
 					reflect.TypeOf(final),
@@ -60,7 +60,7 @@ func (p *parser) parse() (e expr.Expression, err error) {
 			tok := p.shift()
 			if lex.IsTerminal(tok) {
 				// if we have a terminal parse it and put it on the stack
-				e, err := parseLiteral(tok)
+				lit, err := parseLiteral(tok)
 				if err != nil {
 					return e, err
 				}
@@ -87,7 +87,7 @@ func (p *parser) parse() (e expr.Expression, err error) {
 					}
 				}
 
-				p.stack = append(p.stack, e)
+				p.stack = append(p.stack, lit)
 				continue
 			}
 			// otherwise just push the token on the stack
@@ -197,28 +197,28 @@ func (p *parser) reduce() (err error) {
 	}
 }
 
-func parseLiteral(token lex.Token) (e expr.Expression, err error) {
+func parseLiteral(token lex.Token) (e any, err error) {
 	if token.Typ == lex.TQuoted {
-		val := strings.ReplaceAll(token.Val, "\"", "")
-		return &expr.Literal{Value: val}, nil
+		return expr.Lit(strings.ReplaceAll(token.Val, "\"", "")), nil
 	}
 
 	if token.Typ == lex.TRegexp {
-		val := strings.ReplaceAll(token.Val, "/", "")
-		return &expr.RegexpLiteral{
-			Literal: expr.Literal{Value: val},
-		}, nil
+		return expr.REGEXP(token.Val), nil
 	}
 
-	val := token.Val
-	ival, err := strconv.Atoi(val)
+	ival, err := strconv.Atoi(token.Val)
 	if err == nil {
-		return &expr.Literal{Value: ival}, nil
+		return expr.Lit(ival), nil
 	}
 
-	if strings.ContainsAny(val, "*?") {
-		return &expr.WildLiteral{Literal: expr.Literal{Value: val}}, nil
+	fval, err := strconv.ParseFloat(token.Val, 64)
+	if err == nil {
+		return expr.Lit(fval), nil
 	}
 
-	return &expr.Literal{Value: val}, nil
+	if strings.ContainsAny(token.Val, "*?") {
+		return expr.WILD(token.Val), nil
+	}
+
+	return expr.Lit(token.Val), nil
 }
