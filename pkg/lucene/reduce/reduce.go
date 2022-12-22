@@ -49,19 +49,19 @@ func equal(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	}
 
 	// make sure the left is a literal and right is an expression
-	left, ok := elems[0].(*expr.Literal)
+	term, ok := elems[0].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
-	right, ok := elems[2].(expr.Expression)
+	value, ok := elems[2].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
 	elems = []any{
 		expr.Eq(
-			left.String(),
-			right,
+			term,
+			value,
 		),
 	}
 	// we consumed one terminal, the =
@@ -81,11 +81,11 @@ func and(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	}
 
 	// make sure the left and right clauses are expressions
-	left, ok := elems[0].(expr.Expression)
+	left, ok := elems[0].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
-	right, ok := elems[2].(expr.Expression)
+	right, ok := elems[2].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
@@ -114,11 +114,11 @@ func or(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	}
 
 	// make sure the left and right clauses are expressions
-	left, ok := elems[0].(expr.Expression)
+	left, ok := elems[0].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
-	right, ok := elems[2].(expr.Expression)
+	right, ok := elems[2].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
@@ -146,7 +146,7 @@ func not(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	}
 
 	// make sure the thing to be negated is already a parsed
-	negated, ok := elems[len(elems)-1].(expr.Expression)
+	negated, ok := elems[len(elems)-1].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
@@ -187,7 +187,7 @@ func must(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	rest, ok := elems[1].(expr.Expression)
+	rest, ok := elems[1].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
@@ -206,7 +206,7 @@ func mustNot(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	rest, ok := elems[1].(expr.Expression)
+	rest, ok := elems[1].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
@@ -222,7 +222,7 @@ func fuzzy(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 			return elems, nonTerminals, false
 		}
 
-		rest, ok := elems[0].(expr.Expression)
+		rest, ok := elems[0].(*expr.Expression)
 		if !ok {
 			return elems, nonTerminals, false
 		}
@@ -240,23 +240,18 @@ func fuzzy(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	rest, ok := elems[0].(expr.Expression)
+	rest, ok := elems[0].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
-	power, ok := elems[2].(*expr.Literal)
+	distance, ok := elems[2].(int)
 	if !ok {
-		return elems, nonTerminals, false
-	}
-
-	ipower, err := strconv.Atoi(power.String())
-	if err != nil {
 		return elems, nonTerminals, false
 	}
 
 	// we consumed one terminal, the ~
-	return []any{expr.FUZZY(rest, ipower)}, drop(nonTerminals, 1), true
+	return []any{expr.FUZZY(rest, distance)}, drop(nonTerminals, 1), true
 }
 
 func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
@@ -267,7 +262,7 @@ func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 			return elems, nonTerminals, false
 		}
 
-		rest, ok := elems[0].(expr.Expression)
+		rest, ok := elems[0].(*expr.Expression)
 		if !ok {
 			return elems, nonTerminals, false
 		}
@@ -285,23 +280,18 @@ func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	rest, ok := elems[0].(expr.Expression)
+	rest, ok := elems[0].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
-	power, ok := elems[2].(*expr.Literal)
+	power, ok := elems[2].(float64)
 	if !ok {
-		return elems, nonTerminals, false
-	}
-
-	fpower, err := toPositiveFloat(power.String())
-	if err != nil {
 		return elems, nonTerminals, false
 	}
 
 	// we consumed one terminal, the ^
-	return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
+	return []any{expr.BOOST(rest, power)}, drop(nonTerminals, 1), true
 }
 
 func rangeop(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
@@ -325,12 +315,12 @@ func rangeop(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	start, ok := elems[1].(expr.Expression)
+	start, ok := elems[1].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
-	end, ok := elems[3].(expr.Expression)
+	end, ok := elems[3].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}

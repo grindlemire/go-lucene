@@ -1,9 +1,7 @@
 package expr
 
 import (
-	"errors"
 	"fmt"
-	"reflect"
 )
 
 // Lucene Grammar:
@@ -22,211 +20,136 @@ import (
 
 // Expression is an interface over all the different types of expressions
 // that we can parse out of lucene
-type Expression interface {
-	String() string
+type Expression struct {
+	Left  any  `json:"left"`
+	Expr  Expr `json:"op"`
+	Right any  `json:"right"`
+
+	// these are operator specific states we have to track
+	rangeInclusive bool    `json:"-"`
+	boostPower     float64 `json:"-"`
+	fuzzyDistance  int     `json:"-"`
 }
 
-// Expr is a struct over an expression so we can unmarshal into it
-type Expr struct {
-	Expression
+func (e Expression) String() string {
+	return renderers[e.Expr](&e)
 }
 
-// Eq creates a new equals expression
-func Eq(a string, b Expression) Expression {
-	return &Equals{
-		Term:  a,
-		Value: b,
+// expr creates a general new expression
+func expr(left any, op Expr, right ...any) *Expression {
+	e := &Expression{
+		Left: left,
+		Expr: op,
 	}
+	// if right is present and non nil then add it to the expression
+	if len(right) == 1 && right[0] != nil {
+		e.Right = right[0]
+	}
+
+	// support passing a range with inclusivity
+	if op == Range && len(right) == 2 && isBool(right[1]) {
+		e.rangeInclusive = right[1].(bool)
+	}
+
+	// support changing boost power
+	if op == Boost {
+		e.boostPower = 1.0
+		if len(right) == 1 && isFloat(right[0]) {
+			e.boostPower = right[0].(float64)
+		}
+	}
+
+	// support changing fuzzy distance
+	if op == Fuzzy {
+		e.fuzzyDistance = 1
+		if len(right) == 1 && isInt(right[0]) {
+			e.fuzzyDistance = right[0].(int)
+		}
+	}
+	return e
+}
+
+// Lit represents a literal expression
+func Lit(in any) *Expression {
+	return expr(in, Literal)
+}
+
+// WILD represents a literal wildcard expression
+func WILD(in any) *Expression {
+	return expr(in, Wild)
+}
+
+// REGEXP represents a literal regular expression
+func REGEXP(in any) *Expression {
+	return expr(in, Regexp)
+}
+
+// Eq creates a new EQUALS expression
+func Eq(a any, b any) *Expression {
+	return expr(a, Equals, b)
 }
 
 // AND creates an AND expression
-func AND(a, b Expression) Expression {
-	return &And{
-		Left:  a,
-		Right: b,
-	}
+func AND(a, b any) *Expression {
+	return expr(a, And, b)
 }
 
 // OR creates a new OR expression
-func OR(a, b Expression) Expression {
-	return &Or{
-		Left:  a,
-		Right: b,
-	}
-}
-
-// Lit creates a new literal
-func Lit(val any) Expression {
-	return &Literal{
-		Value: val,
-	}
-}
-
-// Wild creates a new literal that contains wildcards
-func Wild(val any) Expression {
-	return &WildLiteral{
-		Literal: Literal{
-			Value: val,
-		},
-	}
+func OR(a, b any) *Expression {
+	return expr(a, Or, b)
 }
 
 // Rang creates a new range expression
-func Rang(min, max Expression, inclusive bool) Expression {
-	return &Range{
-		Inclusive: inclusive,
-		Min:       min,
-		Max:       max,
-	}
+func Rang(min, max any, inclusive bool) *Expression {
+	return expr(min, Range, max, inclusive)
 }
 
 // NOT wraps an expression in a Not
-func NOT(e Expression) Expression {
-	return &Not{
-		Sub: e,
-	}
+func NOT(e any) *Expression {
+	return expr(e, Not)
 }
 
 // MUST wraps an expression in a Must
-func MUST(e Expression) Expression {
-	return &Must{
-		Sub: e,
-	}
+func MUST(e any) *Expression {
+	return expr(e, Must)
 }
 
 // MUSTNOT wraps an expression in a MustNot
-func MUSTNOT(e Expression) Expression {
-	return &MustNot{
-		Sub: e,
-	}
+func MUSTNOT(e any) *Expression {
+	return expr(e, MustNot)
 }
 
 // BOOST wraps an expression in a boost
-func BOOST(e Expression, power float32) Expression {
-	return &Boost{
-		Sub:   e,
-		Power: power,
-	}
+func BOOST(e any, power float64) *Expression {
+	return expr(e, Boost, power)
 }
 
 // FUZZY wraps an expression in a fuzzy
-func FUZZY(e Expression, distance int) Expression {
-	return &Fuzzy{
-		Sub:      e,
-		Distance: distance,
-	}
-}
-
-// REGEXP creates a new regular expression literal
-func REGEXP(val any) Expression {
-	return &RegexpLiteral{
-		Literal: Literal{Value: val},
-	}
+func FUZZY(e any, distance int) *Expression {
+	return expr(e, Fuzzy, distance)
 }
 
 // Validate validates the expression is correctly structured.
-func Validate(ex Expression) (err error) {
-	switch e := ex.(type) {
-	case *Equals:
-		if e.Term == "" || e.Value == nil {
-			return errors.New("EQUALS operator must have both sides of the expression")
-		}
-		return Validate(e.Value)
-	case *And:
-		if e.Left == nil || e.Right == nil {
-			return errors.New("AND clause must have two sides")
-		}
-		err = Validate(e.Left)
-		if err != nil {
-			return err
-		}
-		err = Validate(e.Right)
-		if err != nil {
-			return err
-		}
-	case *Or:
-		if e.Left == nil || e.Right == nil {
-			return errors.New("OR clause must have two sides")
-		}
-		err = Validate(e.Left)
-		if err != nil {
-			return err
-		}
-		err = Validate(e.Right)
-		if err != nil {
-			return err
-		}
-	case *Not:
-		if e.Sub == nil {
-			return errors.New("NOT expression must have a sub expression to negate")
-		}
-		return Validate(e.Sub)
-	case *Literal:
-		// do nothing
-	case *WildLiteral:
-		// do nothing
-	case *RegexpLiteral:
-		// do nothing
-	case *Range:
-		if e.Min == nil || e.Max == nil {
-			return errors.New("range clause must have a min and a max")
-		}
-		err = Validate(e.Min)
-		if err != nil {
-			return err
-		}
-		err = Validate(e.Max)
-		if err != nil {
-			return err
-		}
-
-		switch v := e.Min.(type) {
-		case *Literal, *WildLiteral:
-			// do nothing
-		default:
-			return fmt.Errorf("range clause must have a literal or wildcard min not %s", reflect.TypeOf(v))
-		}
-
-		switch v := e.Max.(type) {
-		case *Literal, *WildLiteral:
-			// do nothing
-		default:
-			return fmt.Errorf("range clause must have a literal or wildcard max not %s", reflect.TypeOf(v))
-		}
-
-	case *Must:
-		if e.Sub == nil {
-			return errors.New("MUST expression must have a sub expression")
-		}
-		_, isMustNot := e.Sub.(*MustNot)
-		_, isMust := e.Sub.(*Must)
-		if isMust || isMustNot {
-			return errors.New("MUST cannot be repeated with itself or MUST NOT")
-		}
-		return Validate(e.Sub)
-	case *MustNot:
-		if e.Sub == nil {
-			return errors.New("MUST NOT expression must have a sub expression")
-		}
-		_, isMustNot := e.Sub.(*MustNot)
-		_, isMust := e.Sub.(*Must)
-		if isMust || isMustNot {
-			return errors.New("MUST NOT cannot be repeated with itself or MUST")
-		}
-		return Validate(e.Sub)
-	case *Boost:
-		if e.Sub == nil {
-			return errors.New("BOOST expression must have a subexpression")
-		}
-		return Validate(e.Sub)
-	case *Fuzzy:
-		if e.Sub == nil {
-			return errors.New("FUZZY expression must have a subexpression")
-		}
-		return Validate(e.Sub)
-	default:
-		return fmt.Errorf("unable to validate Expression type: %s", reflect.TypeOf(e))
+func Validate(in any) (err error) {
+	e, isExpr := in.(*Expression)
+	if !isExpr {
+		// if we don't have an expression we must be in a leaf node
+		return nil
 	}
 
-	return nil
+	fn, found := validators[e.Expr]
+	if !found {
+		return fmt.Errorf("unsupported operator %v", e.Expr)
+	}
+	err = fn(e)
+	if err != nil {
+		return err
+	}
+
+	err = Validate(e.Left)
+	if err != nil {
+		return err
+	}
+
+	return Validate(e.Right)
 }

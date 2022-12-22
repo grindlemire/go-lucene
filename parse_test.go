@@ -14,7 +14,7 @@ const errTemplate = "%s:\n    wanted %v\n    got    %v"
 func TestParseLucene(t *testing.T) {
 	type tc struct {
 		input    string
-		expected expr.Expression
+		expected *expr.Expression
 	}
 
 	tcs := map[string]tc{
@@ -32,11 +32,11 @@ func TestParseLucene(t *testing.T) {
 		},
 		"basic_wild_expr.equal_with_*": {
 			input:    "a:b*",
-			expected: expr.Eq("a", expr.Wild("b*")),
+			expected: expr.Eq("a", expr.WILD("b*")),
 		},
 		"basic_wild_expr.equal_with_?": {
 			input:    "a:b?z",
-			expected: expr.Eq("a", expr.Wild("b?z")),
+			expected: expr.Eq("a", expr.WILD("b?z")),
 		},
 		"regexp": {
 			input:    "a:/b [c]/",
@@ -96,7 +96,7 @@ func TestParseLucene(t *testing.T) {
 			input: `a:[* TO 200]`,
 			expected: expr.Eq(
 				"a",
-				expr.Rang(expr.Wild("*"), expr.Lit(200), true),
+				expr.Rang(expr.WILD("*"), expr.Lit(200), true),
 			),
 		},
 		"range_operator_exclusive": {
@@ -107,7 +107,7 @@ func TestParseLucene(t *testing.T) {
 			input: `a:{2 TO *}`,
 			expected: expr.Eq(
 				"a",
-				expr.Rang(expr.Lit(2), expr.Wild("*"), false),
+				expr.Rang(expr.Lit(2), expr.WILD("*"), false),
 			),
 		},
 		"or_with_nesting": {
@@ -490,17 +490,17 @@ func FuzzParse(f *testing.F) {
 func TestBufParse(t *testing.T) {
 	type tc struct {
 		input string
-		want  expr.Expression
+		want  *expr.Expression
 	}
 
 	tcs := map[string]tc{
 		"basic_inclusive_range": {
 			input: "a:[* TO 5]",
-			want:  expr.Eq("a", expr.Rang(expr.Wild("*"), expr.Lit(5), true)),
+			want:  expr.Eq("a", expr.Rang(expr.WILD("*"), expr.Lit(5), true)),
 		},
 		"basic_exclusive_range": {
 			input: "a:{* TO 5}",
-			want:  expr.Eq("a", expr.Rang(expr.Wild("*"), expr.Lit(5), false)),
+			want:  expr.Eq("a", expr.Rang(expr.WILD("*"), expr.Lit(5), false)),
 		},
 		"range_over_strings": {
 			input: "a:{foo TO bar}",
@@ -579,7 +579,7 @@ func TestBufParse(t *testing.T) {
 			want: expr.OR(
 				expr.OR(
 					expr.Lit("a"),
-					expr.AND(expr.Lit("b"), expr.Eq("c", expr.Rang(expr.Wild("*"), expr.Lit(-1), true))),
+					expr.AND(expr.Lit("b"), expr.Eq("c", expr.Rang(expr.WILD("*"), expr.Lit(-1), true))),
 				),
 				expr.AND(
 					expr.Lit("d"),
@@ -636,14 +636,14 @@ func TestBufParse(t *testing.T) {
 			input: "a:b*",
 			want: expr.Eq(
 				"a",
-				expr.Wild("b*"),
+				expr.WILD("b*"),
 			),
 		},
 		"basic_wild_expr.equal_with_?": {
 			input: "a:b?z",
 			want: expr.Eq(
 				"a",
-				expr.Wild("b?z"),
+				expr.WILD("b?z"),
 			),
 		},
 		"regexp": {

@@ -30,7 +30,7 @@ func main() {
 
 	fmt.Printf("\n%s\n", s)
 
-	var e1 expr.Equals
+	var e1 expr.Expression
 	err = json.Unmarshal(s, &e1)
 	if err != nil {
 		fmt.Printf("Error unmarshalling to json: %s\n", err)
