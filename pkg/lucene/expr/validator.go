@@ -32,14 +32,9 @@ func validateEquals(e *Expression) (err error) {
 		return errors.New("EQUALS validation error: must have equals operator")
 	}
 
-	// _, ok := e.Left.(*Expression)
-	// if !ok {
-	// 	return fmt.Errorf("EQUALS validation: left value must be an expression not %s", reflect.TypeOf(e.Left))
-	// }
-
-	// if !isLiteral(e.Right) {
-	// 	return fmt.Errorf("EQUALS validation: right value must be a literal not %s", reflect.TypeOf(e.Left))
-	// }
+	if !isLiteralExpr(e.Left) {
+		return errors.New("EQUALS validation: left value must be a literal expression")
+	}
 
 	return nil
 }
