@@ -102,13 +102,19 @@ func MUSTNOT(e any) *Expression {
 }
 
 // BOOST wraps an expression in a boost
-func BOOST(e any, power float64) *Expression {
-	return expr(e, Boost, power)
+func BOOST(e any, power ...float64) *Expression {
+	if len(power) > 0 {
+		return expr(e, Boost, power[0])
+	}
+	return expr(e, Boost)
 }
 
 // FUZZY wraps an expression in a fuzzy
-func FUZZY(e any, distance int) *Expression {
-	return expr(e, Fuzzy, distance)
+func FUZZY(e any, distance ...int) *Expression {
+	if len(distance) > 0 {
+		return expr(e, Fuzzy, distance[0])
+	}
+	return expr(e, Fuzzy)
 }
 
 // Validate validates the expression is correctly structured.
@@ -138,6 +144,10 @@ func Validate(in any) (err error) {
 
 // expr creates a general new expression
 func expr(left any, op Operator, right ...any) *Expression {
+	if isLiteral(left) && op != Literal && op != Wild && op != Regexp {
+		left = literalToExpr(left)
+	}
+
 	e := ptr(empty())
 	e.Left = left
 	e.Op = op
@@ -167,6 +177,10 @@ func expr(left any, op Operator, right ...any) *Expression {
 
 	// if right is present and non nil then add it to the expression
 	if len(right) >= 1 && right[0] != nil {
+		if isLiteral(right[0]) {
+			right[0] = literalToExpr(right[0])
+		}
+
 		e.Right = right[0]
 	}
 
@@ -313,21 +327,30 @@ func unmarshalExpression(in json.RawMessage) (e *Expression, err error) {
 		return e, err
 	}
 
+	return literalToExpr(s), nil
+}
+
+func literalToExpr(in any) *Expression {
+	s, isStr := in.(string)
+	if !isStr {
+		return Lit(in)
+	}
+
 	// if it has leading and trailing /'s then it probably is a regex.
 	// Note this needs to be checked before the wildcard check as a regex
 	// can contain * and ?.
 	// TODO this should probably check for escaping
 	if s[0] == '/' && s[len(s)-1] == '/' {
-		return REGEXP(s), nil
+		return REGEXP(s)
 	}
 
 	// if it contains a * or ? then it probably is a wildcard expression
 	// TODO this should probably check for escaping
 	if strings.ContainsAny(s, "*?") {
-		return WILD(s), nil
+		return WILD(s)
 	}
 
-	return Lit(s), nil
+	return Lit(s)
 }
 
 func isJSONObject(in json.RawMessage) bool {

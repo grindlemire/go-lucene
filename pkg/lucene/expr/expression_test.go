@@ -24,6 +24,10 @@ func TestExprJSON(t *testing.T) {
 			input: `"a"`,
 			want:  Lit("a"),
 		},
+		"flat_wildcard": {
+			input: `"a*"`,
+			want:  WILD("a*"),
+		},
 		"flat_equals": {
 			input: `{"left": "a", "operator": "EQUALS", "right": "b"}`,
 			want:  Eq(Lit("a"), Lit("b")),
@@ -59,6 +63,157 @@ func TestExprJSON(t *testing.T) {
 				"operator": "MUST"
 			}`,
 			want: MUST(Lit("a")),
+		},
+		"flat_must_not": {
+			input: `{
+				"left": "a",
+				"operator": "MUST_NOT"
+			}`,
+			want: MUSTNOT(Lit("a")),
+		},
+		"flat_not": {
+			input: `{
+				"left": "a",
+				"operator": "NOT"
+			}`,
+			want: NOT(Lit("a")),
+		},
+		"flat_boost": {
+			input: `{
+				"left": "a",
+				"operator": "BOOST"
+			}`,
+			want: BOOST(Lit("a")),
+		},
+		"flat_boost_explicit_power": {
+			input: `{
+				"left": "a",
+				"operator": "BOOST",
+				"power": 0.8
+			}`,
+			want: BOOST(Lit("a"), 0.8),
+		},
+		"flat_fuzzy": {
+			input: `{
+				"left": "a",
+				"operator": "FUZZY"
+			}`,
+			want: FUZZY(Lit("a")),
+		},
+		"flat_fuzzy_explicit_power": {
+			input: `{
+				"left": "a",
+				"operator": "FUZZY",
+				"distance": 2
+			}`,
+			want: FUZZY("a", 2),
+		},
+		"basic_and": {
+			input: `{
+				"left": {
+					"left": "a",
+					"operator": "EQUALS",
+					"right": "b"
+				},
+				"operator": "AND",
+				"right": {
+					"left": "c",
+					"operator": "EQUALS",
+					"right": "d"
+				}
+			}`,
+			want: AND(
+				Eq("a", "b"),
+				Eq("c", "d"),
+			),
+		},
+		"basic_or": {
+			input: `{
+				"left": {
+					"left": "a",
+					"operator": "EQUALS",
+					"right": "b"
+				},
+				"operator": "OR",
+				"right": {
+					"left": "c",
+					"operator": "EQUALS",
+					"right": "d"
+				}
+			}`,
+			want: OR(
+				Eq("a", "b"),
+				Eq("c", "d"),
+			),
+		},
+		"every_operator_combined": {
+			input: `{
+				"left": {
+					"left": {
+						"left": "a",
+						"operator": "EQUALS",
+						"right": {
+							"left": 1,
+							"operator": "RANGE",
+							"right": "*"
+						}
+					},
+					"operator": "AND",
+					"right": {
+						"left": {
+							"left": {
+								"left": "b",
+								"operator": "EQUALS",
+								"right": "/foo?ar.*/"
+							},
+							"operator": "NOT"
+						},
+						"operator": "BOOST"
+					}
+				},
+				"operator": "OR",
+				"right": {
+					"left": {
+						"left": {
+							"left": "c",
+							"operator": "EQUALS",
+							"right": {
+								"left": "*",
+								"operator": "RANGE",
+								"right": "foo",
+								"exclusive": true
+							}
+						},
+						"operator": "MUST"
+					},
+					"operator": "OR",
+					"right": {
+						"left": {
+							"left": {
+								"left": "d",
+								"operator": "EQUALS",
+								"right": {
+									"left": "bar",
+									"operator": "FUZZY",
+									"distance": 3
+								}
+							},
+							"operator": "NOT"
+						},
+						"operator": "MUST_NOT"
+					}
+				}
+			}`,
+			want: OR(
+				AND(
+					Eq("a", Rang(1, "*", true)),
+					BOOST(NOT(Eq("b", REGEXP("/foo?ar.*/")))),
+				),
+				OR(
+					MUST(Eq("c", Rang("*", "foo", false))),
+					MUSTNOT(NOT(Eq("d", FUZZY("bar", 3)))),
+				),
+			),
 		},
 	}
 
