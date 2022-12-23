@@ -2,10 +2,9 @@ package expr
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -251,10 +250,9 @@ func TestExprJSON(t *testing.T) {
 				t.Fatalf("expected no error during unmarshal but got [%s]", err)
 			}
 
-			// if !reflect.DeepEqual(tc.want, got) {
-			// 	t.Fatalf(errTemplate, "parsed expression doesn't match", tc.want, got)
-			// }
-			require.Equal(t, tc.want, got)
+			if !reflect.DeepEqual(tc.want, got) {
+				t.Fatalf(errTemplate, "parsed expression doesn't match", tc.want, got)
+			}
 
 			gotSerialized, err := json.Marshal(got)
 			if err != nil {

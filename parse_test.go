@@ -2,6 +2,7 @@ package lucene
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -23,217 +24,207 @@ func TestParseLucene(t *testing.T) {
 		},
 		"basic_equal": {
 			input: "a:b",
-			want:  expr.Eq(expr.Lit("a"), expr.Lit("b")),
+			want:  expr.Eq("a", "b"),
 		},
 		"basic_equal_with_number": {
 			input: "a:5",
-			want:  expr.Eq(expr.Lit("a"), expr.Lit(5)),
+			want:  expr.Eq("a", 5),
 		},
 		"basic_wild_equal_with_*": {
 			input: "a:b*",
-			want:  expr.Eq(expr.Lit("a"), expr.WILD("b*")),
+			want:  expr.Eq("a", "b*"),
 		},
 		"basic_wild_equal_with_?": {
 			input: "a:b?z",
-			want:  expr.Eq(expr.Lit("a"), expr.WILD("b?z")),
+			want:  expr.Eq("a", expr.WILD("b?z")),
 		},
 		"basic_inclusive_range": {
 			input: "a:[* TO 5]",
-			want:  expr.Eq(expr.Lit("a"), expr.Rang(expr.WILD("*"), expr.Lit(5), true)),
+			want:  expr.Eq("a", expr.Rang(expr.WILD("*"), 5, true)),
 		},
 		"basic_exclusive_range": {
 			input: "a:{* TO 5}",
-			want:  expr.Eq(expr.Lit("a"), expr.Rang(expr.WILD("*"), expr.Lit(5), false)),
+			want:  expr.Eq("a", expr.Rang(expr.WILD("*"), 5, false)),
 		},
 		"range_over_strings": {
 			input: "a:{foo TO bar}",
-			want:  expr.Eq(expr.Lit("a"), expr.Rang(expr.Lit("foo"), expr.Lit("bar"), false)),
+			want:  expr.Eq("a", expr.Rang("foo", "bar", false)),
 		},
 		"basic_fuzzy": {
 			input: "b AND a~",
-			want:  expr.AND(expr.Lit("b"), expr.FUZZY(expr.Lit("a"), 1)),
+			want:  expr.AND("b", expr.FUZZY("a", 1)),
 		},
 		"fuzzy_power": {
 			input: "b AND a~10",
-			want:  expr.AND(expr.Lit("b"), expr.FUZZY(expr.Lit("a"), 10)),
+			want:  expr.AND("b", expr.FUZZY("a", 10)),
 		},
 		"basic_boost": {
 			input: "b AND a^",
-			want:  expr.AND(expr.Lit("b"), expr.BOOST(expr.Lit("a"), 1.0)),
+			want:  expr.AND("b", expr.BOOST("a", 1.0)),
 		},
 		"boost_power": {
 			input: "b AND a^10",
-			want:  expr.AND(expr.Lit("b"), expr.BOOST(expr.Lit("a"), 10.0)),
+			want:  expr.AND("b", expr.BOOST("a", 10.0)),
 		},
 		"regexp": {
 			input: "a:/b [c]/",
-			want:  expr.Eq(expr.Lit("a"), expr.REGEXP("/b [c]/")),
+			want:  expr.Eq("a", expr.REGEXP("/b [c]/")),
 		},
 		"regexp_with_keywords": {
 			input: `a:/b "[c]/`,
-			want:  expr.Eq(expr.Lit("a"), expr.REGEXP(`/b "[c]/`)),
-		},
-		"default_to_AND_with_literals": {
-			input: "a b",
-			want: expr.AND(
-				expr.Lit("a"),
-				expr.Lit("b"),
-			),
+			want:  expr.Eq("a", expr.REGEXP(`/b "[c]/`)),
 		},
 		"basic_default_AND": {
 			input: "a b",
-			want:  expr.AND(expr.Lit("a"), expr.Lit("b")),
+			want:  expr.AND("a", "b"),
 		},
 		"default_to_AND_with_subexpressions": {
 			input: "a:b c:d",
 			want: expr.AND(
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
-				expr.Eq(expr.Lit("c"), expr.Lit("d")),
+				expr.Eq("a", "b"),
+				expr.Eq("c", "d"),
 			),
 		},
 		"basic_and": {
 			input: "a AND b",
-			want: expr.AND(
-				expr.Lit("a"),
-				expr.Lit("b"),
-			),
+			want:  expr.AND("a", "b"),
 		},
 		"and_with_nesting": {
 			input: "a:foo AND b:bar",
 			want: expr.AND(
-				expr.Eq(expr.Lit("a"), expr.Lit("foo")),
-				expr.Eq(expr.Lit("b"), expr.Lit("bar")),
+				expr.Eq("a", "foo"),
+				expr.Eq("b", "bar"),
 			),
 		},
 		"basic_or": {
 			input: "a OR b",
 			want: expr.OR(
-				expr.Lit("a"),
-				expr.Lit("b"),
+				"a",
+				"b",
 			),
 		},
 		"range_operator_inclusive": {
 			input: "a:[1 TO 5]",
 			want: expr.Eq(
-				expr.Lit("a"),
-				expr.Rang(expr.Lit(1), expr.Lit(5), true),
+				"a",
+				expr.Rang(1, 5, true),
 			),
 		},
 		"range_operator_inclusive_unbound": {
 			input: `a:[* TO 200]`,
 			want: expr.Eq(
-				expr.Lit("a"),
+				"a",
 				expr.Rang(expr.WILD("*"), expr.Lit(200), true),
 			),
 		},
 		"range_operator_exclusive": {
 			input: `a:{"ab" TO "az"}`,
-			want:  expr.Eq(expr.Lit("a"), expr.Rang(expr.Lit("ab"), expr.Lit("az"), false)),
+			want:  expr.Eq("a", expr.Rang(expr.Lit("ab"), expr.Lit("az"), false)),
 		},
 		"range_operator_exclusive_unbound": {
 			input: `a:{2 TO *}`,
 			want: expr.Eq(
-				expr.Lit("a"),
+				"a",
 				expr.Rang(expr.Lit(2), expr.WILD("*"), false),
 			),
 		},
 		"or_with_nesting": {
 			input: "a:foo OR b:bar",
 			want: expr.OR(
-				expr.Eq(expr.Lit("a"), expr.Lit("foo")),
-				expr.Eq(expr.Lit("b"), expr.Lit("bar")),
+				expr.Eq("a", "foo"),
+				expr.Eq("b", "bar"),
 			),
 		},
 		"basic_not": {
 			input: "NOT b",
-			want:  expr.NOT(expr.Lit("b")),
+			want:  expr.NOT("b"),
 		},
 		"nested_not": {
 			input: "a:foo OR NOT b:bar",
 			want: expr.OR(
-				expr.Eq(expr.Lit("a"), expr.Lit("foo")),
-				expr.NOT(expr.Eq(expr.Lit("b"), expr.Lit("bar"))),
+				expr.Eq("a", "foo"),
+				expr.NOT(expr.Eq("b", "bar")),
 			),
 		},
 		"term_grouping": {
 			input: "(a:foo OR b:bar) AND c:baz",
 			want: expr.AND(
 				expr.OR(
-					expr.Eq(expr.Lit("a"), expr.Lit("foo")),
-					expr.Eq(expr.Lit("b"), expr.Lit("bar")),
+					expr.Eq("a", "foo"),
+					expr.Eq("b", "bar"),
 				),
-				expr.Eq(expr.Lit("c"), expr.Lit("baz")),
+				expr.Eq("c", "baz"),
 			),
 		},
 		"value_grouping": {
 			input: "a:(foo OR baz OR bar)",
 			want: expr.Eq(
-				expr.Lit("a"),
+				"a",
 				expr.OR(
 					expr.OR(
-						expr.Lit("foo"),
-						expr.Lit("baz"),
+						"foo",
+						"baz",
 					),
-					expr.Lit("bar"),
+					"bar",
 				),
 			),
 		},
 		"basic_must": {
 			input: "+a:b",
 			want: expr.MUST(
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
+				expr.Eq("a", "b"),
 			),
 		},
 		"basic_must_not": {
 			input: "-a:b",
 			want: expr.MUSTNOT(
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
+				expr.Eq("a", "b"),
 			),
 		},
 		"basic_nested_must_not": {
 			input: "d:e AND (-a:b AND +f:e)",
 			want: expr.AND(
-				expr.Eq(expr.Lit("d"), expr.Lit("e")),
+				expr.Eq("d", "e"),
 				expr.AND(
-					expr.MUSTNOT(expr.Eq(expr.Lit("a"), expr.Lit("b"))),
-					expr.MUST(expr.Eq(expr.Lit("f"), expr.Lit("e"))),
+					expr.MUSTNOT(expr.Eq("a", "b")),
+					expr.MUST(expr.Eq("f", "e")),
 				),
 			),
 		},
 		"basic_escaping": {
 			input: `a:\(1\+1\)\:2`,
-			want:  expr.Eq(expr.Lit("a"), expr.Lit(`\(1\+1\)\:2`)),
+			want:  expr.Eq("a", expr.Lit(`\(1\+1\)\:2`)),
 		},
 		"boost_key_value": {
 			input: "a:b^2 AND foo",
 			want: expr.AND(
-				expr.BOOST(expr.Eq(expr.Lit("a"), expr.Lit("b")), 2),
-				expr.Lit("foo"),
+				expr.BOOST(expr.Eq("a", "b"), 2),
+				"foo",
 			),
 		},
 		"boost_literal": {
 			input: "foo^4",
-			want:  expr.BOOST(expr.Lit("foo"), 4),
+			want:  expr.BOOST("foo", 4),
 		},
 		"boost_literal_in_compound": {
 			input: "a:b AND foo^4",
 			want: expr.AND(
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
-				expr.BOOST(expr.Lit("foo"), 4),
+				expr.Eq("a", "b"),
+				expr.BOOST("foo", 4),
 			),
 		},
 		"boost_literal_leading": {
 			input: "foo^4 AND a:b",
 			want: expr.AND(
-				expr.BOOST(expr.Lit("foo"), 4),
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
+				expr.BOOST("foo", 4),
+				expr.Eq("a", "b"),
 			),
 		},
 		"boost_quoted_literal": {
 			input: `"foo bar"^4 AND a:b`,
 			want: expr.AND(
 				expr.BOOST(expr.Lit("foo bar"), 4),
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
+				expr.Eq("a", "b"),
 			),
 		},
 		"boost_sub_expression": {
@@ -241,13 +232,13 @@ func TestParseLucene(t *testing.T) {
 			want: expr.AND(
 				expr.BOOST(
 					expr.OR(
-						expr.Eq(expr.Lit("title"), expr.Lit("foo")),
-						expr.Eq(expr.Lit("title"), expr.Lit("bar")),
+						expr.Eq("title", "foo"),
+						expr.Eq("title", "bar"),
 					),
 					1.5),
 				expr.OR(
-					expr.Eq(expr.Lit("body"), expr.Lit("foo")),
-					expr.Eq(expr.Lit("body"), expr.Lit("bar")),
+					expr.Eq("body", "foo"),
+					expr.Eq("body", "bar"),
 				),
 			),
 		},
@@ -255,12 +246,12 @@ func TestParseLucene(t *testing.T) {
 			input: "((title:foo)^1.2 OR title:bar) AND (body:foo OR body:bar)",
 			want: expr.AND(
 				expr.OR(
-					expr.BOOST(expr.Eq(expr.Lit("title"), expr.Lit("foo")), 1.2),
-					expr.Eq(expr.Lit("title"), expr.Lit("bar")),
+					expr.BOOST(expr.Eq("title", "foo"), 1.2),
+					expr.Eq("title", "bar"),
 				),
 				expr.OR(
-					expr.Eq(expr.Lit("body"), expr.Lit("foo")),
-					expr.Eq(expr.Lit("body"), expr.Lit("bar")),
+					expr.Eq("body", "foo"),
+					expr.Eq("body", "bar"),
 				),
 			),
 		},
@@ -269,73 +260,73 @@ func TestParseLucene(t *testing.T) {
 			want: expr.OR(
 				expr.AND(
 					expr.OR(
-						expr.Eq(expr.Lit("title"), expr.Lit("foo")),
-						expr.Eq(expr.Lit("title"), expr.Lit("bar")),
+						expr.Eq("title", "foo"),
+						expr.Eq("title", "bar"),
 					),
 
 					expr.OR(
-						expr.Eq(expr.Lit("body"), expr.Lit("foo")),
-						expr.Eq(expr.Lit("body"), expr.Lit("bar")),
+						expr.Eq("body", "foo"),
+						expr.Eq("body", "bar"),
 					),
 				),
-				expr.Eq(expr.Lit("k"), expr.Lit("v")),
+				expr.Eq("k", "v"),
 			),
 		},
 		"fuzzy_key_value": {
 			input: "a:b~2 AND foo",
 			want: expr.AND(
-				expr.FUZZY(expr.Eq(expr.Lit("a"), expr.Lit("b")), 2),
-				expr.Lit("foo"),
+				expr.FUZZY(expr.Eq("a", "b"), 2),
+				"foo",
 			),
 		},
 		"fuzzy_key_value_default": {
 			input: "a:b~ AND foo",
 			want: expr.AND(
-				expr.FUZZY(expr.Eq(expr.Lit("a"), expr.Lit("b")), 1),
-				expr.Lit("foo"),
+				expr.FUZZY(expr.Eq("a", "b"), 1),
+				"foo",
 			),
 		},
 		"fuzzy_literal": {
 			input: "foo~4",
-			want:  expr.FUZZY(expr.Lit("foo"), 4),
+			want:  expr.FUZZY("foo", 4),
 		},
 		"fuzzy_literal_default": {
 			input: "foo~",
-			want:  expr.FUZZY(expr.Lit("foo"), 1),
+			want:  expr.FUZZY("foo", 1),
 		},
 		"fuzzy_literal_in_compound": {
 			input: "a:b AND foo~4",
 			want: expr.AND(
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
-				expr.FUZZY(expr.Lit("foo"), 4),
+				expr.Eq("a", "b"),
+				expr.FUZZY("foo", 4),
 			),
 		},
 		"fuzzy_literal_in_implicit_compound": {
 			input: "a:b foo~4",
 			want: expr.AND(
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
-				expr.FUZZY(expr.Lit("foo"), 4),
+				expr.Eq("a", "b"),
+				expr.FUZZY("foo", 4),
 			),
 		},
 		"fuzzy_literal_leading": {
 			input: "foo~4 AND a:b",
 			want: expr.AND(
-				expr.FUZZY(expr.Lit("foo"), 4),
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
+				expr.FUZZY("foo", 4),
+				expr.Eq("a", "b"),
 			),
 		},
 		"fuzzy_literal_leading_in_implicit_compound": {
 			input: "foo~4 AND a:b",
 			want: expr.AND(
-				expr.FUZZY(expr.Lit("foo"), 4),
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
+				expr.FUZZY("foo", 4),
+				expr.Eq("a", "b"),
 			),
 		},
 		"fuzzy_quoted_literal": {
 			input: `"foo bar"~4 AND a:b`,
 			want: expr.AND(
 				expr.FUZZY(expr.Lit("foo bar"), 4),
-				expr.Eq(expr.Lit("a"), expr.Lit("b")),
+				expr.Eq("a", "b"),
 			),
 		},
 		"fuzzy_sub_expression": {
@@ -343,13 +334,13 @@ func TestParseLucene(t *testing.T) {
 			want: expr.AND(
 				expr.FUZZY(
 					expr.OR(
-						expr.Eq(expr.Lit("title"), expr.Lit("foo")),
-						expr.Eq(expr.Lit("title"), expr.Lit("bar")),
+						expr.Eq("title", "foo"),
+						expr.Eq("title", "bar"),
 					),
 					2),
 				expr.OR(
-					expr.Eq(expr.Lit("body"), expr.Lit("foo")),
-					expr.Eq(expr.Lit("body"), expr.Lit("bar")),
+					expr.Eq("body", "foo"),
+					expr.Eq("body", "bar"),
 				),
 			),
 		},
@@ -357,13 +348,13 @@ func TestParseLucene(t *testing.T) {
 			input: "((title:foo)~ OR title:bar) AND (body:foo OR body:bar)",
 			want: expr.AND(
 				expr.OR(
-					expr.FUZZY(expr.Eq(expr.Lit("title"), expr.Lit("foo")), 1),
-					expr.Eq(expr.Lit("title"), expr.Lit("bar")),
+					expr.FUZZY(expr.Eq("title", "foo"), 1),
+					expr.Eq("title", "bar"),
 				),
 
 				expr.OR(
-					expr.Eq(expr.Lit("body"), expr.Lit("foo")),
-					expr.Eq(expr.Lit("body"), expr.Lit("bar")),
+					expr.Eq("body", "foo"),
+					expr.Eq("body", "bar"),
 				),
 			),
 		},
@@ -372,13 +363,13 @@ func TestParseLucene(t *testing.T) {
 			want: expr.OR(
 				expr.OR(
 					expr.AND(
-						expr.Eq(expr.Lit("a"), expr.Lit("b")),
-						expr.Eq(expr.Lit("c"), expr.Lit("d")),
+						expr.Eq("a", "b"),
+						expr.Eq("c", "d"),
 					),
-					expr.Eq(expr.Lit("e"), expr.Lit("f"))),
+					expr.Eq("e", "f")),
 				expr.AND(
-					expr.Eq(expr.Lit("h"), expr.Lit("i")),
-					expr.Eq(expr.Lit("j"), expr.Lit("k")),
+					expr.Eq("h", "i"),
+					expr.Eq("j", "k"),
 				),
 			),
 		},
@@ -386,44 +377,44 @@ func TestParseLucene(t *testing.T) {
 			input: "a OR b AND c OR d",
 			want: expr.OR(
 				expr.OR(
-					expr.Lit("a"),
-					expr.AND(expr.Lit("b"), expr.Lit("c")),
+					"a",
+					expr.AND("b", "c"),
 				),
-				expr.Lit("d"),
+				"d",
 			),
 		},
 		"test_precedence_weaving_with_not": {
 			input: "NOT a OR b AND NOT c OR d",
 			want: expr.OR(
 				expr.OR(
-					expr.NOT(expr.Lit("a")),
-					expr.AND(expr.Lit("b"), expr.NOT(expr.Lit("c"))),
+					expr.NOT("a"),
+					expr.AND("b", expr.NOT("c")),
 				),
-				expr.Lit("d"),
+				"d",
 			),
 		},
 		"test_equals_in_precedence": {
 			input: "a:az OR b:bz AND NOT c:z OR d",
 			want: expr.OR(
 				expr.OR(
-					expr.Eq(expr.Lit("a"), expr.Lit("az")),
+					expr.Eq("a", "az"),
 					expr.AND(
-						expr.Eq(expr.Lit("b"), expr.Lit("bz")),
+						expr.Eq("b", "bz"),
 						expr.NOT(
-							expr.Eq(expr.Lit("c"), expr.Lit("z")),
+							expr.Eq("c", "z"),
 						),
 					),
 				),
-				expr.Lit("d"),
+				"d",
 			),
 		},
 		"test_parens_in_precedence": {
 			input: "a AND (c OR d)",
 			want: expr.AND(
-				expr.Lit("a"),
+				"a",
 				expr.OR(
-					expr.Lit("c"),
-					expr.Lit("d"),
+					"c",
+					"d",
 				),
 			),
 		},
@@ -431,19 +422,19 @@ func TestParseLucene(t *testing.T) {
 			input: "a OR b AND c:[* to -1] OR d AND NOT +e:f",
 			want: expr.OR(
 				expr.OR(
-					expr.Lit("a"),
+					"a",
 					expr.AND(
-						expr.Lit("b"),
+						"b",
 						expr.Eq(
-							expr.Lit("c"),
-							expr.Rang(expr.WILD("*"), expr.Lit(-1), true),
+							"c",
+							expr.Rang(expr.WILD("*"), -1, true),
 						),
 					),
 				),
 				expr.AND(
-					expr.Lit("d"),
+					"d",
 					expr.NOT(
-						expr.MUST(expr.Eq(expr.Lit("e"), expr.Lit("f"))),
+						expr.MUST(expr.Eq("e", "f")),
 					),
 				),
 			),
@@ -452,15 +443,15 @@ func TestParseLucene(t *testing.T) {
 			input: "a OR b AND c OR d~ AND NOT +(e:f)^10",
 			want: expr.OR(
 				expr.OR(
-					expr.Lit("a"),
-					expr.AND(expr.Lit("b"), expr.Lit("c")),
+					"a",
+					expr.AND("b", "c"),
 				),
 				expr.AND(
-					expr.FUZZY(expr.Lit("d"), 1),
+					expr.FUZZY("d", 1),
 					expr.NOT(
 						expr.BOOST(
 							expr.MUST(
-								expr.Eq(expr.Lit("e"), expr.Lit("f")),
+								expr.Eq("e", "f"),
 							),
 							10.0,
 						),
@@ -525,8 +516,14 @@ func TestParseFailure(t *testing.T) {
 		"and_without_rhs": {
 			input: "a AND",
 		},
+		"and_without_lhs": {
+			input: "AND a",
+		},
 		"or_without_rhs": {
 			input: "a OR",
+		},
+		"or_without_lhs": {
+			input: "OR a",
 		},
 		"not_without_subexpression_1": {
 			input: "NOT",
@@ -576,8 +573,11 @@ func TestParseFailure(t *testing.T) {
 		"range_with_invalid_max": {
 			input: "[* TO (a OR b)]",
 		},
-		"nested_validation_works": {
-			input: "(A=B AND C=(D OR E)) OR (expr.NOT(+a:[* TO]))",
+		"nested_range_missing_max": {
+			input: "(A:B AND C:(D OR E)) OR (NOT(+a:[* TO]))",
+		},
+		"invalid_implicit": {
+			input: "a: b:c",
 		},
 	}
 
@@ -594,19 +594,24 @@ func TestParseFailure(t *testing.T) {
 func FuzzParse(f *testing.F) {
 	tcs := []string{
 		"A:B AND C:D",
-		"+foo OR (expr.NOT(B))",
-		"A = bar",
-		"NOT(b = c)",
+		"+foo OR (NOT(B))",
+		"A:bar",
+		"NOT(b:c)",
 		"z:[* TO 10]",
-		"x:[10 TO *] AND expr.NOT(y:[1 TO 5]",
-		"(+a:b -c:d) OR (z:[1 TO *] expr.NOT(foo))",
-		`+bbq:"woo"`,
+		"x:[10 TO *] AND NOT(y:[1 TO 5]",
+		"(+a:b -c:d) OR (z:[1 TO *] NOT(foo))",
+		`+bbq:"woo yay"`,
 		`-bbq:"woo"`,
+		`(a:b)^10`,
+		`a:foo~`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		Parse(in)
+		e, err := Parse(in)
+		if err == nil {
+			fmt.Printf("%s\n-----------\n", e)
+		}
 	})
 }
