@@ -2,7 +2,7 @@
 
 A search string parser for Go programs that will generate SQL for you and has no external dependencies.
 
-Out of the box it supports [Apache Lucene](https://lucene.apache.org/core/9_4_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package.description) but it can be extended to other syntaxes as well.
+Out of the box it supports [Apache Lucene](https://lucene.apache.org/core/9_4_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package.description) but it can be extended to other syntaxes as well. It uses a bottom up grammar parser using the [shift reduce](https://en.wikipedia.org/wiki/Shift-reduce_parser) method.
 
 # Usage
 
@@ -19,12 +19,6 @@ if err != nil {
     // handle error
 }
 
-fmt.Printf("%s\n", filter)
-// color = red
-//      AND (
-//        NOT(type = "honey crisp")
-//        OR age_in_months >= 5
-//      )
 SQLTemplate := `
 SELECT *
 FROM apples
