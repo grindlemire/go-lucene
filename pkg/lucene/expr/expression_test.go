@@ -146,6 +146,32 @@ func TestExprJSON(t *testing.T) {
 				Eq("c", "d"),
 			),
 		},
+		"preserves_precedence": {
+			input: `{
+				"left": {
+					"left": {
+						"left": "a",
+						"operator": "AND",
+						"right": "b"
+					},
+					"operator": "OR",
+					"right": {
+						"left": "c",
+						"operator": "AND",
+						"right": "d"
+					}
+				},
+				"operator": "OR",
+				"right": "e"
+			}`,
+			want: OR(
+				OR(
+					AND("a", "b"),
+					AND("c", "d"),
+				),
+				"e",
+			),
+		},
 		"every_operator_combined": {
 			input: `{
 				"left": {

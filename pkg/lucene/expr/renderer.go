@@ -2,7 +2,6 @@ package expr
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 )
 
@@ -107,7 +106,7 @@ func renderRange(e *Expression, verbose bool) string {
 
 func renderLiteral(e *Expression, verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("%s(%#v <- %s)", toJSON[e.Op], e.Left, reflect.TypeOf(e.Left))
+		return fmt.Sprintf("%s(%#v)", toJSON[e.Op], e.Left)
 	}
 
 	s, isStr := e.Left.(string)
