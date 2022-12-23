@@ -1,4 +1,4 @@
-package lucene
+package search
 
 import (
 	"fmt"
@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/grindlemire/go-lucene/internal/lex"
-	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
-	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
+	"github.com/grindlemire/go-search/internal/lex"
+	"github.com/grindlemire/go-search/pkg/lucene/expr"
+	"github.com/grindlemire/go-search/pkg/lucene/reduce"
 )
 
 // Parse will parse using a buffer and the shift reduce algorithm. It scales rather well since
