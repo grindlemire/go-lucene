@@ -31,28 +31,28 @@ func renderEquals(e *Expression, verbose bool) string {
 
 func renderBasic(e *Expression, verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("(%#v) %s (%#v)", e.Left, toJSON[e.Op], e.Right)
+		return fmt.Sprintf("(%#v) %s (%#v)", e.Left, toString[e.Op], e.Right)
 	}
-	return fmt.Sprintf("%s %s %s", e.Left, toJSON[e.Op], e.Right)
+	return fmt.Sprintf("%s %s %s", e.Left, toString[e.Op], e.Right)
 }
 
 func renderWrapper(e *Expression, verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("%s(%#v)", toJSON[e.Op], e.Left)
+		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
-	return fmt.Sprintf("%s(%s)", toJSON[e.Op], e.Left)
+	return fmt.Sprintf("%s(%s)", toString[e.Op], e.Left)
 }
 
 func renderMustNot(e *Expression, verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("%s(%#v)", toJSON[e.Op], e.Left)
+		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 	return fmt.Sprintf("-%s", e.Left)
 }
 
 func renderMust(e *Expression, verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("%s(%#v)", toJSON[e.Op], e.Left)
+		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 	return fmt.Sprintf("+%s", e.Left)
 }
@@ -60,10 +60,10 @@ func renderMust(e *Expression, verbose bool) string {
 func renderBoost(e *Expression, verbose bool) string {
 	if verbose {
 		if e.boostPower > 1 {
-			return fmt.Sprintf("%s(%#v^%.1f)", toJSON[e.Op], e.Left, e.boostPower)
+			return fmt.Sprintf("%s(%#v^%.1f)", toString[e.Op], e.Left, e.boostPower)
 		}
 
-		return fmt.Sprintf("%s(%#v)", toJSON[e.Op], e.Left)
+		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
 	if e.boostPower > 1 {
@@ -76,10 +76,10 @@ func renderBoost(e *Expression, verbose bool) string {
 func renderFuzzy(e *Expression, verbose bool) string {
 	if verbose {
 		if e.fuzzyDistance > 1 {
-			return fmt.Sprintf("%s(%#v~%d)", toJSON[e.Op], e.Left, e.fuzzyDistance)
+			return fmt.Sprintf("%s(%#v~%d)", toString[e.Op], e.Left, e.fuzzyDistance)
 		}
 
-		return fmt.Sprintf("%s(%#v)", toJSON[e.Op], e.Left)
+		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
 	if e.fuzzyDistance > 1 {
@@ -106,7 +106,7 @@ func renderRange(e *Expression, verbose bool) string {
 
 func renderLiteral(e *Expression, verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("%s(%#v)", toJSON[e.Op], e.Left)
+		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
 	s, isStr := e.Left.(string)

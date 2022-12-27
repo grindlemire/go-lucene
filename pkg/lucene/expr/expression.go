@@ -211,7 +211,7 @@ func (e Expression) MarshalJSON() (out []byte, err error) {
 
 	c := jsonExpression{
 		Left:     leftRaw,
-		Operator: toJSON[e.Op],
+		Operator: toString[e.Op],
 	}
 
 	// this is dumb but we need it so our "null" is not event given. Otherwise the json serialization
@@ -269,7 +269,7 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	e.Op = fromJSON[c.Operator]
+	e.Op = fromString[c.Operator]
 
 	if e.Op == Range {
 		e.rangeInclusive = true

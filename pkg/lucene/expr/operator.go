@@ -20,7 +20,12 @@ const (
 	Regexp
 )
 
-var fromJSON = map[string]Operator{
+// String renders the operator as a string
+func (o Operator) String() string {
+	return toString[o]
+}
+
+var fromString = map[string]Operator{
 	"AND":      And,
 	"OR":       Or,
 	"EQUALS":   Equals,
@@ -35,7 +40,7 @@ var fromJSON = map[string]Operator{
 	"REGEXP":   Regexp,
 }
 
-var toJSON = map[Operator]string{
+var toString = map[Operator]string{
 	And:     "AND",
 	Or:      "OR",
 	Equals:  "EQUALS",
