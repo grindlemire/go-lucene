@@ -1,4 +1,4 @@
-package search
+package lucene
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/grindlemire/go-search/pkg/lucene/expr"
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
 const errTemplate = "%s:\n    wanted %#v\n    got    %#v"

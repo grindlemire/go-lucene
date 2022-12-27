@@ -1,4 +1,4 @@
-# go-search
+# go-lucene
 
 A search string parser for Go programs that will generate SQL for you and has no external dependencies.
 

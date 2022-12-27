@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/grindlemire/go-search"
-	"github.com/grindlemire/go-search/pkg/lucene/expr"
+	"github.com/grindlemire/go-lucene"
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
 func main() {
@@ -15,7 +15,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	e, err := search.Parse(os.Args[1])
+	e, err := lucene.Parse(os.Args[1])
 	if err != nil {
 		fmt.Printf("Error parsing: %s\n", err)
 		os.Exit(1)

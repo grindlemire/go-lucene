@@ -1,3 +1,3 @@
-module github.com/grindlemire/go-search
+module github.com/grindlemire/go-lucene
 
 go 1.18
