@@ -16,9 +16,24 @@ func equals(left, right string) (string, error) {
 	return fmt.Sprintf("%s = %s", left, right), nil
 }
 
+func basicCompound(op expr.Operator) renderFN {
+	return func(left, right string) (string, error) {
+		return fmt.Sprintf("%s %s %s", left, op, right), nil
+	}
+}
+
+func basicWrap(op expr.Operator) renderFN {
+	return func(left, right string) (string, error) {
+		return fmt.Sprintf("%s(%s)", op, left), nil
+	}
+}
+
 var shared = map[expr.Operator]renderFN{
 	expr.Literal: literal,
 	expr.Equals:  equals,
+	expr.And:     basicCompound(expr.And),
+	expr.Or:      basicCompound(expr.Or),
+	expr.Not:     basicWrap(expr.Not),
 }
 
 type base struct {
@@ -57,6 +72,8 @@ func (b base) serialize(in any) (s string, err error) {
 	switch v := in.(type) {
 	case *expr.Expression:
 		return b.Render(v)
+	case string:
+		return fmt.Sprintf("\"%s\"", v), nil
 	default:
 		return fmt.Sprintf("%v", v), nil
 	}

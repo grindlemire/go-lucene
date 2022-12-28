@@ -15,10 +15,18 @@ func TestSQLDriver(t *testing.T) {
 	}
 
 	tcs := map[string]tc{
-		"basic": {
+		"simple_equals": {
 			input: expr.Eq("a", 5),
 			want:  "a = 5",
 		},
+		// "simple_and": {
+		// 	input: expr.AND(expr.Eq("a", 5), expr.Eq("b", "foo")),
+		// 	want:  `a = 5 AND b = "foo"`,
+		// },
+		// "simple_or": {
+		// 	input: expr.OR(expr.Eq("a", 5), expr.Eq("b", "foo")),
+		// 	want:  `a = 5 OR b = "foo"`,
+		// },
 	}
 
 	for name, tc := range tcs {
