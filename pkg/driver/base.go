@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
@@ -13,7 +14,21 @@ func literal(left, right string) (string, error) {
 }
 
 func equals(left, right string) (string, error) {
+	// at this point the left is considered a column so we should treat it as such
+	// and remove the quotes
+	left = strings.ReplaceAll(left, "\"", "")
 	return fmt.Sprintf("%s = %s", left, right), nil
+}
+
+func noop(left, right string) (string, error) {
+	return left, nil
+}
+
+func like(left, right string) (string, error) {
+	// at this point the left is considered a column so we should treat it as such
+	// and remove the quotes
+	left = strings.ReplaceAll(left, "\"", "")
+	return fmt.Sprintf("%s LIKE %s", left, right), nil
 }
 
 func basicCompound(op expr.Operator) renderFN {
@@ -30,10 +45,18 @@ func basicWrap(op expr.Operator) renderFN {
 
 var shared = map[expr.Operator]renderFN{
 	expr.Literal: literal,
-	expr.Equals:  equals,
 	expr.And:     basicCompound(expr.And),
 	expr.Or:      basicCompound(expr.Or),
 	expr.Not:     basicWrap(expr.Not),
+	expr.Equals:  equals,
+	// expr.Range:   rang,
+	expr.Must:    noop,                // must doesn't really translate to sql
+	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
+	expr.Fuzzy:   noop,
+	expr.Boost:   noop,
+	expr.Wild:    noop, // this gets handled by the equals
+	expr.Regexp:  noop, // this gets handled by the equals
+	expr.Like:    like,
 }
 
 type base struct {

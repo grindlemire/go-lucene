@@ -4,11 +4,18 @@ package expr
 type Operator int
 
 // operations that can be used
+// To add a new operator, do the following:
+// 1. Add it to the iota here
+// 2. Add it to the string maps below
+// 3. Add a render function for it at least in base, perhaps in all the drivers as well
+// 4. Update the json parsing and tests to suppor the new operator
+// 5. Add tests in parse_test and expression_test
 const (
 	Undefined Operator = iota
 	And
 	Or
 	Equals
+	Like
 	Not
 	Range
 	Must
@@ -29,6 +36,7 @@ var fromString = map[string]Operator{
 	"AND":      And,
 	"OR":       Or,
 	"EQUALS":   Equals,
+	"LIKE":     Like,
 	"NOT":      Not,
 	"RANGE":    Range,
 	"MUST":     Must,
@@ -44,6 +52,7 @@ var toString = map[Operator]string{
 	And:     "AND",
 	Or:      "OR",
 	Equals:  "EQUALS",
+	Like:    "LIKE",
 	Not:     "NOT",
 	Range:   "RANGE",
 	Must:    "MUST",

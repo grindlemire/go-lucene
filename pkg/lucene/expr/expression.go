@@ -53,68 +53,79 @@ func (e Expression) GoString() string {
 
 // Lit represents a literal expression
 func Lit(in any) *Expression {
-	return expr(in, Literal)
+	return Expr(in, Literal)
 }
 
 // WILD represents a literal wildcard expression
 func WILD(in any) *Expression {
-	return expr(in, Wild)
+	return Expr(in, Wild)
 }
 
 // REGEXP represents a literal regular expression
 func REGEXP(in any) *Expression {
-	return expr(in, Regexp)
+	return Expr(in, Regexp)
 }
 
 // Eq creates a new EQUALS expression
 func Eq(a any, b any) *Expression {
-	return expr(a, Equals, b)
+	return Expr(a, Equals, b)
+}
+
+// LIKE creates a new fuzzy matching LIKE expression
+func LIKE(a any, b any) *Expression {
+	return Expr(a, Like, b)
 }
 
 // AND creates an AND expression
 func AND(a, b any) *Expression {
-	return expr(a, And, b)
+	return Expr(a, And, b)
 }
 
 // OR creates a new OR expression
 func OR(a, b any) *Expression {
-	return expr(a, Or, b)
+	return Expr(a, Or, b)
 }
 
 // Rang creates a new range expression
 func Rang(min, max any, inclusive bool) *Expression {
-	return expr(min, Range, max, inclusive)
+	return Expr(min, Range, max, inclusive)
 }
 
 // NOT wraps an expression in a Not
 func NOT(e any) *Expression {
-	return expr(e, Not)
+	return Expr(e, Not)
 }
 
 // MUST wraps an expression in a Must
 func MUST(e any) *Expression {
-	return expr(e, Must)
+	return Expr(e, Must)
 }
 
 // MUSTNOT wraps an expression in a MustNot
 func MUSTNOT(e any) *Expression {
-	return expr(e, MustNot)
+	return Expr(e, MustNot)
 }
 
 // BOOST wraps an expression in a boost
 func BOOST(e any, power ...float64) *Expression {
 	if len(power) > 0 {
-		return expr(e, Boost, power[0])
+		return Expr(e, Boost, power[0])
 	}
-	return expr(e, Boost)
+	return Expr(e, Boost)
 }
 
 // FUZZY wraps an expression in a fuzzy
 func FUZZY(e any, distance ...int) *Expression {
 	if len(distance) > 0 {
-		return expr(e, Fuzzy, distance[0])
+		return Expr(e, Fuzzy, distance[0])
 	}
-	return expr(e, Fuzzy)
+	return Expr(e, Fuzzy)
+}
+
+// IsExpr checks if the input is an expression
+func IsExpr(in any) bool {
+	_, isExpr := in.(*Expression)
+	return isExpr
 }
 
 // Validate validates the expression is correctly structured.
@@ -142,8 +153,9 @@ func Validate(in any) (err error) {
 	return Validate(e.Right)
 }
 
-// expr creates a general new expression
-func expr(left any, op Operator, right ...any) *Expression {
+// Expr creates a general new expression. The other public functions are just helpers that call this
+// function underneath.
+func Expr(left any, op Operator, right ...any) *Expression {
 	if isLiteral(left) && op != Literal && op != Wild && op != Regexp {
 		left = literalToExpr(left)
 	}
@@ -245,9 +257,9 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	*e = empty()
 	// if this does not look like an object it must be a literal
 	if !isJSONObject(json.RawMessage(data)) {
-		expr, err := unmarshalExpression(json.RawMessage(data))
+		Expr, err := unmarshalExpression(json.RawMessage(data))
 		// this is required because apparently you can't swap pointers to your receiver mid method
-		*e = *expr
+		*e = *Expr
 		return err
 	}
 
@@ -292,6 +304,7 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 			e.boostPower = *c.BoostPower
 		}
 	}
+
 	return nil
 }
 
