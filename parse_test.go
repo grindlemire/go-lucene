@@ -40,15 +40,15 @@ func TestParseLucene(t *testing.T) {
 		},
 		"basic_inclusive_range": {
 			input: "a:[* TO 5]",
-			want:  expr.Eq("a", expr.Rang(expr.WILD("*"), 5, true)),
+			want:  expr.Rang("a", expr.WILD("*"), 5, true),
 		},
 		"basic_exclusive_range": {
 			input: "a:{* TO 5}",
-			want:  expr.Eq("a", expr.Rang(expr.WILD("*"), 5, false)),
+			want:  expr.Rang("a", expr.WILD("*"), 5, false),
 		},
 		"range_over_strings": {
 			input: "a:{foo TO bar}",
-			want:  expr.Eq("a", expr.Rang("foo", "bar", false)),
+			want:  expr.Rang("a", "foo", "bar", false),
 		},
 		"basic_fuzzy": {
 			input: "b AND a~",
@@ -105,28 +105,19 @@ func TestParseLucene(t *testing.T) {
 		},
 		"range_operator_inclusive": {
 			input: "a:[1 TO 5]",
-			want: expr.Eq(
-				"a",
-				expr.Rang(1, 5, true),
-			),
+			want:  expr.Rang("a", 1, 5, true),
 		},
 		"range_operator_inclusive_unbound": {
 			input: `a:[* TO 200]`,
-			want: expr.Eq(
-				"a",
-				expr.Rang(expr.WILD("*"), expr.Lit(200), true),
-			),
+			want:  expr.Rang("a", expr.WILD("*"), expr.Lit(200), true),
 		},
 		"range_operator_exclusive": {
 			input: `a:{"ab" TO "az"}`,
-			want:  expr.Eq("a", expr.Rang(expr.Lit("ab"), expr.Lit("az"), false)),
+			want:  expr.Rang("a", expr.Lit("ab"), expr.Lit("az"), false),
 		},
 		"range_operator_exclusive_unbound": {
 			input: `a:{2 TO *}`,
-			want: expr.Eq(
-				"a",
-				expr.Rang(expr.Lit(2), expr.WILD("*"), false),
-			),
+			want:  expr.Rang("a", expr.Lit(2), expr.WILD("*"), false),
 		},
 		"or_with_nesting": {
 			input: "a:foo OR b:bar",
@@ -418,6 +409,26 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
+		"test_range_precedance_simple": {
+			input: "c:[* to -1] OR d",
+			want: expr.OR(
+				expr.Rang("c", expr.WILD("*"), -1, true),
+				"d",
+			),
+		},
+		"test_range_precedance": {
+			input: "a OR b AND c:[* to -1] OR d",
+			want: expr.OR(
+				expr.OR(
+					"a",
+					expr.AND(
+						"b",
+						expr.Rang("c", expr.WILD("*"), -1, true),
+					),
+				),
+				"d",
+			),
+		},
 		"test_full_precedance": {
 			input: "a OR b AND c:[* to -1] OR d AND NOT +e:f",
 			want: expr.OR(
@@ -425,10 +436,7 @@ func TestParseLucene(t *testing.T) {
 					"a",
 					expr.AND(
 						"b",
-						expr.Eq(
-							"c",
-							expr.Rang(expr.WILD("*"), -1, true),
-						),
+						expr.Rang("c", expr.WILD("*"), -1, true),
 					),
 				),
 				expr.AND(

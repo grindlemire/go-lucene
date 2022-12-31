@@ -41,20 +41,54 @@ func TestExprJSON(t *testing.T) {
 		},
 		"flat_inclusive_range": {
 			input: `{
-				"left": 1,
+				"left": "a",
 				"operator": "RANGE",
-				"right": 2
+				"right": {
+					"min": 1,
+					"max": 2,
+					"inclusive": true
+				}
 			  }`,
-			want: Rang(Lit(1), Lit(2), true),
+			want: Rang("a", 1, 2, true),
 		},
 		"flat_exclusive_range": {
 			input: `{
-				"left": 1,
+				"left": "a",
 				"operator": "RANGE",
-				"right": 2,
-				"exclusive": true
+				"right": {
+					"min": 1,
+					"max": 2,
+					"inclusive": false
+				}
 			  }`,
-			want: Rang(Lit(1), Lit(2), false),
+			want: Rang("a", 1, 2, false),
+		},
+		"flat_range_with_float": {
+			input: `{
+				"left": "a",
+				"operator": "RANGE",
+				"right": {
+					"min": 1.1,
+					"max": 2.2,
+					"inclusive": true
+				}
+			  }`,
+			want: Rang("a", 1.1, 2.2, true),
+		},
+		"must_wrapping_range": {
+			input: `{
+				"left": {
+					"left": "c",
+					"operator": "RANGE",
+					"right": {
+						"min": "*",
+						"max": "foo",
+						"inclusive": false
+					}
+				},
+				"operator": "MUST"
+			}`,
+			want: MUST(Rang("c", "*", "foo", false)),
 		},
 		"flat_must": {
 			input: `{
@@ -171,16 +205,78 @@ func TestExprJSON(t *testing.T) {
 				"e",
 			),
 		},
+		"compound_using_range": {
+			input: `{
+				"left": {
+					"left": {
+						"left": "c",
+						"operator": "RANGE",
+						"right": {
+							"min": "*",
+							"max": "foo",
+							"inclusive": false
+						}
+					},
+					"operator": "MUST"
+				},
+				"operator": "OR",
+				"right": {
+					"left": {
+						"left": {
+							"left": "d",
+							"operator": "EQUALS",
+							"right": {
+								"left": "bar",
+								"operator": "FUZZY",
+								"distance": 3
+							}
+						},
+						"operator": "NOT"
+					},
+					"operator": "MUST_NOT"
+				}
+			}`,
+			want: OR(
+				MUST(Rang("c", "*", "foo", false)),
+				MUSTNOT(NOT(Eq("d", FUZZY("bar", 3)))),
+			),
+		},
+		"large_blob": {
+			input: `{
+				"left": "a",
+				"operator": "OR",
+				"right": {
+					"left": {
+						"left": "c",
+						"operator": "RANGE",
+						"right": {
+							"min": "*",
+							"max": "foo",
+							"inclusive": false
+						}
+					},
+					"operator": "OR",
+					"right": "b"
+				}
+			}`,
+			want: OR(
+				"a",
+				OR(
+					Rang("c", "*", "foo", false),
+					"b",
+				),
+			),
+		},
 		"every_operator_combined": {
 			input: `{
 				"left": {
 					"left": {
 						"left": "a",
-						"operator": "EQUALS",
+						"operator": "RANGE",
 						"right": {
-							"left": 1,
-							"operator": "RANGE",
-							"right": "*"
+							"min": 1,
+							"max": "*",
+							"inclusive": true
 						}
 					},
 					"operator": "AND",
@@ -201,12 +297,11 @@ func TestExprJSON(t *testing.T) {
 					"left": {
 						"left": {
 							"left": "c",
-							"operator": "EQUALS",
+							"operator": "RANGE",
 							"right": {
-								"left": "*",
-								"operator": "RANGE",
-								"right": "foo",
-								"exclusive": true
+								"min": "*",
+								"max": "foo",
+								"inclusive": false
 							}
 						},
 						"operator": "MUST"
@@ -231,11 +326,11 @@ func TestExprJSON(t *testing.T) {
 			}`,
 			want: OR(
 				AND(
-					Eq("a", Rang(1, "*", true)),
+					Rang("a", 1, "*", true),
 					BOOST(NOT(Eq("b", REGEXP("/foo?ar.*/")))),
 				),
 				OR(
-					MUST(Eq("c", Rang("*", "foo", false))),
+					MUST(Rang("c", "*", "foo", false)),
 					MUSTNOT(NOT(Eq("d", FUZZY("bar", 3)))),
 				),
 			),

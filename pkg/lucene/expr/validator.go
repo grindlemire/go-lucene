@@ -93,19 +93,32 @@ func validateRange(e *Expression) (err error) {
 	}
 
 	if e.Left == nil {
-		return errors.New("RANGE validation: min value must not be nil")
+		return errors.New("RANGE validation: term value must not be nil")
 	}
 
 	if e.Right == nil {
-		return errors.New("RANGE validation: max value must not be nil")
+		return errors.New("RANGE validation: boundary value must not be nil")
 	}
 
 	if !isLiteralExpr(e.Left) {
-		return errors.New("RANGE validation: min value must be a literal")
+		return errors.New("RANGE validation: term value must be a literal")
 	}
 
-	if !isLiteralExpr(e.Right) {
-		return errors.New("RANGE validation: max value must be a literal")
+	boundary, isBoundary := e.Right.(*RangeBoundary)
+	if !isBoundary {
+		return fmt.Errorf("RANGE validation: invalid range boundary - incorrect type [%s]", reflect.TypeOf(e.Right))
+	}
+
+	if boundary == nil {
+		return errors.New("RANGE validation: range boundary must not be nil")
+	}
+
+	if boundary.Min == nil {
+		return errors.New("RANGE validation: range boundary must have a minimum")
+	}
+
+	if boundary.Max == nil {
+		return errors.New("RANGE validation: range boundary must have a maximum")
 	}
 
 	return nil

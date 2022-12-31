@@ -90,18 +90,19 @@ func renderFuzzy(e *Expression, verbose bool) string {
 }
 
 func renderRange(e *Expression, verbose bool) string {
+	boundary := e.Right.(*RangeBoundary)
 	if verbose {
-		if e.rangeInclusive {
-			return fmt.Sprintf("[%#v TO %#v]", e.Left, e.Right)
+		if boundary.Inclusive {
+			return fmt.Sprintf("%#v:[%#v TO %#v]", e.Left, boundary.Min, boundary.Max)
 		}
 
-		return fmt.Sprintf("{%#v TO %#v}", e.Left, e.Right)
+		return fmt.Sprintf("%#v:{%#v TO %#v}", e.Left, boundary.Min, boundary.Max)
 	}
-	if e.rangeInclusive {
-		return fmt.Sprintf("[%s TO %s]", e.Left, e.Right)
+	if boundary.Inclusive {
+		return fmt.Sprintf("%s:[%s TO %s]", e.Left, boundary.Min, boundary.Max)
 	}
 
-	return fmt.Sprintf("{%s TO %s}", e.Left, e.Right)
+	return fmt.Sprintf("%s:{%s TO %s}", e.Left, boundary.Min, boundary.Max)
 }
 
 func renderLiteral(e *Expression, verbose bool) string {

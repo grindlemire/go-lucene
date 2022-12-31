@@ -30,9 +30,15 @@ type Expression struct {
 	Right any      `json:"right,omitempty"`
 
 	// these are operator specific states we have to track
-	rangeInclusive bool
-	boostPower     float64
-	fuzzyDistance  int
+	boostPower    float64
+	fuzzyDistance int
+}
+
+// RangeBoundary represents the boundary conditions for a range operator
+type RangeBoundary struct {
+	Min       any  `json:"min"`
+	Max       any  `json:"max"`
+	Inclusive bool `json:"inclusive"`
 }
 
 func (e Expression) String() string {
@@ -87,8 +93,8 @@ func OR(a, b any) *Expression {
 }
 
 // Rang creates a new range expression
-func Rang(min, max any, inclusive bool) *Expression {
-	return Expr(min, Range, max, inclusive)
+func Rang(term any, min, max any, inclusive bool) *Expression {
+	return Expr(term, Range, min, max, inclusive)
 }
 
 // NOT wraps an expression in a Not
@@ -183,8 +189,13 @@ func Expr(left any, op Operator, right ...any) *Expression {
 	}
 
 	// support passing a range with inclusivity
-	if op == Range && len(right) == 2 && isBool(right[1]) {
-		e.rangeInclusive = right[1].(bool)
+	if op == Range && len(right) == 3 && isBool(right[2]) {
+		e.Right = &RangeBoundary{
+			Min:       literalToExpr(right[0]),
+			Max:       literalToExpr(right[1]),
+			Inclusive: right[2].(bool),
+		}
+		return e
 	}
 
 	// if right is present and non nil then add it to the expression
@@ -204,9 +215,9 @@ type jsonExpression struct {
 	Operator string          `json:"operator"`
 	Right    json.RawMessage `json:"right,omitempty"`
 
-	RangeExclusive *bool    `json:"exclusive,omitempty"`
-	FuzzyDistance  *int     `json:"distance,omitempty"`
-	BoostPower     *float64 `json:"power,omitempty"`
+	RangeBoundary *RangeBoundary `json:"boundaries,omitempty"`
+	FuzzyDistance *int           `json:"distance,omitempty"`
+	BoostPower    *float64       `json:"power,omitempty"`
 }
 
 // MarshalJSON is a custom JSON serialization for the Expression
@@ -244,10 +255,6 @@ func (e Expression) MarshalJSON() (out []byte, err error) {
 		c.FuzzyDistance = &e.fuzzyDistance
 	}
 
-	if !e.rangeInclusive {
-		c.RangeExclusive = ptr(true)
-	}
-
 	return json.Marshal(c)
 }
 
@@ -257,7 +264,7 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	*e = empty()
 	// if this does not look like an object it must be a literal
 	if !isJSONObject(json.RawMessage(data)) {
-		Expr, err := unmarshalExpression(json.RawMessage(data))
+		Expr, err := unmarshalLiteral(json.RawMessage(data))
 		// this is required because apparently you can't swap pointers to your receiver mid method
 		*e = *Expr
 		return err
@@ -269,27 +276,35 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		return err
 	}
 
-	e.Left, err = unmarshalExpression(c.Left)
+	e.Left = ptr(empty())
+	err = json.Unmarshal(c.Left, e.Left)
 	if err != nil {
 		return err
 	}
 
-	if len(c.Right) > 0 {
-		e.Right, err = unmarshalExpression(c.Right)
+	if len(c.Right) > 0 && looksLikeRangeBoundary(c.Right) {
+		var boundary RangeBoundary
+		err = json.Unmarshal(c.Right, &boundary)
+		if err != nil {
+			return err
+		}
+		if !IsExpr(boundary.Min) {
+			boundary.Min = literalToExpr(toIntIfNecessary(boundary.Min))
+		}
+
+		if !IsExpr(boundary.Max) {
+			boundary.Max = literalToExpr(toIntIfNecessary(boundary.Max))
+		}
+		e.Right = &boundary
+	} else if len(c.Right) > 0 {
+		e.Right = ptr(empty())
+		err = json.Unmarshal(c.Right, e.Right)
 		if err != nil {
 			return err
 		}
 	}
 
 	e.Op = fromString[c.Operator]
-
-	if e.Op == Range {
-		e.rangeInclusive = true
-		// yes this can be reduced but this is more readble
-		if c.RangeExclusive != nil && *c.RangeExclusive {
-			e.rangeInclusive = false
-		}
-	}
 
 	if e.Op == Fuzzy {
 		e.fuzzyDistance = 1
@@ -308,18 +323,8 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	return nil
 }
 
-// unmarshal different edge cases for literals in the expression
-func unmarshalExpression(in json.RawMessage) (e *Expression, err error) {
+func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 	e = ptr(empty())
-
-	// if it looks like a sub object then parse it as an expression
-	if isJSONObject(in) {
-		err = json.Unmarshal(in, e)
-		if err != nil {
-			return e, err
-		}
-		return e, nil
-	}
 
 	// check if it is an int first because all ints can be parsed as floats
 	i, err := strconv.Atoi(string(in))
@@ -343,7 +348,22 @@ func unmarshalExpression(in json.RawMessage) (e *Expression, err error) {
 	return literalToExpr(s), nil
 }
 
+// looksLikeRangeBoundary checks whether the marshalled json has the keys for a range boundary.
+// This is a hack but we need to know whether to unmarshal an expression or a range boundary.
+func looksLikeRangeBoundary(in json.RawMessage) bool {
+	// strip all the whitespace out of the input
+	s := strings.Join(strings.Fields(string(in)), "")
+
+	return strings.Contains(s, "\"min\":") &&
+		strings.Contains(s, "\"max\":") &&
+		!strings.Contains(s, "\"left\":")
+}
+
 func literalToExpr(in any) *Expression {
+	if IsExpr(in) {
+		return in.(*Expression)
+	}
+
 	s, isStr := in.(string)
 	if !isStr {
 		return Lit(in)
@@ -375,11 +395,25 @@ func isJSONObject(in json.RawMessage) bool {
 	return trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}'
 }
 
+// apparently the json unmarshal only parses float64 values so we check if the float64
+// is actually a whole number. If it is then make it an int
+func toIntIfNecessary(in any) (out any) {
+	f, isFloat := in.(float64)
+	if !isFloat {
+		return in
+	}
+
+	if f == float64(int(f)) {
+		return int(f)
+	}
+
+	return f
+}
+
 func empty() Expression {
 	return Expression{
-		rangeInclusive: true,
-		fuzzyDistance:  1,
-		boostPower:     1.0,
+		fuzzyDistance: 1,
+		boostPower:    1.0,
 	}
 }
 

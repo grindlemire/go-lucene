@@ -305,40 +305,50 @@ func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 }
 
 func rangeop(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
-	// we need a [, begin, TO, end, ] to have a range operator which is 5 elems
-	if len(elems) != 5 {
+	// we need a term, :, [, begin, TO, end, ] to have a range operator which is 7 elems
+	if len(elems) != 7 {
 		return elems, nonTerminals, false
 	}
 
-	open, ok := elems[0].(lex.Token)
+	colon, ok := elems[1].(lex.Token)
+	if !ok || colon.Typ != lex.TColon {
+		return elems, nonTerminals, false
+	}
+
+	open, ok := elems[2].(lex.Token)
 	if !ok || (open.Typ != lex.TLSquare && open.Typ != lex.TLCurly) {
 		return elems, nonTerminals, false
 	}
 
-	closed, ok := elems[4].(lex.Token)
+	closed, ok := elems[6].(lex.Token)
 	if !ok || (closed.Typ != lex.TRSquare && closed.Typ != lex.TRCurly) {
 		return elems, nonTerminals, false
 	}
 
-	to, ok := elems[2].(lex.Token)
+	to, ok := elems[4].(lex.Token)
 	if !ok || to.Typ != lex.TTO {
 		return elems, nonTerminals, false
 	}
 
-	start, ok := elems[1].(*expr.Expression)
+	term, ok := elems[0].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
-	end, ok := elems[3].(*expr.Expression)
+	start, ok := elems[3].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
-	// we consumed three terminals, the [, TO, and ]
+	end, ok := elems[5].(*expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	// we consumed four terminals, the :, [, TO, and ]
 	return []any{expr.Rang(
-		start, end, (open.Typ == lex.TLSquare && closed.Typ == lex.TRSquare),
-	)}, drop(nonTerminals, 3), true
+		term, start, end, (open.Typ == lex.TLSquare && closed.Typ == lex.TRSquare),
+	)}, drop(nonTerminals, 4), true
 }
 
 func drop[T any](stack []T, i int) []T {
