@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/grindlemire/go-lucene"
+	"github.com/grindlemire/go-lucene/pkg/driver"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
@@ -39,6 +40,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	sq, err := driver.NewSQLDriver().Render(e)
+	if err != nil {
+		fmt.Printf("Error rendering sql: %s\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Printf("Reparsed input: %v\n", e1)
 	fmt.Printf("Verbose  input: %#v\n", e1)
+	fmt.Printf("SQL     output: %s\n", sq)
 }

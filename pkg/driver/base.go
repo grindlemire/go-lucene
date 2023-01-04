@@ -31,6 +31,25 @@ func like(left, right string) (string, error) {
 	return fmt.Sprintf("%s LIKE %s", left, right), nil
 }
 
+func rang(left, right string) (string, error) {
+	stripped := strings.Replace(strings.Replace(right, "(", "", 1), ")", "", 1)
+	rangeSlice := strings.Split(stripped, ",")
+
+	if len(rangeSlice) != 2 {
+		return "", fmt.Errorf(
+			"the BETWEEN operator needs a two item list in the right hand side, have %s",
+			right,
+		)
+	}
+
+	return fmt.Sprintf("%s BETWEEN %s AND %s",
+			left,
+			strings.Trim(rangeSlice[0], " "),
+			strings.Trim(rangeSlice[1], " "),
+		),
+		nil
+}
+
 func basicCompound(op expr.Operator) renderFN {
 	return func(left, right string) (string, error) {
 		return fmt.Sprintf("%s %s %s", left, op, right), nil
@@ -49,7 +68,7 @@ var shared = map[expr.Operator]renderFN{
 	expr.Or:      basicCompound(expr.Or),
 	expr.Not:     basicWrap(expr.Not),
 	expr.Equals:  equals,
-	// expr.Range:   rang,
+	expr.Range:   rang,
 	expr.Must:    noop,                // must doesn't really translate to sql
 	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
 	expr.Fuzzy:   noop,
@@ -95,6 +114,8 @@ func (b base) serialize(in any) (s string, err error) {
 	switch v := in.(type) {
 	case *expr.Expression:
 		return b.Render(v)
+	case *expr.RangeBoundary:
+		return fmt.Sprintf("(%s, %s)", v.Min, v.Max), nil
 	case string:
 		return fmt.Sprintf("\"%s\"", v), nil
 	default:
