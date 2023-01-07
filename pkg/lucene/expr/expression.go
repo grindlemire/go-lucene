@@ -159,9 +159,21 @@ func Validate(in any) (err error) {
 	return Validate(e.Right)
 }
 
+// Column represents a column in sql. It will not be escaped by quotes in the sql rendering
+type Column string
+
+// GoString is a debug print for the column type
+func (c Column) GoString() string {
+	return fmt.Sprintf("COLUMN(%s)", c)
+}
+
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {
+	if isStringlike(left) && (op == Equals || op == Range) {
+		left = wrapInColumn(left)
+	}
+
 	if isLiteral(left) && op != Literal && op != Wild && op != Regexp {
 		left = literalToExpr(left)
 	}
@@ -282,6 +294,13 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		return err
 	}
 
+	e.Op = fromString[c.Operator]
+
+	// if the left hand side is a string then it must be a column
+	if isStringlike(e.Left) && (e.Op == Equals || e.Op == Range) {
+		e.Left = wrapInColumn(e.Left)
+	}
+
 	if len(c.Right) > 0 && looksLikeRangeBoundary(c.Right) {
 		var boundary RangeBoundary
 		err = json.Unmarshal(c.Right, &boundary)
@@ -303,8 +322,6 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 			return err
 		}
 	}
-
-	e.Op = fromString[c.Operator]
 
 	if e.Op == Fuzzy {
 		e.fuzzyDistance = 1
@@ -393,6 +410,34 @@ func isJSONObject(in json.RawMessage) bool {
 	}
 
 	return trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}'
+}
+
+// isStringLike checks if the input is a string or is a literal wrapping a string
+func isStringlike(in any) bool {
+	_, isStr := in.(string)
+	e, isExpr := in.(*Expression)
+	if isExpr {
+		_, isStrLiteralExpr := e.Left.(string)
+		return isStrLiteralExpr
+	}
+
+	return isStr
+}
+
+func wrapInColumn(in any) (out *Expression) {
+	s, isStr := in.(string)
+	if isStr {
+		return Lit(Column(s))
+	}
+
+	e, isExpr := in.(*Expression)
+	if isExpr {
+		s, isStr = e.Left.(string)
+		if isStr {
+			return Lit(Column(s))
+		}
+	}
+	return e
 }
 
 // apparently the json unmarshal only parses float64 values so we check if the float64

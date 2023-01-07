@@ -36,10 +36,7 @@ func rang(left, right string) (string, error) {
 	rangeSlice := strings.Split(stripped, ",")
 
 	if len(rangeSlice) != 2 {
-		return "", fmt.Errorf(
-			"the BETWEEN operator needs a two item list in the right hand side, have %s",
-			right,
-		)
+		return "", fmt.Errorf("the BETWEEN operator needs a two item list in the right hand side, have %s", right)
 	}
 
 	return fmt.Sprintf("%s BETWEEN %s AND %s",
@@ -52,7 +49,7 @@ func rang(left, right string) (string, error) {
 
 func basicCompound(op expr.Operator) renderFN {
 	return func(left, right string) (string, error) {
-		return fmt.Sprintf("%s %s %s", left, op, right), nil
+		return fmt.Sprintf("(%s) %s (%s)", left, op, right), nil
 	}
 }
 
@@ -116,6 +113,8 @@ func (b base) serialize(in any) (s string, err error) {
 		return b.Render(v)
 	case *expr.RangeBoundary:
 		return fmt.Sprintf("(%s, %s)", v.Min, v.Max), nil
+	case expr.Column:
+		return fmt.Sprintf("%s", v), nil
 	case string:
 		return fmt.Sprintf("\"%s\"", v), nil
 	default:

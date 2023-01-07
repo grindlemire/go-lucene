@@ -254,7 +254,12 @@ func isLiteralExpr(in any) bool {
 }
 
 func isLiteral(in any) bool {
-	return isString(in) || isNum(in) || isBool(in)
+	return isString(in) || isNum(in) || isBool(in) || isColumn(in)
+}
+
+func isColumn(in any) bool {
+	_, is := in.(Column)
+	return is
 }
 
 func isString(in any) bool {
