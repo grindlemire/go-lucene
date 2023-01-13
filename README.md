@@ -1,6 +1,6 @@
 # go-lucene
 
-A depedency free pure go implementation of a lucene syntax parser that can be used to generate sql filters.
+A lucene parser written in go with no dependencies.
 
 # Usage
 
