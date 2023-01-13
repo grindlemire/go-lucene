@@ -19,11 +19,11 @@ jobs:
 
             - name: set tagname
               id: tag
-              run: echo "::set-output name=version::$(echo $GITHUB_REF | cut -d / -f 3)"
+              run: echo "version=$(echo $GITHUB_REF | cut -d / -f 3)" >> $GITHUB_OUTPUT
 
             - name: set major version name
               id: major_version
-              run: echo "::set-output name=version::$(echo $GITHUB_REF | cut -d / -f 3 | cut -d . -f 1)"
+              run: echo "version=$(echo $GITHUB_REF | cut -d / -f 3 | cut -d . -f 1)" >> $GITHUB_OUTPUT
 
             - name: test
               run: go test -v ./...
