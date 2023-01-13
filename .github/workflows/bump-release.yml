@@ -20,6 +20,6 @@ jobs:
             - name: test
               run: go test -v ./...
 
-            - uses: MeilCli/bump-release-action@v1
+            - uses: grindlemire/bump-release-action@master
               with:
                   config_path: '.github/bump.yml'
