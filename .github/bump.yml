@@ -16,6 +16,7 @@ release:
         - replace-prefix: 'dependency: '
           new-prefix: ''
 branch:
+    base-branch: main
     version-branch-prefix: 'v'
     bump-version-commit-prefix: 'v'
 categories:
