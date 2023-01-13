@@ -42,3 +42,44 @@ WHERE
 LIMIT 10;
 `
 ```
+
+## Extending with a custom driver
+
+Just embed the `Base` driver in your custom driver and override the `RenderFN`'s with your own custom rendering functions. Please contribute drivers back so others can use it too :).
+
+```Go
+import (
+    "github.com/grindlemire/go-lucene/pkg/driver"
+    "github.com/grindlemire/go-lucene/pkg/lucene/expr"
+)
+
+// MyDriver ...
+type MyDriver struct {
+	Base
+}
+
+// NewMyDriver ...
+func NewMyDriver() MyDriver {
+	fns := map[expr.Operator]driver.RenderFN{
+        // suppose we have our own literal rendering function
+		expr.Literal: myLiteral,
+	}
+
+	for op, sharedFN := range driver.Shared {
+		_, found := fns[op]
+		if !found {
+			fns[op] = sharedFN
+		}
+	}
+
+	return MyDriver{
+		driver.Base{
+			renderFNs: fns,
+		},
+	}
+}
+
+func myLiteral(left, right string) (string, error) {
+    // ...
+}
+```

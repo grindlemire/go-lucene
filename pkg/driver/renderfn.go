@@ -8,7 +8,9 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
-type renderFN func(left, right string) (string, error)
+// RenderFN is a rendering function. It takes the left and right side of the operator serialized to a string
+// and serializes the entire expression
+type RenderFN func(left, right string) (string, error)
 
 func literal(left, right string) (string, error) {
 	return left, nil
@@ -128,13 +130,13 @@ func rang(left, right string) (string, error) {
 		nil
 }
 
-func basicCompound(op expr.Operator) renderFN {
+func basicCompound(op expr.Operator) RenderFN {
 	return func(left, right string) (string, error) {
 		return fmt.Sprintf("(%s) %s (%s)", left, op, right), nil
 	}
 }
 
-func basicWrap(op expr.Operator) renderFN {
+func basicWrap(op expr.Operator) RenderFN {
 	return func(left, right string) (string, error) {
 		return fmt.Sprintf("%s(%s)", op, left), nil
 	}

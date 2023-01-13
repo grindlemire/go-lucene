@@ -6,7 +6,9 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
-var shared = map[expr.Operator]renderFN{
+// Shared is the shared set of render functions that can be used as a base and overriden
+// for each flavor of sql
+var Shared = map[expr.Operator]RenderFN{
 	expr.Literal: literal,
 	expr.And:     basicCompound(expr.And),
 	expr.Or:      basicCompound(expr.Or),
@@ -22,12 +24,13 @@ var shared = map[expr.Operator]renderFN{
 	expr.Like:    like,
 }
 
-type base struct {
-	renderFNs map[expr.Operator]renderFN
+// Base is the base driver that is embedded in each driver
+type Base struct {
+	renderFNs map[expr.Operator]RenderFN
 }
 
 // Render will render the expression based on the renderFNs provided by the driver.
-func (b base) Render(e *expr.Expression) (s string, err error) {
+func (b Base) Render(e *expr.Expression) (s string, err error) {
 	if e == nil {
 		return "", nil
 	}
@@ -50,7 +53,7 @@ func (b base) Render(e *expr.Expression) (s string, err error) {
 	return fn(left, right)
 }
 
-func (b base) serialize(in any) (s string, err error) {
+func (b Base) serialize(in any) (s string, err error) {
 	if in == nil {
 		return "", nil
 	}

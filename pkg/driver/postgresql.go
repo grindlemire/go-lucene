@@ -4,16 +4,16 @@ import "github.com/grindlemire/go-lucene/pkg/lucene/expr"
 
 // PostgresDriver transforms a parsed lucene expression to a sql filter.
 type PostgresDriver struct {
-	base
+	Base
 }
 
 // NewPostgresDriver creates a new driver that will output a parsed lucene expression as a SQL filter.
 func NewPostgresDriver() PostgresDriver {
-	fns := map[expr.Operator]renderFN{
+	fns := map[expr.Operator]RenderFN{
 		expr.Literal: literal,
 	}
 
-	for op, sharedFN := range shared {
+	for op, sharedFN := range Shared {
 		_, found := fns[op]
 		if !found {
 			fns[op] = sharedFN
@@ -21,7 +21,7 @@ func NewPostgresDriver() PostgresDriver {
 	}
 
 	return PostgresDriver{
-		base{
+		Base{
 			renderFNs: fns,
 		},
 	}
