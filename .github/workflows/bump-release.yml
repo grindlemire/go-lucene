@@ -25,15 +25,19 @@ jobs:
               uses: 'phips28/gh-action-bump-version@master'
               with:
                   tag-prefix: 'v'
-            
-            - name: extract version from tag
-                  id: version-from-tag
-                  run: echo "version=$(echo '${{ steps.version-bump.outputs.newTag }}' | sed 's/v//')" >> $GITHUB_OUTPUT
+
+            - name: set tagname
+              id: tag
+              run: echo "version=$(echo '${{ steps.version-bump.outputs.newTag }}' | sed 's/v//')" >> $GITHUB_OUTPUT
+
+            - name: set major version name
+              id: major_version
+              run: echo "version=$(echo '${{ steps.version-bump.outputs.newTag }}' | sed 's/v//' | cut -d . -f 1)" >> $GITHUB_OUTPUT
 
             - name: release
               uses: softprops/action-gh-release@v1
               with:
-                  tag_name: ${{ steps.version-from-tag.outputs.newTag }}
+                  tag_name: ${{ steps.tag.outputs.newTag }}
 
             - name: create release branch
               uses: peterjgrainger/action-create-branch@v2.2.0
