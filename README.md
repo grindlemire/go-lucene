@@ -81,6 +81,6 @@ func NewMyDriver() MyDriver {
 
 // myLiteral ...
 func myLiteral(left, right string) (string, error) {
-    // ..
+    // ...
 }
 ```
