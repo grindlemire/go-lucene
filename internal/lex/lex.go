@@ -211,6 +211,7 @@ func (l Lexer) Peek() Token {
 	return l.Next()
 }
 
+// lexSpace is the first state that we always start with
 func lexSpace(l *Lexer) tokenStateFn {
 	for {
 		switch l.next() {
