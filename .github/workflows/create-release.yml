@@ -28,10 +28,17 @@ jobs:
             - name: test
               run: go test -v ./...
 
+            - name: create release branch
+              uses: peterjgrainger/action-create-branch@v2.2.0
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  branch: release-branch.${{ steps.major_version.outputs.version }}
+
             - name: merge to release branch
               uses: tukasz/direct-merge-action@v2.0.2
               with:
                   source-branch: main
                   target-branch: release-branch.${{ steps.major_version.outputs.version }}
-                  commit-message: Merge from main for release ${{ steps.tag.outputs.version }}
+                  commit-message: Automatic merge from main for release ${{ steps.tag.outputs.version }}
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
