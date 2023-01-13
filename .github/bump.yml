@@ -26,30 +26,35 @@ categories:
       commits:
           - 'breaking:'
       changes-prefix: ':warning: '
+
     - title: 'Changes'
       labels:
           - 'Feature'
       commits:
           - 'feature:'
       changes-prefix: ':gift: '
+
     - title: 'Changes'
       labels:
           - Maintenance
       commits:
           - 'change:'
       changes-prefix: ':hammer: '
+
     - title: 'Bug Fixes'
       labels:
           - 'Bug'
       commits:
           - 'fix:'
       changes-prefix: ':ambulance: '
+
     - title: 'Changes'
       labels:
           - 'Documentation'
       commits:
           - 'document:'
       changes-prefix: ':blue_book: '
+
     - title: 'Dependency Updates'
       labels:
           - 'Dependencies'
