@@ -1,0 +1,37 @@
+name: Create Release
+
+on:
+    push:
+        tags:
+            - 'v*.*.*'
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - name: checkout repo
+              uses: actions/checkout@v3
+
+            - name: setup go
+              uses: actions/setup-go@v2
+              with:
+                  go-version: 'stable'
+
+            - name: set tagname
+              id: tag
+              run: echo "::set-output name=version::$(echo $GITHUB_REF | cut -d / -f 3)"
+
+            - name: set major version name
+              id: major_version
+              run: echo "::set-output name=version::$(echo $GITHUB_REF | cut -d / -f 3 | cut -d . -f 1)"
+
+            - name: test
+              run: go test -v ./...
+
+            - name: merge to release branch
+              uses: tukasz/direct-merge-action@v2.0.2
+              with:
+                  source-branch: main
+                  target-branch: release-branch.${{ steps.major_version.outputs.version }}
+                  commit-message: Merge from main for release ${{ steps.tag.outputs.version }}
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
