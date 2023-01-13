@@ -28,6 +28,11 @@ jobs:
             - name: test
               run: go test -v ./...
 
+            - name: release
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: ${{ steps.tag.outputs.version }}
+
             - name: create release branch
               uses: peterjgrainger/action-create-branch@v2.2.0
               env:
