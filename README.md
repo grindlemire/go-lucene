@@ -1,8 +1,6 @@
 # go-lucene
 
-A search string parser for Go programs that will generate SQL for you and has no external dependencies.
-
-Out of the box it supports [Apache Lucene](https://lucene.apache.org/core/9_4_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package.description) but it can be extended to other syntaxes as well. It uses a bottom up grammar parser using the [shift reduce](https://en.wikipedia.org/wiki/Shift-reduce_parser) method.
+A depedency free pure go implementation of a lucene syntax parser that can be used to generate sql filters.
 
 # Usage
 
@@ -14,7 +12,7 @@ if err != nil {
     // handle error
 }
 
-filter, err := lucene.NewSQLDriver().Render(expression)
+filter, err := driver.NewPostgresDriver().Render(expression)
 if err != nil {
     // handle error
 }
@@ -25,9 +23,9 @@ FROM apples
 WHERE %s
 LIMIT 10;
 `
-mySQLQuery := fmt.Sprintf(SQLTemplate, filter)
+sqlQuery := fmt.Sprintf(SQLTemplate, filter)
 
-// mySQLQuery is:
+// sqlQuery is:
 `
 SELECT *
 FROM apples
@@ -40,5 +38,3 @@ WHERE
 LIMIT 10;
 `
 ```
-
-This can also plug directly into an ORM without much issue.

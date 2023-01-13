@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	sq, err := driver.NewSQLDriver().Render(e)
+	sq, err := driver.NewPostgresDriver().Render(e)
 	if err != nil {
 		fmt.Printf("Error rendering sql: %s\n", err)
 		os.Exit(1)

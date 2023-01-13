@@ -118,7 +118,7 @@ func TestSQLDriver(t *testing.T) {
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			got, err := NewSQLDriver().Render(tc.input)
+			got, err := NewPostgresDriver().Render(tc.input)
 			if err != nil {
 				t.Fatalf("got an unexpected error when rendering: %v", err)
 			}

@@ -208,6 +208,14 @@ func TestLex(t *testing.T) {
 				tok(TLiteral, `\(1\+1\)\:2`),
 			},
 		},
+		"quoted_sequence_tokensized": {
+			in: `"foo bar":"works well"`,
+			expected: []Token{
+				tok(TQuoted, "\"foo bar\""),
+				tok(TColon, ":"),
+				tok(TQuoted, "\"works well\""),
+			},
+		},
 	}
 
 	for name, tc := range tcs {
