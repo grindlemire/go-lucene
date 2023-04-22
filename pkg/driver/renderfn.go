@@ -30,7 +30,7 @@ func noop(left, right string) (string, error) {
 func like(left, right string) (string, error) {
 	// at this point the left is considered a column so we should treat it as such
 	// and remove the quotes
-	left = strings.ReplaceAll(left, "\"", "")
+	left = strings.ReplaceAll(left, "'", "")
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
 }
 
@@ -122,7 +122,7 @@ func rang(left, right string) (string, error) {
 			nil
 	}
 
-	return fmt.Sprintf(`%s BETWEEN "%s" AND "%s"`,
+	return fmt.Sprintf(`%s BETWEEN '%s' AND '%s'`,
 			left,
 			strings.Trim(rangeSlice[0], " "),
 			strings.Trim(rangeSlice[1], " "),

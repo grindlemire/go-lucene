@@ -70,7 +70,7 @@ func (b Base) serialize(in any) (s string, err error) {
 	case expr.Column:
 		return fmt.Sprintf("%s", v), nil
 	case string:
-		return fmt.Sprintf("\"%s\"", v), nil
+		return fmt.Sprintf("'%s'", v), nil
 	default:
 		return fmt.Sprintf("%v", v), nil
 	}
