@@ -21,11 +21,11 @@ func TestSQLDriver(t *testing.T) {
 		},
 		"simple_and": {
 			input: expr.AND(expr.Eq("a", 5), expr.Eq("b", "foo")),
-			want:  `(a = 5) AND (b = "foo")`,
+			want:  `(a = 5) AND (b = 'foo')`,
 		},
 		"simple_or": {
 			input: expr.OR(expr.Eq("a", 5), expr.Eq("b", "foo")),
-			want:  `(a = 5) OR (b = "foo")`,
+			want:  `(a = 5) OR (b = 'foo')`,
 		},
 		"simple_not": {
 			input: expr.NOT(expr.Eq("a", 1)),
@@ -33,11 +33,11 @@ func TestSQLDriver(t *testing.T) {
 		},
 		"simple_like": {
 			input: expr.LIKE("a", "%(b|d)%"),
-			want:  `a SIMILAR TO "%(b|d)%"`,
+			want:  `a SIMILAR TO '%(b|d)%'`,
 		},
 		"string_range": {
 			input: expr.Rang("a", "foo", "bar", true),
-			want:  `a BETWEEN "foo" AND "bar"`,
+			want:  `a BETWEEN 'foo' AND 'bar'`,
 		},
 		"mixed_number_range": {
 			input: expr.Rang("a", 1.1, 10, true),
@@ -112,7 +112,7 @@ func TestSQLDriver(t *testing.T) {
 					expr.Not,
 				),
 			),
-			want: `((a = "foo") OR (b = "/b*ar/")) AND (NOT(c BETWEEN "aaa" AND "*"))`,
+			want: `((a = 'foo') OR (b = '/b*ar/')) AND (NOT(c BETWEEN 'aaa' AND '*'))`,
 		},
 	}
 
