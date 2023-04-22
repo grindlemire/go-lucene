@@ -36,7 +36,7 @@ FROM apples
 WHERE
     color = red
     AND (
-      NOT(type = "honey crisp")
+      NOT(type = 'honey crisp')
       OR age_in_months >= 5
     )
 LIMIT 10;
