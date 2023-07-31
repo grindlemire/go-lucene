@@ -25,6 +25,10 @@ const (
 	Literal
 	Wild
 	Regexp
+	Greater
+	Less
+	GreaterEq
+	LessEq
 )
 
 // String renders the operator as a string
@@ -33,33 +37,41 @@ func (o Operator) String() string {
 }
 
 var fromString = map[string]Operator{
-	"AND":      And,
-	"OR":       Or,
-	"EQUALS":   Equals,
-	"LIKE":     Like,
-	"NOT":      Not,
-	"RANGE":    Range,
-	"MUST":     Must,
-	"MUST_NOT": MustNot,
-	"BOOST":    Boost,
-	"FUZZY":    Fuzzy,
-	"LITERAL":  Literal,
-	"WILD":     Wild,
-	"REGEXP":   Regexp,
+	"AND":        And,
+	"OR":         Or,
+	"EQUALS":     Equals,
+	"LIKE":       Like,
+	"NOT":        Not,
+	"RANGE":      Range,
+	"MUST":       Must,
+	"MUST_NOT":   MustNot,
+	"BOOST":      Boost,
+	"FUZZY":      Fuzzy,
+	"LITERAL":    Literal,
+	"WILD":       Wild,
+	"REGEXP":     Regexp,
+	"GREATER":    Greater,
+	"LESS":       Less,
+	"GREATER_EQ": GreaterEq,
+	"LESS_EQ":    LessEq,
 }
 
 var toString = map[Operator]string{
-	And:     "AND",
-	Or:      "OR",
-	Equals:  "EQUALS",
-	Like:    "LIKE",
-	Not:     "NOT",
-	Range:   "RANGE",
-	Must:    "MUST",
-	MustNot: "MUST_NOT",
-	Boost:   "BOOST",
-	Fuzzy:   "FUZZY",
-	Literal: "LITERAL",
-	Wild:    "WILD",
-	Regexp:  "REGEXP",
+	And:       "AND",
+	Or:        "OR",
+	Equals:    "EQUALS",
+	Like:      "LIKE",
+	Not:       "NOT",
+	Range:     "RANGE",
+	Must:      "MUST",
+	MustNot:   "MUST_NOT",
+	Boost:     "BOOST",
+	Fuzzy:     "FUZZY",
+	Literal:   "LITERAL",
+	Wild:      "WILD",
+	Regexp:    "REGEXP",
+	Greater:   "GREATER",
+	Less:      "LESS",
+	GreaterEq: "GREATER_EQ",
+	LessEq:    "LESS_EQ",
 }

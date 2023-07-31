@@ -77,6 +77,22 @@ func Eq(a any, b any) *Expression {
 	return Expr(a, Equals, b)
 }
 
+func GREATER(a any, b any) *Expression {
+	return Expr(a, Greater, b)
+}
+
+func LESS(a any, b any) *Expression {
+	return Expr(a, Less, b)
+}
+
+func GREATEREQ(a any, b any) *Expression {
+	return Expr(a, GreaterEq, b)
+}
+
+func LESSEQ(a any, b any) *Expression {
+	return Expr(a, LessEq, b)
+}
+
 // LIKE creates a new fuzzy matching LIKE expression
 func LIKE(a any, b any) *Expression {
 	return Expr(a, Like, b)

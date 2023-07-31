@@ -9,18 +9,22 @@ import (
 type validator = func(*Expression) (err error)
 
 var validators = map[Operator]validator{
-	Equals:  validateEquals,
-	And:     validateAnd,
-	Or:      validateOr,
-	Not:     validateNot,
-	Range:   validateRange,
-	Must:    validateMust,
-	MustNot: validateMustNot,
-	Boost:   validateBoost,
-	Fuzzy:   validateFuzzy,
-	Literal: validateLiteral,
-	Wild:    validateWild,
-	Regexp:  validateRegexp,
+	Equals:    validateEquals,
+	And:       validateAnd,
+	Or:        validateOr,
+	Not:       validateNot,
+	Range:     validateRange,
+	Must:      validateMust,
+	MustNot:   validateMustNot,
+	Boost:     validateBoost,
+	Fuzzy:     validateFuzzy,
+	Literal:   validateLiteral,
+	Wild:      validateWild,
+	Regexp:    validateRegexp,
+	Greater:   validateCompare,
+	Less:      validateCompare,
+	GreaterEq: validateCompare,
+	LessEq:    validateCompare,
 }
 
 func validateEquals(e *Expression) (err error) {
@@ -34,6 +38,22 @@ func validateEquals(e *Expression) (err error) {
 
 	if !isLiteralExpr(e.Left) {
 		return errors.New("EQUALS validation: left value must be a literal expression")
+	}
+
+	return nil
+}
+
+func validateCompare(e *Expression) (err error) {
+	if e == nil {
+		return nil
+	}
+
+	if e.Op != Greater && e.Op != Less && e.Op != GreaterEq && e.Op != LessEq {
+		return errors.New("COMPARE validation error: must have equals operator")
+	}
+
+	if !isLiteralExpr(e.Left) {
+		return errors.New("COMPARE validation: left value must be a literal expression")
 	}
 
 	return nil
