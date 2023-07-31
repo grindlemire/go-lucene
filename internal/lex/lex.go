@@ -41,8 +41,6 @@ const (
 	TQuoted
 	TRegexp
 
-	// temporary
-
 	// precedance of operators. Order matters here. This might need to be abstracted
 	// to a grammar specific precedence but for now it is fine here.
 	TEqual
