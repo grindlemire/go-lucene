@@ -79,6 +79,22 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.Rang("a", 1, "*", true),
 			want:  `a >= 1`,
 		},
+		"lt": {
+			input: expr.LESS("a", 10),
+			want:  `a < 10`,
+		},
+		"lte": {
+			input: expr.LESSEQ("a", 10),
+			want:  `a <= 10`,
+		},
+		"gt": {
+			input: expr.GREATER("a", 10),
+			want:  `a > 10`,
+		},
+		"gte": {
+			input: expr.GREATEREQ("a", 10),
+			want:  `a >= 10`,
+		},
 		"must_ignored": {
 			input: expr.MUST(expr.Eq("a", 1)),
 			want:  `a = 1`,

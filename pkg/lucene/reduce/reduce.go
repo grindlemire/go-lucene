@@ -75,13 +75,13 @@ func compare(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	// ensure the middle token is an equals
+	// ensure our middle tokens start with a colon
 	tok, ok := elems[1].(lex.Token)
 	if !ok || (tok.Typ != lex.TColon) {
 		return elems, nonTerminals, false
 	}
 
-	// ensure the middle token is an equals
+	// ensure the colon is followed by a > or <
 	tokCmp, ok := elems[2].(lex.Token)
 	if !ok || (tokCmp.Typ != lex.TGreater && tokCmp.Typ != lex.TLess) {
 		return elems, nonTerminals, false
@@ -121,19 +121,19 @@ func compareEq(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool)
 		return elems, nonTerminals, false
 	}
 
-	// ensure the middle token is an equals
+	// ensure our middle tokens start with a colon
 	tok, ok := elems[1].(lex.Token)
 	if !ok || (tok.Typ != lex.TColon) {
 		return elems, nonTerminals, false
 	}
 
-	// ensure the middle token is an equals
+	// ensure the colon is followed by a > or <
 	tokCmp, ok := elems[2].(lex.Token)
 	if !ok || (tokCmp.Typ != lex.TGreater && tokCmp.Typ != lex.TLess) {
 		return elems, nonTerminals, false
 	}
 
-	// ensure the middle token is an equals
+	// ensure the middle tokens are followed by an =
 	tokEp, ok := elems[3].(lex.Token)
 	if !ok || (tokEp.Typ != lex.TEqual) {
 		return elems, nonTerminals, false

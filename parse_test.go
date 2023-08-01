@@ -491,6 +491,15 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
+		"test_elastic_greater_than_precedance": {
+			input: "a:>10 AND -b:<=-20",
+			want: expr.AND(
+				expr.GREATER("a", 10),
+				expr.MUSTNOT(
+					expr.LESSEQ("b", -20),
+				),
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -515,7 +524,11 @@ func TestParseLucene(t *testing.T) {
 			}
 
 			if !reflect.DeepEqual(got, &gotSerialized) {
-				t.Fatalf(errTemplate, "roundtrip serialization is not stable", tc.want, got)
+				// occasionally this test fails and the error message makes the test look like
+				// the want and got are equivalent. This is almost always an unexported var is different
+				// Using testify/require will show the error if it shows up
+				// require.Equal(t, tc.want, gotSerialized)
+				t.Fatalf(errTemplate, "roundtrip serialization is not stable", tc.want, gotSerialized)
 			}
 		})
 	}
