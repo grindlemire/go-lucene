@@ -27,9 +27,9 @@ type reducer func(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bo
 var reducers = []reducer{
 	and,
 	or,
+	equal,
 	compare,
 	compareEq,
-	equal,
 	not,
 	sub,
 	must,
@@ -113,7 +113,7 @@ func compare(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		}
 	}
 
-	return elems, drop(nonTerminals, 1), true
+	return elems, drop(nonTerminals, 2), true
 }
 
 func compareEq(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
@@ -165,7 +165,7 @@ func compareEq(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool)
 		}
 	}
 
-	return elems, drop(nonTerminals, 1), true
+	return elems, drop(nonTerminals, 3), true
 
 }
 

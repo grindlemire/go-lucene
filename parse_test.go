@@ -46,6 +46,14 @@ func TestParseLucene(t *testing.T) {
 			input: "a:<=22",
 			want:  expr.LESSEQ("a", 22),
 		},
+		"basic_greater_less_with_number": {
+			input: "a:<22 AND b:>33",
+			want:  expr.AND(expr.LESS("a", 22), expr.GREATER("b", 33)),
+		},
+		"basic_greater_less_eq_with_number": {
+			input: "a:<=22 AND b:>=33",
+			want:  expr.AND(expr.LESSEQ("a", 22), expr.GREATEREQ("b", 33)),
+		},
 		"basic_wild_equal_with_*": {
 			input: "a:b*",
 			want:  expr.Eq("a", "b*"),
