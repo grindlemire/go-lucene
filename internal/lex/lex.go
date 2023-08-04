@@ -44,6 +44,8 @@ const (
 	// precedance of operators. Order matters here. This might need to be abstracted
 	// to a grammar specific precedence but for now it is fine here.
 	TEqual
+	TGreater
+	TLess
 	TColon
 	TPlus
 	TMinus
@@ -62,8 +64,6 @@ const (
 	TTO
 	TLSquare
 	TRSquare
-	TGreater
-	TLess
 
 	// start and end operators
 	TEOF

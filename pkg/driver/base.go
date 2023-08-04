@@ -9,19 +9,23 @@ import (
 // Shared is the shared set of render functions that can be used as a base and overriden
 // for each flavor of sql
 var Shared = map[expr.Operator]RenderFN{
-	expr.Literal: literal,
-	expr.And:     basicCompound(expr.And),
-	expr.Or:      basicCompound(expr.Or),
-	expr.Not:     basicWrap(expr.Not),
-	expr.Equals:  equals,
-	expr.Range:   rang,
-	expr.Must:    noop,                // must doesn't really translate to sql
-	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
-	expr.Fuzzy:   noop,
-	expr.Boost:   noop,
-	expr.Wild:    noop, // wildcard expressions can render as literal strings
-	expr.Regexp:  noop, // regexp expressions can render as literal strings
-	expr.Like:    like,
+	expr.Literal:   literal,
+	expr.And:       basicCompound(expr.And),
+	expr.Or:        basicCompound(expr.Or),
+	expr.Not:       basicWrap(expr.Not),
+	expr.Equals:    equals,
+	expr.Range:     rang,
+	expr.Must:      noop,                // must doesn't really translate to sql
+	expr.MustNot:   basicWrap(expr.Not), // must not is really just a negation
+	expr.Fuzzy:     noop,
+	expr.Boost:     noop,
+	expr.Wild:      noop, // wildcard expressions can render as literal strings
+	expr.Regexp:    noop, // regexp expressions can render as literal strings
+	expr.Like:      like,
+	expr.Greater:   greater,
+	expr.GreaterEq: greaterEq,
+	expr.Less:      less,
+	expr.LessEq:    lessEq,
 }
 
 // Base is the base driver that is embedded in each driver

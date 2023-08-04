@@ -28,6 +28,8 @@ var reducers = []reducer{
 	and,
 	or,
 	equal,
+	compare,
+	compareEq,
 	not,
 	sub,
 	must,
@@ -66,6 +68,105 @@ func equal(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	}
 	// we consumed one terminal, the =
 	return elems, drop(nonTerminals, 1), true
+}
+
+func compare(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+	if len(elems) != 4 {
+		return elems, nonTerminals, false
+	}
+
+	// ensure our middle tokens start with a colon
+	tok, ok := elems[1].(lex.Token)
+	if !ok || (tok.Typ != lex.TColon) {
+		return elems, nonTerminals, false
+	}
+
+	// ensure the colon is followed by a > or <
+	tokCmp, ok := elems[2].(lex.Token)
+	if !ok || (tokCmp.Typ != lex.TGreater && tokCmp.Typ != lex.TLess) {
+		return elems, nonTerminals, false
+	}
+
+	// make sure the left is a literal and right is an expression
+	term, ok := elems[0].(*expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+	value, ok := elems[3].(*expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	if tokCmp.Typ == lex.TGreater {
+		elems = []any{
+			expr.GREATER(
+				term,
+				value,
+			),
+		}
+	} else {
+		elems = []any{
+			expr.LESS(
+				term,
+				value,
+			),
+		}
+	}
+
+	return elems, drop(nonTerminals, 2), true
+}
+
+func compareEq(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+	if len(elems) != 5 {
+		return elems, nonTerminals, false
+	}
+
+	// ensure our middle tokens start with a colon
+	tok, ok := elems[1].(lex.Token)
+	if !ok || (tok.Typ != lex.TColon) {
+		return elems, nonTerminals, false
+	}
+
+	// ensure the colon is followed by a > or <
+	tokCmp, ok := elems[2].(lex.Token)
+	if !ok || (tokCmp.Typ != lex.TGreater && tokCmp.Typ != lex.TLess) {
+		return elems, nonTerminals, false
+	}
+
+	// ensure the middle tokens are followed by an =
+	tokEp, ok := elems[3].(lex.Token)
+	if !ok || (tokEp.Typ != lex.TEqual) {
+		return elems, nonTerminals, false
+	}
+
+	// make sure the left is a literal and right is an expression
+	term, ok := elems[0].(*expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+	value, ok := elems[4].(*expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	if tokCmp.Typ == lex.TGreater {
+		elems = []any{
+			expr.GREATEREQ(
+				term,
+				value,
+			),
+		}
+	} else {
+		elems = []any{
+			expr.LESSEQ(
+				term,
+				value,
+			),
+		}
+	}
+
+	return elems, drop(nonTerminals, 3), true
+
 }
 
 func and(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {

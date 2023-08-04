@@ -8,18 +8,22 @@ import (
 type renderer func(e *Expression, verbose bool) string
 
 var renderers = map[Operator]renderer{
-	Equals:  renderEquals,
-	And:     renderBasic,
-	Or:      renderBasic,
-	Not:     renderWrapper,
-	Range:   renderRange,
-	Must:    renderMust,
-	MustNot: renderMustNot,
-	Boost:   renderBoost,
-	Fuzzy:   renderFuzzy,
-	Literal: renderLiteral,
-	Wild:    renderLiteral,
-	Regexp:  renderLiteral,
+	Equals:    renderEquals,
+	And:       renderBasic,
+	Or:        renderBasic,
+	Not:       renderWrapper,
+	Range:     renderRange,
+	Must:      renderMust,
+	MustNot:   renderMustNot,
+	Boost:     renderBoost,
+	Fuzzy:     renderFuzzy,
+	Literal:   renderLiteral,
+	Wild:      renderLiteral,
+	Regexp:    renderLiteral,
+	Greater:   renderBasic,
+	Less:      renderBasic,
+	GreaterEq: renderBasic,
+	LessEq:    renderBasic,
 }
 
 func renderEquals(e *Expression, verbose bool) string {

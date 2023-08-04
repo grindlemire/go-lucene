@@ -34,6 +34,22 @@ func like(left, right string) (string, error) {
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
 }
 
+func greater(left, right string) (string, error) {
+	return fmt.Sprintf("%s > %s", left, right), nil
+}
+
+func less(left, right string) (string, error) {
+	return fmt.Sprintf("%s < %s", left, right), nil
+}
+
+func greaterEq(left, right string) (string, error) {
+	return fmt.Sprintf("%s >= %s", left, right), nil
+}
+
+func lessEq(left, right string) (string, error) {
+	return fmt.Sprintf("%s <= %s", left, right), nil
+}
+
 // rang is more complicated than the others because it has to handle inclusive and exclusive ranges,
 // number and string ranges, and ranges that only have one bound
 func rang(left, right string) (string, error) {

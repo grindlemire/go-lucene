@@ -35,6 +35,22 @@ func TestLex(t *testing.T) {
 				tok(TLiteral, "c"),
 			},
 		},
+		"negatives_in_elastic_comparison": {
+			in: "a:<-10 AND -b:>=20",
+			expected: []Token{
+				tok(TLiteral, "a"),
+				tok(TColon, ":"),
+				tok(TLess, "<"),
+				tok(TLiteral, "-10"),
+				tok(TAnd, "AND"),
+				tok(TMinus, "-"),
+				tok(TLiteral, "b"),
+				tok(TColon, ":"),
+				tok(TGreater, ">"),
+				tok(TEqual, "="),
+				tok(TLiteral, "20"),
+			},
+		},
 		"literals": {
 			in:       "abc",
 			expected: []Token{tok(TLiteral, "abc")},

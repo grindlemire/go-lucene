@@ -22,6 +22,13 @@ import (
 // 		id
 // 		[id TO id]
 
+// Added grammar to be compatible with elastic lucene
+// See https://www.elastic.co/guide/en/elasticsearch/reference/8.9/query-dsl-query-string-query.html#query-string-syntax
+//      E:>E
+//      E:>=E
+//      E:<E
+//      E:<=E
+
 // Expression is an interface over all the different types of expressions
 // that we can parse out of lucene
 type Expression struct {
@@ -54,6 +61,7 @@ func (e Expression) GoString() string {
 	if e.Op == Undefined {
 		return ""
 	}
+	fmt.Printf("E: %+v %+v %+v | %+v %+v\n", e.Left, e.Op, e.Right, e.boostPower, e.fuzzyDistance)
 	return renderers[e.Op](&e, true)
 }
 
@@ -75,6 +83,22 @@ func REGEXP(in any) *Expression {
 // Eq creates a new EQUALS expression
 func Eq(a any, b any) *Expression {
 	return Expr(a, Equals, b)
+}
+
+func GREATER(a any, b any) *Expression {
+	return Expr(a, Greater, b)
+}
+
+func LESS(a any, b any) *Expression {
+	return Expr(a, Less, b)
+}
+
+func GREATEREQ(a any, b any) *Expression {
+	return Expr(a, GreaterEq, b)
+}
+
+func LESSEQ(a any, b any) *Expression {
+	return Expr(a, LessEq, b)
 }
 
 // LIKE creates a new fuzzy matching LIKE expression
@@ -170,7 +194,7 @@ func (c Column) GoString() string {
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {
-	if isStringlike(left) && (op == Equals || op == Range) {
+	if isStringlike(left) && canOperateOnColumn(op) {
 		left = wrapInColumn(left)
 	}
 
@@ -297,7 +321,7 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	e.Op = fromString[c.Operator]
 
 	// if the left hand side is a string then it must be a column
-	if isStringlike(e.Left) && (e.Op == Equals || e.Op == Range) {
+	if isStringlike(e.Left) && canOperateOnColumn(e.Op) {
 		e.Left = wrapInColumn(e.Left)
 	}
 
@@ -422,6 +446,12 @@ func isStringlike(in any) bool {
 	}
 
 	return isStr
+}
+
+// canOperateOnColumn checks if an operator can be applied to a column (the left side of the operator).
+// Example: equal can be applied onto a column (e.g. myColumn = 'foo') but Boost (^) cannot.
+func canOperateOnColumn(op Operator) bool {
+	return op == Equals || op == Range || op == Greater || op == Less || op == GreaterEq || op == LessEq
 }
 
 func wrapInColumn(in any) (out *Expression) {

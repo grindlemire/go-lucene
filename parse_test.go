@@ -30,6 +30,30 @@ func TestParseLucene(t *testing.T) {
 			input: "a:5",
 			want:  expr.Eq("a", 5),
 		},
+		"basic_greater_with_number": {
+			input: "a:>22",
+			want:  expr.GREATER("a", 22),
+		},
+		"basic_greater_eq_with_number": {
+			input: "a:>=22",
+			want:  expr.GREATEREQ("a", 22),
+		},
+		"basic_less_with_number": {
+			input: "a:<22",
+			want:  expr.LESS("a", 22),
+		},
+		"basic_less_eq_with_number": {
+			input: "a:<=22",
+			want:  expr.LESSEQ("a", 22),
+		},
+		"basic_greater_less_with_number": {
+			input: "a:<22 AND b:>33",
+			want:  expr.AND(expr.LESS("a", 22), expr.GREATER("b", 33)),
+		},
+		"basic_greater_less_eq_with_number": {
+			input: "a:<=22 AND b:>=33",
+			want:  expr.AND(expr.LESSEQ("a", 22), expr.GREATEREQ("b", 33)),
+		},
 		"basic_wild_equal_with_*": {
 			input: "a:b*",
 			want:  expr.Eq("a", "b*"),
@@ -467,6 +491,15 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
+		"test_elastic_greater_than_precedance": {
+			input: "a:>10 AND -b:<=-20",
+			want: expr.AND(
+				expr.GREATER("a", 10),
+				expr.MUSTNOT(
+					expr.LESSEQ("b", -20),
+				),
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -491,7 +524,11 @@ func TestParseLucene(t *testing.T) {
 			}
 
 			if !reflect.DeepEqual(got, &gotSerialized) {
-				t.Fatalf(errTemplate, "roundtrip serialization is not stable", tc.want, got)
+				// occasionally this test fails and the error message makes the test look like
+				// the want and got are equivalent. This is almost always an unexported var is different
+				// Using testify/require will show the error if it shows up
+				// require.Equal(t, tc.want, gotSerialized)
+				t.Fatalf(errTemplate, "roundtrip serialization is not stable", tc.want, gotSerialized)
 			}
 		})
 	}
