@@ -99,14 +99,6 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.MUST(expr.Eq("a", 1)),
 			want:  `a = 1`,
 		},
-		"fuzzy_ignored": {
-			input: expr.FUZZY(expr.Eq("a", 1)),
-			want:  `a = 1`,
-		},
-		"boost_ignored": {
-			input: expr.BOOST(expr.Eq("a", 1)),
-			want:  `a = 1`,
-		},
 		"nested_filter": {
 			input: expr.Expr(
 				expr.Expr(
@@ -128,7 +120,15 @@ func TestSQLDriver(t *testing.T) {
 					expr.Not,
 				),
 			),
-			want: `((a = 'foo') OR (b = '/b*ar/')) AND (NOT(c BETWEEN 'aaa' AND '*'))`,
+			want: `((a = 'foo') OR (b ~ '/b*ar/')) AND (NOT(c BETWEEN 'aaa' AND '*'))`,
+		},
+		"space_in_fieldname": {
+			input: expr.Eq("a b", 1),
+			want:  `"a b" = 1`,
+		},
+		"quoted_column_name": {
+			input: expr.Eq(`"foobar"`, 1),
+			want:  `"foobar" = 1`,
 		},
 	}
 

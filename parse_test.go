@@ -208,7 +208,11 @@ func TestParseLucene(t *testing.T) {
 		},
 		"basic_escaping": {
 			input: `a:\(1\+1\)\:2`,
-			want:  expr.Eq("a", expr.Lit(`\(1\+1\)\:2`)),
+			want:  expr.Eq("a", expr.Lit(`(1+1):2`)),
+		},
+		"escaped_column_name": {
+			input: `foo\ bar:b`,
+			want:  expr.Eq("foo bar", "b"),
 		},
 		"boost_key_value": {
 			input: "a:b^2 AND foo",

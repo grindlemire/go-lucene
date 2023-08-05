@@ -34,10 +34,10 @@ func TestExprJSON(t *testing.T) {
 		"flat_regexp": {
 			input: `{
 				"left": "a",
-				"operator": "EQUALS",
+				"operator": "LIKE",
 				"right": "/b [c]/"
 			  }`,
-			want: Eq(Lit("a"), REGEXP("/b [c]/")),
+			want: LIKE(Lit("a"), REGEXP("/b [c]/")),
 		},
 		"flat_inclusive_range": {
 			input: `{
@@ -140,6 +140,17 @@ func TestExprJSON(t *testing.T) {
 				"distance": 2
 			}`,
 			want: FUZZY("a", 2),
+		},
+		"flat_in_list": {
+			input: `{
+				"left": "a",
+				"operator": "IN",
+				"right": {
+					"left": ["b", "c"],
+					"operator": "LIST"
+				}	
+			}`,
+			want: IN("a", LIST(Lit("b"), Lit("c"))),
 		},
 		"basic_and": {
 			input: `{
@@ -284,7 +295,7 @@ func TestExprJSON(t *testing.T) {
 						"left": {
 							"left": {
 								"left": "b",
-								"operator": "EQUALS",
+								"operator": "LIKE",
 								"right": "/foo?ar.*/"
 							},
 							"operator": "NOT"
@@ -327,7 +338,7 @@ func TestExprJSON(t *testing.T) {
 			want: OR(
 				AND(
 					Rang("a", 1, "*", true),
-					BOOST(NOT(Eq("b", REGEXP("/foo?ar.*/")))),
+					BOOST(NOT(LIKE("b", REGEXP("/foo?ar.*/")))),
 				),
 				OR(
 					MUST(Rang("c", "*", "foo", false)),

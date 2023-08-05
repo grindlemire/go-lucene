@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
@@ -9,16 +10,16 @@ import (
 // Shared is the shared set of render functions that can be used as a base and overriden
 // for each flavor of sql
 var Shared = map[expr.Operator]RenderFN{
-	expr.Literal:   literal,
-	expr.And:       basicCompound(expr.And),
-	expr.Or:        basicCompound(expr.Or),
-	expr.Not:       basicWrap(expr.Not),
-	expr.Equals:    equals,
-	expr.Range:     rang,
-	expr.Must:      noop,                // must doesn't really translate to sql
-	expr.MustNot:   basicWrap(expr.Not), // must not is really just a negation
-	expr.Fuzzy:     noop,
-	expr.Boost:     noop,
+	expr.Literal: literal,
+	expr.And:     basicCompound(expr.And),
+	expr.Or:      basicCompound(expr.Or),
+	expr.Not:     basicWrap(expr.Not),
+	expr.Equals:  equals,
+	expr.Range:   rang,
+	expr.Must:    noop,                // must doesn't really translate to sql
+	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
+	// expr.Fuzzy:     unsupported,
+	// expr.Boost:     unsupported,
 	expr.Wild:      noop, // wildcard expressions can render as literal strings
 	expr.Regexp:    noop, // regexp expressions can render as literal strings
 	expr.Like:      like,
@@ -26,6 +27,8 @@ var Shared = map[expr.Operator]RenderFN{
 	expr.GreaterEq: greaterEq,
 	expr.Less:      less,
 	expr.LessEq:    lessEq,
+	expr.In:        inFn,
+	expr.List:      list,
 }
 
 // Base is the base driver that is embedded in each driver
@@ -51,7 +54,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 
 	fn, ok := b.renderFNs[e.Op]
 	if !ok {
-		return s, fmt.Errorf("unable to render operator [%s] - please file an issue for this", e.Op)
+		return s, fmt.Errorf("unable to render operator [%s]", e.Op)
 	}
 
 	return fn(left, right)
@@ -65,6 +68,16 @@ func (b Base) serialize(in any) (s string, err error) {
 	switch v := in.(type) {
 	case *expr.Expression:
 		return b.Render(v)
+	case []*expr.Expression:
+		strs := []string{}
+		for _, e := range v {
+			s, err = b.Render(e)
+			if err != nil {
+				return s, err
+			}
+			strs = append(strs, s)
+		}
+		return strings.Join(strs, ", "), nil
 	case *expr.RangeBoundary:
 		if v.Inclusive {
 			return fmt.Sprintf("[%s, %s]", v.Min, v.Max), nil

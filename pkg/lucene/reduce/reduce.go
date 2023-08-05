@@ -60,14 +60,50 @@ func equal(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 		return elems, nonTerminals, false
 	}
 
-	elems = []any{
-		expr.Eq(
-			term,
-			value,
-		),
+	if literals, ok := isChainedOrLiterals(value); ok && len(literals) > 1 {
+		elems = []any{
+			expr.IN(
+				term,
+				expr.LIST(literals),
+			),
+		}
+	} else {
+		elems = []any{
+			expr.Eq(
+				term,
+				value,
+			),
+		}
 	}
 	// we consumed one terminal, the =
 	return elems, drop(nonTerminals, 1), true
+}
+
+func isChainedOrLiterals(in *expr.Expression) (out []*expr.Expression, ok bool) {
+	if in == nil {
+		return out, false
+	}
+
+	if in.Op == expr.Literal {
+		return []*expr.Expression{in}, true
+	}
+
+	if in.Op == expr.Or {
+		left, ok := in.Left.(*expr.Expression)
+		if !ok {
+			return out, false
+		}
+		right, ok := in.Right.(*expr.Expression)
+		if !ok {
+			return out, false
+		}
+
+		l, isLLiterals := isChainedOrLiterals(left)
+		r, isRLiterals := isChainedOrLiterals(right)
+		return append(l, r...), isLLiterals && isRLiterals
+	}
+
+	return out, false
 }
 
 func compare(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {

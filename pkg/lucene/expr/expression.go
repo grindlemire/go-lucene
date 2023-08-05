@@ -52,7 +52,11 @@ func (e Expression) String() string {
 	if e.Op == Undefined {
 		return ""
 	}
-	return renderers[e.Op](&e, false)
+	renderer, found := renderers[e.Op]
+	if !found {
+		return "ERROR: unable to render string for unsupported operator"
+	}
+	return renderer(&e, false)
 }
 
 // GoString prints a verbose string representation. Useful for debugging exactly
@@ -61,8 +65,11 @@ func (e Expression) GoString() string {
 	if e.Op == Undefined {
 		return ""
 	}
-	fmt.Printf("E: %+v %+v %+v | %+v %+v\n", e.Left, e.Op, e.Right, e.boostPower, e.fuzzyDistance)
-	return renderers[e.Op](&e, true)
+	renderer, found := renderers[e.Op]
+	if !found {
+		return "ERROR: unable to render gostring for unsupported operator"
+	}
+	return renderer(&e, true)
 }
 
 // Lit represents a literal expression
@@ -104,6 +111,14 @@ func LESSEQ(a any, b any) *Expression {
 // LIKE creates a new fuzzy matching LIKE expression
 func LIKE(a any, b any) *Expression {
 	return Expr(a, Like, b)
+}
+
+func IN(a any, b any) *Expression {
+	return Expr(a, In, b)
+}
+
+func LIST(a ...any) *Expression {
+	return Expr(a, List)
 }
 
 // AND creates an AND expression
@@ -194,7 +209,7 @@ func (c Column) GoString() string {
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {
-	if isStringlike(left) && canOperateOnColumn(op) {
+	if isStringlike(left) && operatesOnColumn(op) {
 		left = wrapInColumn(left)
 	}
 
@@ -205,6 +220,13 @@ func Expr(left any, op Operator, right ...any) *Expression {
 	e := ptr(empty())
 	e.Left = left
 	e.Op = op
+
+	// support using a like operator with wildcards or regex
+	if op == Equals && len(right) == 1 && shouldUseLikeOperator(right[0]) {
+		e.Op = Like
+		e.Right = right[0].(*Expression)
+		return e
+	}
 
 	// support changing boost power
 	if op == Boost {
@@ -231,6 +253,29 @@ func Expr(left any, op Operator, right ...any) *Expression {
 			Max:       literalToExpr(right[1]),
 			Inclusive: right[2].(bool),
 		}
+		return e
+	}
+
+	// support passing a slice to an IN operator
+	if op == In && len(right) > 0 {
+		e.Right = right[0].(*Expression)
+		return e
+	}
+
+	if op == List {
+		// super gross but this is how go handles any types that are slices
+		slice, isSlice := left.([]any)[0].([]*Expression)
+		if isSlice {
+			e.Left = slice
+			return e
+		}
+
+		l := left.([]any)
+		vals := []*Expression{}
+		for _, v := range l {
+			vals = append(vals, v.(*Expression))
+		}
+		e.Left = vals
 		return e
 	}
 
@@ -306,22 +351,43 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		return err
 	}
 
+	// unmarshal the current layer in the json first, then worry about
+	// the left and right hand subobjects
 	var c jsonExpression
 	err = json.Unmarshal(data, &c)
 	if err != nil {
 		return err
 	}
 
-	e.Left = ptr(empty())
-	err = json.Unmarshal(c.Left, e.Left)
-	if err != nil {
-		return err
+	// check if it is an array so we can parse it into literals
+	if isArray(json.RawMessage(c.Left)) {
+		var l []json.RawMessage
+		err = json.Unmarshal(c.Left, &l)
+		if err != nil {
+			return err
+		}
+
+		exprs := []*Expression{}
+		for _, v := range l {
+			parsedExp, err := unmarshalLiteral(v)
+			if err != nil {
+				return err
+			}
+			exprs = append(exprs, parsedExp)
+		}
+		e.Left = exprs
+	} else {
+		e.Left = ptr(empty())
+		err = json.Unmarshal(c.Left, e.Left)
+		if err != nil {
+			return err
+		}
 	}
 
 	e.Op = fromString[c.Operator]
 
 	// if the left hand side is a string then it must be a column
-	if isStringlike(e.Left) && canOperateOnColumn(e.Op) {
+	if isStringlike(e.Left) && operatesOnColumn(e.Op) {
 		e.Left = wrapInColumn(e.Left)
 	}
 
@@ -389,6 +455,15 @@ func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 	return literalToExpr(s), nil
 }
 
+func isArray(in json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(in)
+	if len(trimmed) == 0 {
+		return false
+	}
+
+	return trimmed[0] == '[' && trimmed[len(trimmed)-1] == ']'
+}
+
 // looksLikeRangeBoundary checks whether the marshalled json has the keys for a range boundary.
 // This is a hack but we need to know whether to unmarshal an expression or a range boundary.
 func looksLikeRangeBoundary(in json.RawMessage) bool {
@@ -448,15 +523,27 @@ func isStringlike(in any) bool {
 	return isStr
 }
 
-// canOperateOnColumn checks if an operator can be applied to a column (the left side of the operator).
+// operatesOnColumn checks if an operator can be applied to a column (the left side of the operator).
 // Example: equal can be applied onto a column (e.g. myColumn = 'foo') but Boost (^) cannot.
-func canOperateOnColumn(op Operator) bool {
-	return op == Equals || op == Range || op == Greater || op == Less || op == GreaterEq || op == LessEq
+func operatesOnColumn(op Operator) bool {
+	return op == Equals ||
+		op == Range ||
+		op == Greater ||
+		op == Less ||
+		op == GreaterEq ||
+		op == LessEq ||
+		op == In ||
+		op == Like
 }
 
+// wrapInColumn converts a string to a column and enforces column
+// invariants (e.g. if the column name contains a space then it must be quoted)
 func wrapInColumn(in any) (out *Expression) {
 	s, isStr := in.(string)
 	if isStr {
+		if strings.Contains(s, " ") {
+			s = fmt.Sprintf(`"%s"`, s)
+		}
 		return Lit(Column(s))
 	}
 
@@ -464,6 +551,9 @@ func wrapInColumn(in any) (out *Expression) {
 	if isExpr {
 		s, isStr = e.Left.(string)
 		if isStr {
+			if strings.Contains(s, " ") {
+				s = fmt.Sprintf(`"%s"`, s)
+			}
 			return Lit(Column(s))
 		}
 	}
@@ -494,4 +584,12 @@ func empty() Expression {
 
 func ptr[T any](in T) *T {
 	return &in
+}
+
+func shouldUseLikeOperator(in any) bool {
+	expr, isExpr := in.(*Expression)
+	if !isExpr {
+		return false
+	}
+	return expr.Op == Wild || expr.Op == Regexp
 }

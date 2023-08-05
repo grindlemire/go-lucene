@@ -198,26 +198,36 @@ func (p *parser) reduce() (err error) {
 }
 
 func parseLiteral(token lex.Token) (e any, err error) {
+	// if it is a quote then remove escape
 	if token.Typ == lex.TQuoted {
 		return expr.Lit(strings.ReplaceAll(token.Val, "\"", "")), nil
 	}
 
+	// if it is a regexp then parse it
 	if token.Typ == lex.TRegexp {
 		return expr.REGEXP(token.Val), nil
 	}
 
+	// attempt to parse it as an integer
 	ival, err := strconv.Atoi(token.Val)
 	if err == nil {
 		return expr.Lit(ival), nil
 	}
 
+	// attempt to parse it as a float
 	fval, err := strconv.ParseFloat(token.Val, 64)
 	if err == nil {
 		return expr.Lit(fval), nil
 	}
 
+	// if it contains unescaped wildcards then it is a wildcard string
 	if strings.ContainsAny(token.Val, "*?") {
 		return expr.WILD(token.Val), nil
+	}
+
+	// if it contains an escape string then strip it out now
+	if strings.Contains(token.Val, `\`) {
+		return expr.Lit(strings.ReplaceAll(token.Val, `\`, "")), nil
 	}
 
 	return expr.Lit(token.Val), nil
