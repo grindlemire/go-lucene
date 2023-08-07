@@ -85,6 +85,10 @@ func (b Base) serialize(in any) (s string, err error) {
 		return fmt.Sprintf("(%s, %s)", v.Min, v.Max), nil
 
 	case expr.Column:
+		if strings.Contains(string(v), " ") {
+			sv := fmt.Sprintf(`"%s"`, string(v))
+			return sv, nil
+		}
 		return fmt.Sprintf("%s", v), nil
 	case string:
 		return fmt.Sprintf("'%s'", v), nil

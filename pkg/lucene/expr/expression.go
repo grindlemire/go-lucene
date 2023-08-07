@@ -541,9 +541,6 @@ func operatesOnColumn(op Operator) bool {
 func wrapInColumn(in any) (out *Expression) {
 	s, isStr := in.(string)
 	if isStr {
-		if strings.Contains(s, " ") {
-			s = fmt.Sprintf(`"%s"`, s)
-		}
 		return Lit(Column(s))
 	}
 
@@ -551,9 +548,6 @@ func wrapInColumn(in any) (out *Expression) {
 	if isExpr {
 		s, isStr = e.Left.(string)
 		if isStr {
-			if strings.Contains(s, " ") {
-				s = fmt.Sprintf(`"%s"`, s)
-			}
 			return Lit(Column(s))
 		}
 	}

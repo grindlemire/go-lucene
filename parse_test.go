@@ -56,11 +56,11 @@ func TestParseLucene(t *testing.T) {
 		},
 		"basic_wild_equal_with_*": {
 			input: "a:b*",
-			want:  expr.Eq("a", "b*"),
+			want:  expr.LIKE("a", "b*"),
 		},
 		"basic_wild_equal_with_?": {
 			input: "a:b?z",
-			want:  expr.Eq("a", expr.WILD("b?z")),
+			want:  expr.LIKE("a", expr.WILD("b?z")),
 		},
 		"basic_inclusive_range": {
 			input: "a:[* TO 5]",
@@ -173,14 +173,12 @@ func TestParseLucene(t *testing.T) {
 		},
 		"value_grouping": {
 			input: "a:(foo OR baz OR bar)",
-			want: expr.Eq(
+			want: expr.IN(
 				"a",
-				expr.OR(
-					expr.OR(
-						"foo",
-						"baz",
-					),
-					"bar",
+				expr.LIST(
+					expr.Lit("foo"),
+					expr.Lit("baz"),
+					expr.Lit("bar"),
 				),
 			),
 		},
@@ -212,7 +210,7 @@ func TestParseLucene(t *testing.T) {
 		},
 		"escaped_column_name": {
 			input: `foo\ bar:b`,
-			want:  expr.Eq("foo bar", "b"),
+			want:  expr.Eq(`foo bar`, "b"),
 		},
 		"boost_key_value": {
 			input: "a:b^2 AND foo",
