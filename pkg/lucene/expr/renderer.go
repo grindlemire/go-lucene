@@ -24,6 +24,9 @@ var renderers = map[Operator]renderer{
 	Less:      renderBasic,
 	GreaterEq: renderBasic,
 	LessEq:    renderBasic,
+	Like:      renderBasic,
+	In:        renderBasic,
+	List:      renderList,
 }
 
 func renderEquals(e *Expression, verbose bool) string {
@@ -107,6 +110,24 @@ func renderRange(e *Expression, verbose bool) string {
 	}
 
 	return fmt.Sprintf("%s:{%s TO %s}", e.Left, boundary.Min, boundary.Max)
+}
+
+func renderList(e *Expression, verbose bool) string {
+	vals := e.Left.([]*Expression)
+	strs := []string{}
+	for _, v := range vals {
+		if verbose {
+			strs = append(strs, fmt.Sprintf("%#v", v.Left))
+			continue
+		}
+		strs = append(strs, fmt.Sprintf("%s", v.Left))
+	}
+
+	if verbose {
+		return fmt.Sprintf("LIST(%s)", strings.Join(strs, ", "))
+	}
+
+	return fmt.Sprintf("(%s)", strings.Join(strs, ", "))
 }
 
 func renderLiteral(e *Expression, verbose bool) string {

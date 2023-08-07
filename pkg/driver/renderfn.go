@@ -17,9 +17,6 @@ func literal(left, right string) (string, error) {
 }
 
 func equals(left, right string) (string, error) {
-	// at this point the left is considered a column so we should treat it as such
-	// and remove the quotes
-	left = strings.ReplaceAll(left, "\"", "")
 	return fmt.Sprintf("%s = %s", left, right), nil
 }
 
@@ -28,10 +25,21 @@ func noop(left, right string) (string, error) {
 }
 
 func like(left, right string) (string, error) {
-	// at this point the left is considered a column so we should treat it as such
-	// and remove the quotes
-	left = strings.ReplaceAll(left, "'", "")
+	if len(right) >= 4 && right[1] == '/' && right[len(right)-2] == '/' {
+		return fmt.Sprintf("%s ~ %s", left, right), nil
+	}
+
+	right = strings.ReplaceAll(right, "*", "%")
+	right = strings.ReplaceAll(right, "?", "_")
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
+}
+
+func inFn(left, right string) (string, error) {
+	return fmt.Sprintf("%s IN %s", left, right), nil
+}
+
+func list(left, right string) (string, error) {
+	return fmt.Sprintf("(%s)", left), nil
 }
 
 func greater(left, right string) (string, error) {

@@ -8,7 +8,7 @@ type Operator int
 // 1. Add it to the iota here
 // 2. Add it to the string maps below
 // 3. Add a render function for it at least in base, perhaps in all the drivers as well
-// 4. Update the json parsing and tests to suppor the new operator
+// 4. Update the json parsing and tests to support the new operator
 // 5. Add tests in parse_test and expression_test
 const (
 	Undefined Operator = iota
@@ -29,6 +29,8 @@ const (
 	Less
 	GreaterEq
 	LessEq
+	In
+	List
 )
 
 // String renders the operator as a string
@@ -54,6 +56,8 @@ var fromString = map[string]Operator{
 	"LESS":       Less,
 	"GREATER_EQ": GreaterEq,
 	"LESS_EQ":    LessEq,
+	"IN":         In,
+	"LIST":       List,
 }
 
 var toString = map[Operator]string{
@@ -74,4 +78,6 @@ var toString = map[Operator]string{
 	Less:      "LESS",
 	GreaterEq: "GREATER_EQ",
 	LessEq:    "LESS_EQ",
+	In:        "IN",
+	List:      "LIST",
 }

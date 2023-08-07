@@ -1,5 +1,7 @@
 # Release Process
 
+### Note this might be out of date, I have to figure out what is going on here
+
 ## Rules for release branches:
 
 -   If you are releasing a new major version you need to branch off of master into a branch `release-branch.v#` (example `release-branch.v2` for a 2.x release)

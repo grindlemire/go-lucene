@@ -25,6 +25,9 @@ var validators = map[Operator]validator{
 	Less:      validateCompare,
 	GreaterEq: validateCompare,
 	LessEq:    validateCompare,
+	Like:      validateLike,
+	In:        validateIn,
+	List:      validateList,
 }
 
 func validateEquals(e *Expression) (err error) {
@@ -49,7 +52,7 @@ func validateCompare(e *Expression) (err error) {
 	}
 
 	if e.Op != Greater && e.Op != Less && e.Op != GreaterEq && e.Op != LessEq {
-		return errors.New("COMPARE validation error: must have equals operator")
+		return errors.New("COMPARE validation error: must have comparison operator operator")
 	}
 
 	if !isLiteralExpr(e.Left) {
@@ -266,6 +269,98 @@ func validateRegexp(e *Expression) (err error) {
 	}
 
 	return nil
+}
+
+func validateLike(e *Expression) (err error) {
+	if e == nil {
+		return nil
+	}
+
+	if e.Left == nil {
+		return errors.New("LIKE validation: column must not be nil")
+	}
+
+	if !isLiteralExpr(e.Left) {
+		return fmt.Errorf("LIKE validation: value must be a literal, not %s", reflect.TypeOf(e.Left))
+	}
+
+	if e.Right == nil {
+		return errors.New("LIKE validation: must have two values")
+	}
+
+	right, ok := e.Right.(*Expression)
+	if !ok {
+		return fmt.Errorf("LIKE validation: right side must be an expression, not %s", reflect.TypeOf(e.Right))
+	}
+
+	if right.Op != Wild && right.Op != Regexp {
+		return fmt.Errorf("LIKE validation: right side must be a wildcard or regexp, not %s", right.Op)
+	}
+
+	return nil
+}
+
+func validateIn(e *Expression) (err error) {
+	if e == nil {
+		return nil
+	}
+
+	if e.Left == nil {
+		return errors.New("IN validation: column must not be nil")
+	}
+
+	if !isLiteralExpr(e.Left) {
+		return fmt.Errorf("IN validation: value must be a literal, not %s", reflect.TypeOf(e.Left))
+	}
+
+	if e.Right == nil {
+		return errors.New("IN validation: must have two values")
+	}
+
+	right, ok := e.Right.(*Expression)
+	if !ok {
+		return fmt.Errorf("IN validation: right side must be an expression, not %s", reflect.TypeOf(e.Right))
+	}
+
+	if right.Op != List {
+		return fmt.Errorf("IN validation: right side must be a list, not %s", right.Op)
+	}
+
+	return nil
+}
+
+func validateList(e *Expression) (err error) {
+	if e == nil {
+		return nil
+	}
+
+	if e.Left == nil {
+		return errors.New("LIST validation: value must not be nil")
+	}
+
+	if e.Right != nil {
+		return errors.New("LIST validation: must not have two values")
+	}
+
+	if !isListOfLiteralExprs(e.Left) {
+		return fmt.Errorf("LIST validation: value must be a list of literals, not %s", reflect.TypeOf(e.Left))
+	}
+
+	return nil
+}
+
+func isListOfLiteralExprs(in any) bool {
+	fmt.Println(reflect.TypeOf(in))
+	e, isList := in.([]*Expression)
+	if !isList {
+		return false
+	}
+	for _, v := range e {
+		if !isLiteralExpr(v) {
+			return false
+		}
+	}
+	return true
 }
 
 func isLiteralExpr(in any) bool {
