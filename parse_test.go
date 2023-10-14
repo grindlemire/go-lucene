@@ -98,6 +98,10 @@ func TestParseLucene(t *testing.T) {
 			input: `a:/b "[c]/`,
 			want:  expr.Eq("a", expr.REGEXP(`/b "[c]/`)),
 		},
+		"regexp_with_escaped_chars": {
+			input: `url:/example.com\/foo\/bar\/.*/`,
+			want:  expr.Eq("url", expr.REGEXP(`/example.com\/foo\/bar\/.*/`)),
+		},
 		"basic_default_AND": {
 			input: "a b",
 			want:  expr.AND("a", "b"),
