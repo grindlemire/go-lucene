@@ -147,6 +147,12 @@ func TestLex(t *testing.T) {
 				tok(TRegexp, "/a[b]*/"),
 			},
 		},
+		"regexp_tokenized_with_escaped_chars": {
+			in: `/.*example.com\/article\/.*/`,
+			expected: []Token{
+				tok(TRegexp, `/.*example.com\/article\/.*/`),
+			},
+		},
 		"symbols_tokenized": {
 			in: `()[]{}:+-=><`,
 			expected: []Token{

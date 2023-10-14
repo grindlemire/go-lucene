@@ -95,6 +95,10 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: `a:/b "[c]/`,
 			want:  `a ~ '/b "[c]/'`,
 		},
+		"regexp_with_escaped_chars": {
+			input: `url:/example.com\/foo\/bar\/.*/`,
+			want:  `url ~ '/example.com\/foo\/bar\/.*/'`,
+		},
 		"basic_default_AND": {
 			input: "a b",
 			want:  "('a') AND ('b')",
@@ -223,7 +227,6 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-
 			expr, err := Parse(tc.input)
 			if err != nil {
 				t.Fatal(err)
