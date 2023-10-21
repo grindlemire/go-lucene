@@ -33,7 +33,7 @@ var Shared = map[expr.Operator]RenderFN{
 
 // Base is the base driver that is embedded in each driver
 type Base struct {
-	renderFNs map[expr.Operator]RenderFN
+	RenderFNs map[expr.Operator]RenderFN
 }
 
 // Render will render the expression based on the renderFNs provided by the driver.
@@ -52,7 +52,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return s, err
 	}
 
-	fn, ok := b.renderFNs[e.Op]
+	fn, ok := b.RenderFNs[e.Op]
 	if !ok {
 		return s, fmt.Errorf("unable to render operator [%s]", e.Op)
 	}

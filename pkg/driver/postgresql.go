@@ -22,7 +22,7 @@ func NewPostgresDriver() PostgresDriver {
 
 	return PostgresDriver{
 		Base{
-			renderFNs: fns,
+			RenderFNs: fns,
 		},
 	}
 }
