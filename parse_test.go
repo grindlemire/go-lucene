@@ -439,14 +439,14 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
-		"test_range_precedance_simple": {
+		"test_range_precedence_simple": {
 			input: "c:[* to -1] OR d",
 			want: expr.OR(
 				expr.Rang("c", expr.WILD("*"), -1, true),
 				"d",
 			),
 		},
-		"test_range_precedance": {
+		"test_range_precedence": {
 			input: "a OR b AND c:[* to -1] OR d",
 			want: expr.OR(
 				expr.OR(
@@ -459,7 +459,7 @@ func TestParseLucene(t *testing.T) {
 				"d",
 			),
 		},
-		"test_full_precedance": {
+		"test_full_precedence": {
 			input: "a OR b AND c:[* to -1] OR d AND NOT +e:f",
 			want: expr.OR(
 				expr.OR(
@@ -477,7 +477,7 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
-		"test_full_precedance_with_suffixes": {
+		"test_full_precedence_with_suffixes": {
 			input: "a OR b AND c OR d~ AND NOT +(e:f)^10",
 			want: expr.OR(
 				expr.OR(
@@ -497,7 +497,7 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
-		"test_elastic_greater_than_precedance": {
+		"test_elastic_greater_than_precedence": {
 			input: "a:>10 AND -b:<=-20",
 			want: expr.AND(
 				expr.GREATER("a", 10),

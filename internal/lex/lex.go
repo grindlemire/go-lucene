@@ -27,7 +27,7 @@ func (i Token) String() string {
 	return fmt.Sprintf("%q", i.Val)
 }
 
-// precedance : > ) > + > - > ~ > ^ > NOT > AND > OR > (
+// precedence : > ) > + > - > ~ > ^ > NOT > AND > OR > (
 
 // TokType is an enum of token types that can be parsed by the lexer. Order matters here for non terminals
 // with a lower number meaning a higher precedence.
@@ -41,7 +41,7 @@ const (
 	TQuoted
 	TRegexp
 
-	// precedance of operators. Order matters here. This might need to be abstracted
+	// precedence of operators. Order matters here. This might need to be abstracted
 	// to a grammar specific precedence but for now it is fine here.
 	TEqual
 	TGreater
@@ -148,17 +148,17 @@ func IsTerminal(tok Token) bool {
 	}[tok.Typ]
 }
 
-// HasLessPrecedance checks if a current token has lower precedance than the next.
+// HasLessPrecedence checks if a current token has lower precedence than the next.
 // There is a specific ordering in the iota (lower numbers = higher precedence) indicating
 // whether the operator has more precedence or not.
-func HasLessPrecedance(current Token, next Token) bool {
+func HasLessPrecedence(current Token, next Token) bool {
 	// left associative. If we see another of the same type don't add onto the pile.
 	// right associative would return true here.
 	if current.Typ == next.Typ {
 		return false
 	}
 
-	// lower numbers mean higher precedance
+	// lower numbers mean higher precedence
 	return current.Typ > next.Typ
 }
 
