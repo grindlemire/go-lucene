@@ -142,8 +142,8 @@ func (p *parser) shouldShift(next lex.Token) bool {
 		return false
 	}
 
-	// shift if our current token has less precedance than the next token
-	return lex.HasLessPrecedance(curr, next)
+	// shift if our current token has less precedence than the next token
+	return lex.HasLessPrecedence(curr, next)
 }
 
 func anyOpenBracket(curr, next lex.Token) bool {

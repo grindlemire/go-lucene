@@ -207,19 +207,19 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: "a AND (c OR d)",
 			want:  "('a') AND (('c') OR ('d'))",
 		},
-		"test_range_precedance_simple": {
+		"test_range_precedence_simple": {
 			input: "c:[* to -1] OR d",
 			want:  "(c <= -1) OR ('d')",
 		},
-		"test_range_precedance": {
+		"test_range_precedence": {
 			input: "a OR b AND c:[* to -1] OR d",
 			want:  "(('a') OR (('b') AND (c <= -1))) OR ('d')",
 		},
-		"test_full_precedance": {
+		"test_full_precedence": {
 			input: "a OR b AND c:[* to -1] OR d AND NOT +e:f",
 			want:  "(('a') OR (('b') AND (c <= -1))) OR (('d') AND (NOT(e = 'f')))",
 		},
-		"test_elastic_greater_than_precedance": {
+		"test_elastic_greater_than_precedence": {
 			input: "a:>10 AND -b:<=-20",
 			want:  "(a > 10) AND (NOT(b <= -20))",
 		},
