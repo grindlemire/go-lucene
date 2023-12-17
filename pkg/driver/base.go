@@ -20,8 +20,8 @@ var Shared = map[expr.Operator]RenderFN{
 	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
 	// expr.Fuzzy:     unsupported,
 	// expr.Boost:     unsupported,
-	expr.Wild:      noop, // wildcard expressions can render as literal strings
-	expr.Regexp:    noop, // regexp expressions can render as literal strings
+	expr.Wild:      literal,
+	expr.Regexp:    literal,
 	expr.Like:      like,
 	expr.Greater:   greater,
 	expr.GreaterEq: greaterEq,
@@ -52,12 +52,36 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return s, err
 	}
 
+	if e.Op != expr.Range && e.Op != expr.Not && e.Op != expr.List && e.Op != expr.In && e.Op != expr.Literal && e.Op != expr.Must && e.Op != expr.MustNot {
+		if !b.isSimple(e.Left) {
+			left = "(" + left + ")"
+		}
+		if !b.isSimple(e.Right) {
+			right = "(" + right + ")"
+		}
+	}
+
 	fn, ok := b.RenderFNs[e.Op]
 	if !ok {
 		return s, fmt.Errorf("unable to render operator [%s]", e.Op)
 	}
 
 	return fn(left, right)
+}
+
+func (b Base) isSimple(in any) bool {
+	switch v := in.(type) {
+	case *expr.Expression:
+		return v.Op == expr.Undefined || v.Op == expr.Literal || v.Op == expr.Regexp || v.Op == expr.Wild
+	case expr.Column:
+		return true
+	case nil:
+		return true
+	case string, int, float64:
+		return true
+	default:
+		return false
+	}
 }
 
 func (b Base) serialize(in any) (s string, err error) {
@@ -79,19 +103,34 @@ func (b Base) serialize(in any) (s string, err error) {
 		}
 		return strings.Join(strs, ", "), nil
 	case *expr.RangeBoundary:
-		if v.Inclusive {
-			return fmt.Sprintf("[%s, %s]", v.Min, v.Max), nil
+		min, err := b.serialize(v.Min)
+		if err != nil {
+			return "", err
 		}
-		return fmt.Sprintf("(%s, %s)", v.Min, v.Max), nil
+		max, err := b.serialize(v.Max)
+		if err != nil {
+			return "", err
+		}
+
+		if v.Inclusive {
+			return fmt.Sprintf("[%s, %s]", min, max), nil
+		}
+		return fmt.Sprintf("(%s, %s)", min, max), nil
 
 	case expr.Column:
-		if strings.Contains(string(v), " ") {
-			sv := fmt.Sprintf(`"%s"`, string(v))
-			return sv, nil
+		if len(v) == 0 {
+			return "", fmt.Errorf("column name is empty")
 		}
-		return fmt.Sprintf("%s", v), nil
+		if strings.ContainsRune(string(v), '"') {
+			return "", fmt.Errorf("column name contains a double quote: %q", v)
+		}
+		// Always escape column names with double quotes,
+		// otherwise we need to know the reserved words
+		// which might change in the future.
+		return fmt.Sprintf(`"%s"`, string(v)), nil
 	case string:
-		return fmt.Sprintf("'%s'", v), nil
+		// escape single quotes with double single quotes
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")), nil
 	default:
 		return fmt.Sprintf("%v", v), nil
 	}
