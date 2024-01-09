@@ -350,7 +350,6 @@ func validateList(e *Expression) (err error) {
 }
 
 func isListOfLiteralExprs(in any) bool {
-	fmt.Println(reflect.TypeOf(in))
 	e, isList := in.([]*Expression)
 	if !isList {
 		return false
