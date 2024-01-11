@@ -2,7 +2,6 @@ package lucene
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -660,9 +659,6 @@ func FuzzParse(f *testing.F) {
 		f.Add(tc)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		e, err := Parse(in)
-		if err == nil {
-			fmt.Printf("%s\n-----------\n", e)
-		}
+		_, _ = Parse(in)
 	})
 }

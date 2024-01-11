@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
@@ -13,6 +14,13 @@ import (
 type RenderFN func(left, right string) (string, error)
 
 func literal(left, right string) (string, error) {
+	if !utf8.ValidString(left) {
+		return "", fmt.Errorf("literal contains invalid utf8: %q", left)
+	}
+	if strings.ContainsRune(left, 0) {
+		return "", fmt.Errorf("literal contains null byte: %q", left)
+	}
+
 	return left, nil
 }
 
@@ -78,14 +86,14 @@ func rang(left, right string) (string, error) {
 
 	iMin, iMax, err := toInts(rawMin, rawMax)
 	if err == nil {
-		if rawMin == "*" {
+		if rawMin == "'*'" {
 			if inclusive {
 				return fmt.Sprintf("%s <= %d", left, iMax), nil
 			}
 			return fmt.Sprintf("%s < %d", left, iMax), nil
 		}
 
-		if rawMax == "*" {
+		if rawMax == "'*'" {
 			if inclusive {
 				return fmt.Sprintf("%s >= %d", left, iMin), nil
 			}
@@ -113,14 +121,14 @@ func rang(left, right string) (string, error) {
 
 	fMin, fMax, err := toFloats(rawMin, rawMax)
 	if err == nil {
-		if rawMin == "*" {
+		if rawMin == "'*'" {
 			if inclusive {
 				return fmt.Sprintf("%s <= %.2f", left, fMax), nil
 			}
 			return fmt.Sprintf("%s < %.2f", left, fMax), nil
 		}
 
-		if rawMax == "*" {
+		if rawMax == "'*'" {
 			if inclusive {
 				return fmt.Sprintf("%s >= %.2f", left, fMin), nil
 			}
@@ -146,7 +154,7 @@ func rang(left, right string) (string, error) {
 			nil
 	}
 
-	return fmt.Sprintf(`%s BETWEEN '%s' AND '%s'`,
+	return fmt.Sprintf(`%s BETWEEN %s AND %s`,
 			left,
 			strings.Trim(rangeSlice[0], " "),
 			strings.Trim(rangeSlice[1], " "),
@@ -156,7 +164,7 @@ func rang(left, right string) (string, error) {
 
 func basicCompound(op expr.Operator) RenderFN {
 	return func(left, right string) (string, error) {
-		return fmt.Sprintf("(%s) %s (%s)", left, op, right), nil
+		return fmt.Sprintf("%s %s %s", left, op, right), nil
 	}
 }
 
@@ -168,12 +176,12 @@ func basicWrap(op expr.Operator) RenderFN {
 
 func toInts(rawMin, rawMax string) (iMin, iMax int, err error) {
 	iMin, err = strconv.Atoi(rawMin)
-	if rawMin != "*" && err != nil {
+	if rawMin != "'*'" && err != nil {
 		return 0, 0, err
 	}
 
 	iMax, err = strconv.Atoi(rawMax)
-	if rawMax != "*" && err != nil {
+	if rawMax != "'*'" && err != nil {
 		return 0, 0, err
 	}
 
@@ -182,12 +190,12 @@ func toInts(rawMin, rawMax string) (iMin, iMax int, err error) {
 
 func toFloats(rawMin, rawMax string) (fMin, fMax float64, err error) {
 	fMin, err = strconv.ParseFloat(rawMin, 64)
-	if rawMin != "*" && err != nil {
+	if rawMin != "'*'" && err != nil {
 		return 0, 0, err
 	}
 
 	fMax, err = strconv.ParseFloat(rawMax, 64)
-	if rawMax != "*" && err != nil {
+	if rawMax != "'*'" && err != nil {
 		return 0, 0, err
 	}
 
