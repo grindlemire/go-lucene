@@ -117,35 +117,23 @@ func (tt TokType) String() string {
 	}[tt]
 }
 
+
+// terminalTokens contains a map of terminal tokens.
+// Uses empty struct value to conserve memory.
+var terminalTokens = map[TokType]struct{}{
+	TErr:     struct{}{},
+	TLiteral: struct{}{},
+	TQuoted:  struct{}{},
+	TRegexp:  struct{}{},
+	TEOF:     struct{}{},
+}
+
 // IsTerminal checks wether a specific token is a terminal token meaning
 // it can't be matched in the grammar.
 func IsTerminal(tok Token) bool {
-	return map[TokType]bool{
-		TErr:     true,
-		TLiteral: true,
-		TQuoted:  true,
-		TRegexp:  true,
-		TEqual:   false,
-		TLParen:  false,
-		TRParen:  false,
-		TAnd:     false,
-		TOr:      false,
-		TNot:     false,
-		TLSquare: false,
-		TRSquare: false,
-		TLCurly:  false,
-		TRCurly:  false,
-		TTO:      false,
-		TColon:   false,
-		TPlus:    false,
-		TMinus:   false,
-		TGreater: false,
-		TLess:    false,
-		TTilde:   false,
-		TCarrot:  false,
-		TEOF:     true,
-		TStart:   false,
-	}[tok.Typ]
+	_, terminal := terminalTokens[tok.Typ]
+
+	return terminal
 }
 
 // HasLessPrecedence checks if a current token has lower precedence than the next.
