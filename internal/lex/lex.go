@@ -88,44 +88,45 @@ var symbols = map[rune]TokType{
 	// '-': tMINUS,
 }
 
-func (tt TokType) String() string {
-	return map[TokType]string{
-		TErr:     "tERR",
-		TLiteral: "tLITERAL",
-		TQuoted:  "tQUOTED",
-		TRegexp:  "tREGEXP",
-		TEqual:   "tEQUAL",
-		TLParen:  "tLPAREN",
-		TRParen:  "tRPAREN",
-		TAnd:     "tAND",
-		TOr:      "tOR",
-		TNot:     "tNOT",
-		TLSquare: "tLSQUARE",
-		TRSquare: "tRSQUARE",
-		TLCurly:  "tLCURLY",
-		TRCurly:  "tRCURLY",
-		TTO:      "tTO",
-		TColon:   "tCOLON",
-		TPlus:    "tPLUS",
-		TMinus:   "tMINUS",
-		TGreater: "tGREATER",
-		TLess:    "tLESS",
-		TTilde:   "tTILDE",
-		TCarrot:  "tCARROT",
-		TEOF:     "tEOF",
-		TStart:   "tSTART",
-	}[tt]
+var tokStrings = map[TokType]string{
+	TErr:     "tERR",
+	TLiteral: "tLITERAL",
+	TQuoted:  "tQUOTED",
+	TRegexp:  "tREGEXP",
+	TEqual:   "tEQUAL",
+	TLParen:  "tLPAREN",
+	TRParen:  "tRPAREN",
+	TAnd:     "tAND",
+	TOr:      "tOR",
+	TNot:     "tNOT",
+	TLSquare: "tLSQUARE",
+	TRSquare: "tRSQUARE",
+	TLCurly:  "tLCURLY",
+	TRCurly:  "tRCURLY",
+	TTO:      "tTO",
+	TColon:   "tCOLON",
+	TPlus:    "tPLUS",
+	TMinus:   "tMINUS",
+	TGreater: "tGREATER",
+	TLess:    "tLESS",
+	TTilde:   "tTILDE",
+	TCarrot:  "tCARROT",
+	TEOF:     "tEOF",
+	TStart:   "tSTART",
 }
 
+func (tt TokType) String() string {
+	return tokStrings[tt]
+}
 
 // terminalTokens contains a map of terminal tokens.
 // Uses empty struct value to conserve memory.
 var terminalTokens = map[TokType]struct{}{
-	TErr:     struct{}{},
-	TLiteral: struct{}{},
-	TQuoted:  struct{}{},
-	TRegexp:  struct{}{},
-	TEOF:     struct{}{},
+	TErr:     {},
+	TLiteral: {},
+	TQuoted:  {},
+	TRegexp:  {},
+	TEOF:     {},
 }
 
 // IsTerminal checks wether a specific token is a terminal token meaning
