@@ -3,8 +3,6 @@ package lucene
 import (
 	"strings"
 	"testing"
-
-	"github.com/grindlemire/go-lucene/pkg/driver"
 )
 
 func TestPostgresSQLEndToEnd(t *testing.T) {
@@ -235,12 +233,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			expr, err := Parse(tc.input)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			got, err := driver.NewPostgresDriver().Render(expr)
+			got, err := ToPostgres(tc.input)
 			if err != nil {
 				// if we got an expect error then we are fine
 				if tc.err != "" && strings.Contains(err.Error(), tc.err) {
@@ -254,6 +247,10 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			}
 
 			if got != tc.want {
+				expr, err := Parse(tc.input)
+				if err != nil {
+					t.Fatalf("unable to parse expression: %v", err)
+				}
 				t.Fatalf("\nwant %s\ngot  %s\nparsed expression: %#v\n", tc.want, got, expr)
 			}
 		})
