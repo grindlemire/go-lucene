@@ -6,7 +6,7 @@ var (
 	postgres = driver.NewPostgresDriver()
 )
 
-// ToPostgres is a helper that will render the lucene expression to a postgres sql filter.
+// ToPostgres is a wrapper that will render the lucene expression string as a postgres sql filter string.
 func ToPostgres(in string) (string, error) {
 	e, err := Parse(in)
 	if err != nil {

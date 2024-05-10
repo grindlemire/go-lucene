@@ -11,8 +11,8 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
 
-// Parse will parse using a buffer and the shift reduce algorithm. It scales rather well since
-// it is a one pass algorithm with no backtracking.
+// Parse will parse a lucene expression string using a buffer and the shift reduce algorithm. The returned expression
+// is an AST that can be rendered to a variety of different formats.
 func Parse(input string) (e *expr.Expression, err error) {
 	p := &parser{
 		lex:          lex.Lex(input),
