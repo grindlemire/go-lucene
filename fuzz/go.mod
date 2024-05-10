@@ -12,5 +12,5 @@ require (
 	google.golang.org/protobuf v1.23.0 // indirect
 )
 
-// Always just use the current version of go-lucene
+// Always just use the local version of go-lucene
 replace github.com/grindlemire/go-lucene => ../
