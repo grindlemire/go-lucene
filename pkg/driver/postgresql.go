@@ -2,12 +2,12 @@ package driver
 
 import "github.com/grindlemire/go-lucene/pkg/lucene/expr"
 
-// PostgresDriver transforms a parsed lucene expression to a sql filter.
+// PostgresDriver transforms a parsed lucene expression to a postgres sql filter.
 type PostgresDriver struct {
 	Base
 }
 
-// NewPostgresDriver creates a new driver that will output a parsed lucene expression as a SQL filter.
+// NewPostgresDriver creates a new driver that will output postgres filter strings from parsed lucene expressions.
 func NewPostgresDriver() PostgresDriver {
 	fns := map[expr.Operator]RenderFN{
 		expr.Literal: literal,
