@@ -28,6 +28,9 @@ jobs:
             - name: test
               run: go test -v ./...
 
+            - name: fuzz test
+              run: go test -v ./fuzz
+
             - name: release
               uses: softprops/action-gh-release@v1
               with:
