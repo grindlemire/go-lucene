@@ -11,14 +11,29 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
 
+type opt func(*parser)
+
+// WithDefaultField sets the default field to equate literals to.
+// For example a:b AND "c" will be parsed as a:b AND myfield:"c"
+func WithDefaultField(field string) opt {
+	return func(p *parser) {
+		p.defaultField = field
+	}
+}
+
 // Parse will parse a lucene expression string using a buffer and the shift reduce algorithm. The returned expression
 // is an AST that can be rendered to a variety of different formats.
-func Parse(input string) (e *expr.Expression, err error) {
+func Parse(input string, opts ...opt) (e *expr.Expression, err error) {
 	p := &parser{
 		lex:          lex.Lex(input),
 		stack:        []any{},
 		nonTerminals: []lex.Token{{Typ: lex.TStart}},
 	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
 	ex, err := p.parse()
 	if err != nil {
 		return e, err
@@ -36,6 +51,8 @@ type parser struct {
 	lex          *lex.Lexer
 	stack        []any
 	nonTerminals []lex.Token
+
+	defaultField string
 }
 
 func (p *parser) parse() (e *expr.Expression, err error) {
@@ -43,7 +60,7 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 		next := p.lex.Peek()
 		if p.shouldAccept(next) {
 			if len(p.stack) != 1 {
-				return e, fmt.Errorf("multiple expression left after parsing: %v", p.stack)
+				return e, fmt.Errorf("multiple expressions left after parsing: %v", p.stack)
 			}
 			final, ok := p.stack[0].(*expr.Expression)
 			if !ok {
@@ -186,7 +203,7 @@ func (p *parser) reduce() (err error) {
 
 		// try to reduce with all our reducers
 		var reduced bool
-		top, p.nonTerminals, reduced = reduce.Reduce(top, p.nonTerminals)
+		top, p.nonTerminals, reduced = reduce.Reduce(top, p.nonTerminals, p.defaultField)
 
 		// if we consumed some non terminals during the reduce it means we successfully reduced
 		if reduced {

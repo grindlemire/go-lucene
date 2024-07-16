@@ -11,9 +11,9 @@ import (
 // Reduce will reduce the elems and nonTerminals stacks using the available reducers and return
 // those slices modified to contain the reduced expressions. The elems will contain the reduced
 // expression the the nonTerminals will contain the modified stack of nonTerminals yet to be reduced.
-func Reduce(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func Reduce(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	for _, reducer := range reducers {
-		elems, nonTerminals, reduced := reducer(elems, nonTerminals)
+		elems, nonTerminals, reduced := reducer(elems, nonTerminals, defaultField)
 		if reduced {
 			return elems, nonTerminals, true
 		}
@@ -21,7 +21,7 @@ func Reduce(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return elems, nonTerminals, false
 }
 
-type reducer func(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool)
+type reducer func(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool)
 
 // reducers are the reducers that will be executed during the grammar parsing
 var reducers = []reducer{
@@ -39,7 +39,7 @@ var reducers = []reducer{
 	rangeop,
 }
 
-func equal(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func equal(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
 	}
@@ -106,7 +106,7 @@ func isChainedOrLiterals(in *expr.Expression) (out []*expr.Expression, ok bool) 
 	return out, false
 }
 
-func compare(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func compare(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	if len(elems) != 4 {
 		return elems, nonTerminals, false
 	}
@@ -152,7 +152,7 @@ func compare(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return elems, drop(nonTerminals, 2), true
 }
 
-func compareEq(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func compareEq(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	if len(elems) != 5 {
 		return elems, nonTerminals, false
 	}
@@ -205,7 +205,7 @@ func compareEq(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool)
 
 }
 
-func and(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func and(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	// if we don't have 3 items in the buffer it's not an AND clause
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
@@ -230,15 +230,15 @@ func and(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// we have a valid AND clause. Replace it in the stack
 	elems = []any{
 		expr.AND(
-			left,
-			right,
+			wrapLiteral(left, defaultField),
+			wrapLiteral(right, defaultField),
 		),
 	}
 	// we consumed one terminal, the AND
 	return elems, drop(nonTerminals, 1), true
 }
 
-func or(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func or(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	// if we don't have 3 items in the buffer it's not an OR clause
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
@@ -263,15 +263,15 @@ func or(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	// we have a valid OR clause. Replace it in the stack
 	elems = []any{
 		expr.OR(
-			left,
-			right,
+			wrapLiteral(left, defaultField),
+			wrapLiteral(right, defaultField),
 		),
 	}
 	// we consumed one terminal, the OR
 	return elems, drop(nonTerminals, 1), true
 }
 
-func not(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func not(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	if len(elems) < 2 {
 		return elems, nonTerminals, false
 	}
@@ -289,12 +289,16 @@ func not(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	}
 
 	elems = elems[:len(elems)-2]
-	elems = append(elems, expr.NOT(negated))
+	elems = append(elems,
+		expr.NOT(
+			wrapLiteral(negated, defaultField),
+		),
+	)
 	// we consumed one terminal, the NOT
 	return elems, drop(nonTerminals, 1), true
 }
 
-func sub(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func sub(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	// all the internal terms should have reduced by the time we hit this reducer
 	if len(elems) != 3 {
 		return elems, nonTerminals, false
@@ -314,7 +318,7 @@ func sub(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return []any{elems[1]}, drop(nonTerminals, 2), true
 }
 
-func must(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func must(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	if len(elems) != 2 {
 		return elems, nonTerminals, false
 	}
@@ -333,7 +337,7 @@ func must(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return []any{expr.MUST(rest)}, drop(nonTerminals, 1), true
 }
 
-func mustNot(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	if len(elems) != 2 {
 		return elems, nonTerminals, false
 	}
@@ -351,7 +355,7 @@ func mustNot(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return []any{expr.MUSTNOT(rest)}, drop(nonTerminals, 1), true
 }
 
-func fuzzy(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	// we are in the case with an implicit 1 fuzzy distance
 	if len(elems) == 2 {
 		must, ok := elems[1].(lex.Token)
@@ -396,7 +400,7 @@ func fuzzy(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return []any{expr.FUZZY(rest, idistance)}, drop(nonTerminals, 1), true
 }
 
-func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func boost(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	// we are in the case with an implicit 1 fuzzy distance
 	if len(elems) == 2 {
 		must, ok := elems[1].(lex.Token)
@@ -441,7 +445,7 @@ func boost(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
 	return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
 }
 
-func rangeop(elems []any, nonTerminals []lex.Token) ([]any, []lex.Token, bool) {
+func rangeop(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
 	// we need a term, :, [, begin, TO, end, ] to have a range operator which is 7 elems
 	if len(elems) != 7 {
 		return elems, nonTerminals, false
@@ -504,4 +508,14 @@ func toPositiveFloat(in string) (f float64, err error) {
 	}
 
 	return f, fmt.Errorf("[%v] is not a positive float", in)
+}
+
+// wrapLiteral will wrap a literal expression in an equals expression for a defaultdefaultFieldd.
+// we need this because we want to support lucene expressions like a:b AND "c" which needs a default
+// field to compare "c" against to be valid.
+func wrapLiteral(lit *expr.Expression, field string) *expr.Expression {
+	if lit.Op == expr.Literal && field != "" {
+		return expr.Eq(expr.Column(field), lit)
+	}
+	return lit
 }

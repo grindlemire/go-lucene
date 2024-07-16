@@ -7,9 +7,10 @@ import (
 
 func TestPostgresSQLEndToEnd(t *testing.T) {
 	type tc struct {
-		input string
-		want  string
-		err   string
+		input        string
+		want         string
+		defaultField string
+		err          string
 	}
 
 	tcs := map[string]tc{
@@ -229,11 +230,26 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: "1a:b",
 			want:  `"1a" = 'b'`,
 		},
+		"default_field_and": {
+			input:        `title:"The Right Way" AND go`,
+			want:         `("title" = 'The Right Way') AND ("default" = 'go')`,
+			defaultField: "default",
+		},
+		"default_field_or": {
+			input:        `title:"The Right Way" OR go`,
+			want:         `("title" = 'The Right Way') OR ("default" = 'go')`,
+			defaultField: "default",
+		},
+		"default_field_not": {
+			input:        `title:"The Right Way" AND NOT(go)`,
+			want:         `("title" = 'The Right Way') AND (NOT("default" = 'go'))`,
+			defaultField: "default",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			got, err := ToPostgres(tc.input)
+			got, err := ToPostgres(tc.input, WithDefaultField(tc.defaultField))
 			if err != nil {
 				// if we got an expect error then we are fine
 				if tc.err != "" && strings.Contains(err.Error(), tc.err) {

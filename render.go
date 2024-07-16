@@ -7,8 +7,8 @@ var (
 )
 
 // ToPostgres is a wrapper that will render the lucene expression string as a postgres sql filter string.
-func ToPostgres(in string) (string, error) {
-	e, err := Parse(in)
+func ToPostgres(in string, opts ...opt) (string, error) {
+	e, err := Parse(in, opts...)
 	if err != nil {
 		return "", err
 	}
