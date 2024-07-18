@@ -568,7 +568,7 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			gotStr, gotParams, err := ToPostgresParams(tc.input, WithDefaultField(tc.defaultField))
+			gotStr, gotParams, err := ToParameterizedPostgres(tc.input, WithDefaultField(tc.defaultField))
 			if err != nil {
 				// if we got an expect error then we are fine
 				if tc.err != "" && strings.Contains(err.Error(), tc.err) {
