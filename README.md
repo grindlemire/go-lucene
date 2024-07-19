@@ -1,4 +1,5 @@
 # go-lucene
+[![Go Reference](https://pkg.go.dev/badge/github.com/grindlemire/go-lucene.svg)](https://pkg.go.dev/github.com/grindlemire/go-lucene)
 
 A lucene parser written in go with no dependencies.
 
@@ -7,6 +8,12 @@ With this package you can quickly integrate lucene style searching inside your a
 Out of the box go-lucene support postgres compliant sql generation but it can be extended to support different flavors of sql (or no sql) as well.
 
 # Usage
+Use `lucene.ToPostgres` to generate a single string with all your filters in it
+
+Use `lucene.ToParmeterizedPostgres` to generate a parameterized string with args that you can pass to your DB query
+
+
+## Pure String
 ```go
 // suppose you want a query for red apples that are not honey crisp or granny smith and are older than 5 months old
 myQuery := `color:red AND NOT (type:"honey crisp" OR type:"granny smith") AND age_in_months:[5 TO *]`
@@ -41,6 +48,26 @@ WHERE
 	("age_in_months" >= 5)
 LIMIT 10;
 `
+```
+
+## Parameterized Input
+```go
+// suppose you want a query for red apples that are not honey crisp or granny smith and are older than 5 months old
+myQuery := `color:red AND NOT (type:"honey crisp" OR type:"granny smith") AND age_in_months:[5 TO *]`
+filter, params, err := lucene.ToParameterizedPostgres(myQuery)
+if err != nil {
+    // handle error
+}
+
+SQLTemplate := `
+SELECT *
+FROM apples
+WHERE %s
+LIMIT 10;
+`
+sqlQuery := fmt.Sprintf(SQLTemplate, filter)
+
+db.Query(sqlQuery, params)
 ```
 
 ## Extending with a custom driver
