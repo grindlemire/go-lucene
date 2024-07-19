@@ -36,6 +36,8 @@ type Base struct {
 	RenderFNs map[expr.Operator]RenderFN
 }
 
+// RenderParam will render the expression into a parameterized query. The returned string will contain placeholders
+// and the params will contain the values that should be passed to the query.
 func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error) {
 	if e == nil {
 		return "", params, nil
