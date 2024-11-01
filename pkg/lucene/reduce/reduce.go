@@ -510,7 +510,7 @@ func toPositiveFloat(in string) (f float64, err error) {
 	return f, fmt.Errorf("[%v] is not a positive float", in)
 }
 
-// wrapLiteral will wrap a literal expression in an equals expression for a defaultdefaultFieldd.
+// wrapLiteral will wrap a literal expression in an equals expression for a defaultField.
 // we need this because we want to support lucene expressions like a:b AND "c" which needs a default
 // field to compare "c" against to be valid.
 func wrapLiteral(lit *expr.Expression, field string) *expr.Expression {

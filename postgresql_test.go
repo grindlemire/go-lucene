@@ -564,6 +564,18 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 			wantParams:   []any{"The Right Way", "go"},
 			defaultField: "default",
 		},
+		"default_bare_field": {
+			input:        `this is an example`,
+			wantStr:      `((("default" = ?) AND ("default" = ?)) AND ("default" = ?)) AND ("default" = ?)`,
+			wantParams:   []any{"this", "is", "an", "example"},
+			defaultField: "default",
+		},
+		"default_single_literal": {
+			input:        `a`,
+			wantStr:      `"default" = ?`,
+			wantParams:   []any{"a"},
+			defaultField: "default",
+		},
 	}
 
 	for name, tc := range tcs {
