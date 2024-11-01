@@ -8,9 +8,11 @@ With this package you can quickly integrate lucene style searching inside your a
 Out of the box go-lucene support postgres compliant sql generation but it can be extended to support different flavors of sql (or no sql) as well.
 
 # Usage
-Use `lucene.ToPostgres` to generate a single string with all your filters in it
+Use `lucene.ToPostgres` to generate a single string with all your filters in it.
 
-Use `lucene.ToParmeterizedPostgres` to generate a parameterized string with args that you can pass to your DB query
+Use `lucene.ToParmeterizedPostgres` to generate a parameterized string with args that you can pass to your DB query.
+
+Use the `lucene.WithDefaultField` option to associate bare literals with a field.
 
 
 ## Pure String
@@ -68,6 +70,33 @@ LIMIT 10;
 sqlQuery := fmt.Sprintf(SQLTemplate, filter)
 
 db.Query(sqlQuery, params)
+```
+
+## Default Fields
+```go
+myQuery := "red OR green"
+filter, err := lucene.ToPostgres(
+	myQuery, lucene.WithDefaultField("appleColor"))
+if err != nil {
+    // handle error
+}
+
+SQLTemplate := `
+SELECT *
+FROM apples
+WHERE %s
+LIMIT 10;
+`
+sqlQuery := fmt.Sprintf(SQLTemplate, filter)
+
+// sqlQuery is:
+`
+SELECT *
+FROM apples
+WHERE
+    ("appleColor" = 'red') OR ("appleColor" = 'green')
+LIMIT 10;
+`
 ```
 
 ## Extending with a custom driver

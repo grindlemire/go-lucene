@@ -539,6 +539,54 @@ func TestParseLucene(t *testing.T) {
 	}
 }
 
+func TestParseLuceneWithDefaultField(t *testing.T) {
+	type tc struct {
+		input        string
+		defaultField string
+		want         *expr.Expression
+	}
+
+	tcs := map[string]tc{
+		"single_literal": {
+			input:        "a",
+			defaultField: "foo",
+			want:         expr.Eq("foo", "a"),
+		},
+		"quoted_literal": {
+			input:        `"a"`,
+			defaultField: "foo",
+			want:         expr.Eq("foo", "a"),
+		},
+		"number_literal": {
+			input:        `7`,
+			defaultField: "foo",
+			want:         expr.Eq("foo", 7),
+		},
+		"multiple_literals": {
+			input:        "a b",
+			defaultField: "foo",
+			want:         expr.AND(expr.Eq("foo", "a"), expr.Eq("foo", "b")),
+		},
+		"basic_and": {
+			input:        "a AND b",
+			defaultField: "foo",
+			want:         expr.AND(expr.Eq("foo", "a"), expr.Eq("foo", "b")),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input, WithDefaultField(tc.defaultField))
+			if err != nil {
+				t.Fatalf("wanted no error, got: %v", err)
+			}
+			if !reflect.DeepEqual(tc.want, got) {
+				t.Fatalf(errTemplate, "parsed expression doesn't match", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestParseFailure(t *testing.T) {
 	type tc struct {
 		input string
