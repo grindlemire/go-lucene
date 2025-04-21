@@ -11,7 +11,7 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
 
-type opt func(*parser)
+type Opt func(*parser)
 
 // WithDefaultField sets the default field to equate literals to.
 // For example a:b AND "c" will be parsed as a:b AND myfield:"c"
@@ -23,7 +23,7 @@ func WithDefaultField(field string) opt {
 
 // Parse will parse a lucene expression string using a buffer and the shift reduce algorithm. The returned expression
 // is an AST that can be rendered to a variety of different formats.
-func Parse(input string, opts ...opt) (e *expr.Expression, err error) {
+func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
 	p := &parser{
 		lex:          lex.Lex(input),
 		stack:        []any{},
