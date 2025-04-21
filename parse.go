@@ -15,7 +15,7 @@ type Opt func(*parser)
 
 // WithDefaultField sets the default field to equate literals to.
 // For example a:b AND "c" will be parsed as a:b AND myfield:"c"
-func WithDefaultField(field string) opt {
+func WithDefaultField(field string) Opt {
 	return func(p *parser) {
 		p.defaultField = field
 	}
