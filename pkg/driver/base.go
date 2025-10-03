@@ -53,6 +53,13 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return s, params, err
 	}
 
+	// edge case for a standalone wildcard on a like operator.
+	// Convert to a regular expression that matches anything
+	if right == "'*'" && e.Op == expr.Like {
+		right = "?"
+		rparams = []any{"%"}
+	}
+
 	// if we are in a regular expression we need to convert the * to % and ? to _
 	if e.Op == expr.Like && len(rparams) > 0 {
 		rval := rparams[0].(string)
