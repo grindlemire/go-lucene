@@ -82,6 +82,18 @@ filter, params, err := lucene.ToParameterizedPostgres(`color:red AND type:"gala"
 // Params: ["red", "gala"]
 ```
 
+### Wildcard Queries
+```go
+filter, err := lucene.ToPostgres(`name:John* AND email:*@example.com`)
+// SQL: ("name" SIMILAR TO 'John%') AND ("email" SIMILAR TO '%@example.com')
+```
+
+### Regular Expression Queries
+```go
+filter, err := lucene.ToPostgres(`url:/example\.com\/.*\/`)
+// SQL: "url" ~ '/example\.com\/.*\/'
+```
+
 ## Custom SQL Drivers
 
 Extend the library for different SQL dialects by creating custom drivers:
