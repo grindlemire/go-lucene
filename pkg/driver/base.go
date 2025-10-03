@@ -54,7 +54,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	}
 
 	// if we are in a regular expression we need to convert the * to % and ? to _
-	if e.Op == expr.Like {
+	if e.Op == expr.Like && len(rparams) > 0 {
 		rval := rparams[0].(string)
 		// keep the regexp intact if it is a // regexp
 		if len(rval) < 4 || rval[0] != '/' || rval[len(rval)-1] != '/' {
@@ -257,9 +257,9 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 		// which might change in the future.
 		return fmt.Sprintf(`"%s"`, string(v)), params, nil
 	case string:
-		// if we have a '*' then we don't want to insert a param
+		// if we have a '*' then we want to insert a param for wildcard
 		if v == "*" {
-			return "'*'", params, nil
+			return "?", []any{"%"}, nil
 		}
 
 		// escape single quotes with double single quotes
