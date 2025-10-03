@@ -264,9 +264,10 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 		// which might change in the future.
 		return fmt.Sprintf(`"%s"`, string(v)), params, nil
 	case string:
-		// if we have a '*' then we want to insert a param for wildcard
+		// if we have a '*' then we don't want to insert a param since
+		// it can be used either in a regexp or a range operator.
 		if v == "*" {
-			return "?", []any{"%"}, nil
+			return "'*'", params, nil
 		}
 
 		// escape single quotes with double single quotes
