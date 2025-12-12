@@ -91,7 +91,7 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				// we should always check if the current top of the stack is another token
 				// if it isn't then we have an implicit AND we need to inject.
 				if len(p.stack) > 0 {
-					topToken, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
+					_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 					if !isTopToken {
 						implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
 						// act as if we just saw an AND and check if we need to reduce the
@@ -103,59 +103,11 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 							}
 						}
 
-						// if we have a literal as the previous parsed thing then
-						// we must be in an implicit AND and should reduce
-						p.stack = append(p.stack, implAnd)
-						p.nonTerminals = append(p.nonTerminals, implAnd)
-					} else if isTopToken && (topToken.Typ == lex.TTilde || topToken.Typ == lex.TCarrot) {
-						// if the top is a fuzzy (~) or boost (^) operator, we need to check
-						// if the literal we just parsed is a number. If it is a number, we should
-						// NOT reduce yet - let it be used as the distance/power value. If it's not
-						// a number, we should reduce the operator now (implicit distance/power of 1).
-						isLiteralNumber := false
-						if litExpr, ok := lit.(*expr.Expression); ok && litExpr.Op == expr.Literal {
-							// check if the literal is a number
-							switch v := litExpr.Left.(type) {
-							case int, int64, float64, float32:
-								isLiteralNumber = true
-							case string:
-								// try to parse as number
-								_, err := strconv.Atoi(v)
-								if err == nil {
-									isLiteralNumber = true
-								} else {
-									_, err := strconv.ParseFloat(v, 64)
-									if err == nil {
-										isLiteralNumber = true
-									}
-								}
-							}
-						}
-
-						// only reduce if the literal is NOT a number
-						if !isLiteralNumber {
-							// reduce the fuzzy/boost operator with implicit distance/power
-							err = p.reduce()
-							if err != nil {
-								return e, err
-							}
-							// after reducing, check if we need an implicit AND
-							if len(p.stack) > 0 {
-								_, isTopTokenAfter := p.stack[len(p.stack)-1].(lex.Token)
-								if !isTopTokenAfter {
-									implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
-									if !p.shouldShift(implAnd) {
-										err = p.reduce()
-										if err != nil {
-											return e, err
-										}
-									}
-									p.stack = append(p.stack, implAnd)
-									p.nonTerminals = append(p.nonTerminals, implAnd)
-								}
-							}
-						}
-					}
+					// if we have a literal as the previous parsed thing then
+					// we must be in an implicit AND and should reduce
+					p.stack = append(p.stack, implAnd)
+					p.nonTerminals = append(p.nonTerminals, implAnd)
+				}
 				}
 
 				p.stack = append(p.stack, lit)
