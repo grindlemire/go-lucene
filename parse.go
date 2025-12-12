@@ -213,6 +213,22 @@ func (p *parser) reduce() (err error) {
 
 		// if we consumed some non terminals during the reduce it means we successfully reduced
 		if reduced {
+			// If the reducer returned multiple elements and the first two are both expressions,
+			// we need to inject an implicit AND between them (this happens when fuzzy/boost
+			// does a partial reduction like [FUZZY(...), other-expr])
+			if len(top) >= 2 {
+				_, isFirstExpr := top[0].(*expr.Expression)
+				_, isSecondExpr := top[1].(*expr.Expression)
+				if isFirstExpr && isSecondExpr {
+					// Insert AND between the two expressions: [expr1, expr2] -> [expr1, AND, expr2]
+					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
+					newTop := append([]any{top[0]}, implAnd)
+					newTop = append(newTop, top[1:]...)
+					top = newTop
+					p.nonTerminals = append(p.nonTerminals, implAnd)
+				}
+			}
+
 			// if we successfully reduced re-add it to the top of the stack and return
 			p.stack = append(p.stack, top...)
 			return nil

@@ -27,6 +27,8 @@ type reducer func(elems []any, nonTerminals []lex.Token, defaultField string) ([
 var reducers = []reducer{
 	and,
 	or,
+	fuzzy,
+	boost,
 	equal,
 	compare,
 	compareEq,
@@ -34,8 +36,6 @@ var reducers = []reducer{
 	sub,
 	must,
 	mustNot,
-	fuzzy,
-	boost,
 	rangeop,
 }
 
@@ -356,73 +356,51 @@ func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any,
 }
 
 func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
-	// we are in the case with an implicit 1 fuzzy distance
+	if len(elems) < 2 {
+		return elems, nonTerminals, false
+	}
+
+	tilde, ok := elems[1].(lex.Token)
+	if !ok || tilde.Typ != lex.TTilde {
+		return elems, nonTerminals, false
+	}
+
+	rest, ok := elems[0].(*expr.Expression)
+	if !ok {
+		return elems, nonTerminals, false
+	}
+
+	// If we have exactly 2 elements, use implicit distance of 1
 	if len(elems) == 2 {
-		must, ok := elems[1].(lex.Token)
-		if !ok || must.Typ != lex.TTilde {
-			return elems, nonTerminals, false
-		}
-
-		rest, ok := elems[0].(*expr.Expression)
-		if !ok {
-			return elems, nonTerminals, false
-		}
-
-		// we consumed one terminal, the ~
 		return []any{expr.FUZZY(rest, 1)}, drop(nonTerminals, 1), true
 	}
 
-	if len(elems) != 3 {
-		return elems, nonTerminals, false
+	// We have 3+ elements. Check if elems[2] is a valid numeric distance
+	if distance, ok := elems[2].(*expr.Expression); ok {
+		if idistance, err := strconv.Atoi(distance.String()); err == nil {
+			return []any{expr.FUZZY(rest, idistance)}, drop(nonTerminals, 1), true
+		}
+		// elems[2] is an Expression but not a valid numeric distance
+		// This means we have [expr, ~, non-numeric-expr] which should be reduced
+		// to [FUZZY(expr, 1), non-numeric-expr] so the parser can inject an implicit AND
+		result := append([]any{expr.FUZZY(rest, 1)}, elems[2:]...)
+		return result, drop(nonTerminals, 1), true
 	}
 
-	must, ok := elems[1].(lex.Token)
-	if !ok || must.Typ != lex.TTilde {
-		return elems, nonTerminals, false
-	}
-
-	rest, ok := elems[0].(*expr.Expression)
-	if !ok {
-		return elems, nonTerminals, false
-	}
-
-	distance, ok := elems[2].(*expr.Expression)
-	if !ok {
-		return elems, nonTerminals, false
-	}
-
-	idistance, err := strconv.Atoi(distance.String())
-	if err != nil {
-		return elems, nonTerminals, false
-	}
-
-	// we consumed one terminal, the ~
-	return []any{expr.FUZZY(rest, idistance)}, drop(nonTerminals, 1), true
+	// elems[2] is NOT an Expression (might be a Token or something else)
+	// This means we have [expr, ~, token/other] - reduce just [expr, ~] with implicit distance
+	// The token/other will be handled in the next reduce cycle
+	result := append([]any{expr.FUZZY(rest, 1)}, elems[2:]...)
+	return result, drop(nonTerminals, 1), true
 }
 
 func boost(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
-	// we are in the case with an implicit 1 fuzzy distance
-	if len(elems) == 2 {
-		must, ok := elems[1].(lex.Token)
-		if !ok || must.Typ != lex.TCarrot {
-			return elems, nonTerminals, false
-		}
-
-		rest, ok := elems[0].(*expr.Expression)
-		if !ok {
-			return elems, nonTerminals, false
-		}
-
-		// we consumed one terminal, the ^
-		return []any{expr.BOOST(rest, 1.0)}, drop(nonTerminals, 1), true
-	}
-
-	if len(elems) != 3 {
+	if len(elems) < 2 {
 		return elems, nonTerminals, false
 	}
 
-	boost, ok := elems[1].(lex.Token)
-	if !ok || boost.Typ != lex.TCarrot {
+	carrot, ok := elems[1].(lex.Token)
+	if !ok || carrot.Typ != lex.TCarrot {
 		return elems, nonTerminals, false
 	}
 
@@ -431,18 +409,22 @@ func boost(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 		return elems, nonTerminals, false
 	}
 
-	power, ok := elems[2].(*expr.Expression)
-	if !ok {
-		return elems, nonTerminals, false
+	if len(elems) == 2 {
+		return []any{expr.BOOST(rest, 1.0)}, drop(nonTerminals, 1), true
 	}
 
-	fpower, err := toPositiveFloat(power.String())
-	if err != nil {
-		return elems, nonTerminals, false
+	// We have 3+ elements. Check if elems[2] is a valid numeric power
+	if power, ok := elems[2].(*expr.Expression); ok {
+		if fpower, err := toPositiveFloat(power.String()); err == nil {
+			// Valid power - reduce all 3 elements
+			return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
+		}
 	}
 
-	// we consumed one terminal, the ^
-	return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
+	// elems[2] is NOT a valid power - reduce just [expr, ^] with implicit power
+	// Return the remaining elements to stay on the stack for further processing
+	result := append([]any{expr.BOOST(rest, 1.0)}, elems[2:]...)
+	return result, drop(nonTerminals, 1), true
 }
 
 func rangeop(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
