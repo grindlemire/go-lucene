@@ -91,7 +91,7 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				// we should always check if the current top of the stack is another token
 				// if it isn't then we have an implicit AND we need to inject.
 				if len(p.stack) > 0 {
-					_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
+					topToken, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 					if !isTopToken {
 						implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
 						// act as if we just saw an AND and check if we need to reduce the
@@ -107,6 +107,54 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 						// we must be in an implicit AND and should reduce
 						p.stack = append(p.stack, implAnd)
 						p.nonTerminals = append(p.nonTerminals, implAnd)
+					} else if isTopToken && (topToken.Typ == lex.TTilde || topToken.Typ == lex.TCarrot) {
+						// if the top is a fuzzy (~) or boost (^) operator, we need to check
+						// if the literal we just parsed is a number. If it is a number, we should
+						// NOT reduce yet - let it be used as the distance/power value. If it's not
+						// a number, we should reduce the operator now (implicit distance/power of 1).
+						isLiteralNumber := false
+						if litExpr, ok := lit.(*expr.Expression); ok && litExpr.Op == expr.Literal {
+							// check if the literal is a number
+							switch v := litExpr.Left.(type) {
+							case int, int64, float64, float32:
+								isLiteralNumber = true
+							case string:
+								// try to parse as number
+								_, err := strconv.Atoi(v)
+								if err == nil {
+									isLiteralNumber = true
+								} else {
+									_, err := strconv.ParseFloat(v, 64)
+									if err == nil {
+										isLiteralNumber = true
+									}
+								}
+							}
+						}
+
+						// only reduce if the literal is NOT a number
+						if !isLiteralNumber {
+							// reduce the fuzzy/boost operator with implicit distance/power
+							err = p.reduce()
+							if err != nil {
+								return e, err
+							}
+							// after reducing, check if we need an implicit AND
+							if len(p.stack) > 0 {
+								_, isTopTokenAfter := p.stack[len(p.stack)-1].(lex.Token)
+								if !isTopTokenAfter {
+									implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
+									if !p.shouldShift(implAnd) {
+										err = p.reduce()
+										if err != nil {
+											return e, err
+										}
+									}
+									p.stack = append(p.stack, implAnd)
+									p.nonTerminals = append(p.nonTerminals, implAnd)
+								}
+							}
+						}
 					}
 				}
 
@@ -213,6 +261,22 @@ func (p *parser) reduce() (err error) {
 
 		// if we consumed some non terminals during the reduce it means we successfully reduced
 		if reduced {
+			// If the reducer returned multiple elements and the first two are both expressions,
+			// we need to inject an implicit AND between them (this happens when fuzzy/boost
+			// does a partial reduction like [FUZZY(...), other-expr])
+			if len(top) >= 2 {
+				_, isFirstExpr := top[0].(*expr.Expression)
+				_, isSecondExpr := top[1].(*expr.Expression)
+				if isFirstExpr && isSecondExpr {
+					// Insert AND between the two expressions: [expr1, expr2] -> [expr1, AND, expr2]
+					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
+					newTop := append([]any{top[0]}, implAnd)
+					newTop = append(newTop, top[1:]...)
+					top = newTop
+					p.nonTerminals = append(p.nonTerminals, implAnd)
+				}
+			}
+			
 			// if we successfully reduced re-add it to the top of the stack and return
 			p.stack = append(p.stack, top...)
 			return nil

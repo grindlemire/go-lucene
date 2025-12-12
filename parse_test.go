@@ -247,6 +247,20 @@ func TestParseLucene(t *testing.T) {
 				expr.Eq("a", "b"),
 			),
 		},
+		"boost_key_implicit_power_before_term": {
+			input: "color:red^ k1:v1",
+			want: expr.AND(
+				expr.BOOST(expr.Eq("color", "red"), 1),
+				expr.Eq("k1", "v1"),
+			),
+		},
+		"boost_key_power_before_term": {
+			input: "color:red^2 k1:v1",
+			want: expr.AND(
+				expr.BOOST(expr.Eq("color", "red"), 2),
+				expr.Eq("k1", "v1"),
+			),
+		},
 		"boost_sub_expression": {
 			input: "(title:foo OR title:bar)^1.5 AND (body:foo OR body:bar)",
 			want: expr.AND(
@@ -304,6 +318,20 @@ func TestParseLucene(t *testing.T) {
 			want: expr.AND(
 				expr.FUZZY(expr.Eq("a", "b"), 1),
 				"foo",
+			),
+		},
+		"fuzzy_key_implicit_distance_before_term": {
+			input: "color:red~ k1:v1",
+			want: expr.AND(
+				expr.FUZZY(expr.Eq("color", "red"), 1),
+				expr.Eq("k1", "v1"),
+			),
+		},
+		"fuzzy_key_distance_before_term": {
+			input: "color:red~2 k1:v1",
+			want: expr.AND(
+				expr.FUZZY(expr.Eq("color", "red"), 2),
+				expr.Eq("k1", "v1"),
 			),
 		},
 		"fuzzy_literal": {
