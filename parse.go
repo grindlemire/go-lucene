@@ -103,11 +103,11 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 							}
 						}
 
-					// if we have a literal as the previous parsed thing then
-					// we must be in an implicit AND and should reduce
-					p.stack = append(p.stack, implAnd)
-					p.nonTerminals = append(p.nonTerminals, implAnd)
-				}
+						// if we have a literal as the previous parsed thing then
+						// we must be in an implicit AND and should reduce
+						p.stack = append(p.stack, implAnd)
+						p.nonTerminals = append(p.nonTerminals, implAnd)
+					}
 				}
 
 				p.stack = append(p.stack, lit)
@@ -228,7 +228,7 @@ func (p *parser) reduce() (err error) {
 					p.nonTerminals = append(p.nonTerminals, implAnd)
 				}
 			}
-			
+
 			// if we successfully reduced re-add it to the top of the stack and return
 			p.stack = append(p.stack, top...)
 			return nil
