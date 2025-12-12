@@ -675,6 +675,9 @@ func TestParseFailure(t *testing.T) {
 		"boost_without_subexpression_2": {
 			input: "()^2",
 		},
+		"boost_before_colon_nonterminal": {
+			input: "color:red^:k1",
+		},
 		"fuzzy_without_subexpression_1": {
 			input: "~2",
 		},
@@ -686,6 +689,9 @@ func TestParseFailure(t *testing.T) {
 		},
 		"fuzzy_without_subexpression_4": {
 			input: "()~",
+		},
+		"fuzzy_before_colon_nonterminal": {
+			input: "color:red~:k1",
 		},
 		"range_without_min": {
 			input: "[ TO 5]",
