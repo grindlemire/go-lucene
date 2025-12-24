@@ -113,7 +113,25 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				p.stack = append(p.stack, lit)
 				continue
 			}
-			// otherwise just push the token on the stack
+
+			// For prefix operators (-, +, NOT), inject implicit AND if the top of stack is an expression.
+			// These operators start new subexpressions, so consecutive terms like "-a:b -c:d" need AND between them.
+			if len(p.stack) > 0 && isPrefixOperator(tok) {
+				_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
+				if !isTopToken {
+					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
+					if !p.shouldShift(implAnd) {
+						err = p.reduce()
+						if err != nil {
+							return e, err
+						}
+					}
+					p.stack = append(p.stack, implAnd)
+					p.nonTerminals = append(p.nonTerminals, implAnd)
+				}
+			}
+
+			// push the token on the stack
 			p.stack = append(p.stack, tok)
 			p.nonTerminals = append(p.nonTerminals, tok)
 			continue
@@ -186,6 +204,12 @@ func anyClosingBracket(curr lex.Token) bool {
 
 func endingRangeSubExpr(next lex.Token) bool {
 	return next.Typ == lex.TRSquare || next.Typ == lex.TRCurly
+}
+
+// isPrefixOperator returns true for operators that start a new subexpression.
+// These need implicit AND injection when they follow an expression.
+func isPrefixOperator(tok lex.Token) bool {
+	return tok.Typ == lex.TMinus || tok.Typ == lex.TPlus || tok.Typ == lex.TNot
 }
 
 func (p *parser) shouldAccept(next lex.Token) bool {

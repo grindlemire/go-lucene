@@ -231,6 +231,8 @@ func lexVal(l *Lexer) tokenStateFn {
 		}
 		l.backup()
 		return lexWord
+	case r == '!':
+		return l.emit(TNot)
 
 	case r == '"' || r == '\'':
 		l.backup()

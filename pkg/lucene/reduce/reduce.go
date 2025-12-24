@@ -334,7 +334,7 @@ func must(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []
 	}
 
 	// we consumed 1 terminal, the +
-	return []any{expr.MUST(rest)}, drop(nonTerminals, 1), true
+	return []any{expr.MUST(wrapLiteral(rest, defaultField))}, drop(nonTerminals, 1), true
 }
 
 func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
@@ -352,7 +352,7 @@ func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any,
 		return elems, nonTerminals, false
 	}
 	// we consumed one terminal, the -
-	return []any{expr.MUSTNOT(rest)}, drop(nonTerminals, 1), true
+	return []any{expr.MUSTNOT(wrapLiteral(rest, defaultField))}, drop(nonTerminals, 1), true
 }
 
 func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {

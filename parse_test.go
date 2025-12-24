@@ -533,6 +533,55 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
+		"implicit_and_with_subexpressions": {
+			input: "a:b c:d",
+			want: expr.AND(
+				expr.Eq("a", "b"),
+				expr.Eq("c", "d"),
+			),
+		},
+		"implicit_and_with_negated_subexpressions": {
+			input: "-a:b -c:d",
+			want: expr.AND(
+				expr.MUSTNOT(expr.Eq("a", "b")),
+				expr.MUSTNOT(expr.Eq("c", "d")),
+			),
+		},
+		"implicit_and_with_explicit_negation": {
+			input: "a:b NOT c:d",
+			want: expr.AND(
+				expr.Eq("a", "b"),
+				expr.NOT(expr.Eq("c", "d")),
+			),
+		},
+		"implicit_and_with_boosted_subexpressions": {
+			input: "a:b^ c:d^10",
+			want: expr.AND(
+				expr.BOOST(expr.Eq("a", "b"), 1),
+				expr.BOOST(expr.Eq("c", "d"), 10),
+			),
+		},
+		"implicit_and_with_boosted_subexpressions_reversed": {
+			input: "a:b^10 c:d^",
+			want: expr.AND(
+				expr.BOOST(expr.Eq("a", "b"), 10),
+				expr.BOOST(expr.Eq("c", "d"), 1),
+			),
+		},
+		"implicit_and_with_fuzzy_subexpressions": {
+			input: "a:b~ c:d~10",
+			want: expr.AND(
+				expr.FUZZY(expr.Eq("a", "b"), 1),
+				expr.FUZZY(expr.Eq("c", "d"), 10),
+			),
+		},
+		"implicit_and_with_fuzzy_subexpressions_reversed": {
+			input: "a:b~10 c:d~",
+			want: expr.AND(
+				expr.FUZZY(expr.Eq("a", "b"), 10),
+				expr.FUZZY(expr.Eq("c", "d"), 1),
+			),
+		},
 	}
 
 	for name, tc := range tcs {
