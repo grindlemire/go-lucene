@@ -285,6 +285,11 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: `title:"Foo" a:b NOT k:c`,
 			want:  `(("title" = 'Foo') AND ("a" = 'b')) AND (NOT("k" = 'c'))`,
 		},
+		"implicit_and_with_quotes": {
+			input:        `"jakarta apache" -"Apache Lucene"`,
+			want:         `("default" = 'jakarta apache') AND (NOT("default" = 'Apache Lucene'))`,
+			defaultField: "default",
+		},
 	}
 
 	for name, tc := range tcs {
