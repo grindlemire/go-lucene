@@ -276,9 +276,14 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			want:         `(("title" = 'Foo') AND ("a" = 'c')) AND (NOT("default" = 'b'))`,
 			defaultField: "default",
 		},
-		"exclamation_mark_as_alternative_to_not": {
-			input: "a:b !c:d",
-			want:  `("a" = 'b') AND (NOT("c" = 'd'))`,
+		"implicit_and_with_explicit_subexpression_and_default_field": {
+			input:        `title:"Foo" a:b NOT c`,
+			want:         `(("title" = 'Foo') AND ("a" = 'b')) AND (NOT("default" = 'c'))`,
+			defaultField: "default",
+		},
+		"implicit_and_with_explicit_subexpression_and_keyword_field": {
+			input: `title:"Foo" a:b NOT k:c`,
+			want:  `(("title" = 'Foo') AND ("a" = 'b')) AND (NOT("k" = 'c'))`,
 		},
 	}
 
