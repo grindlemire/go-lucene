@@ -290,6 +290,25 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			want:         `("default" = 'jakarta apache') AND (NOT("default" = 'Apache Lucene'))`,
 			defaultField: "default",
 		},
+		"implicit_and_with_exclamation_mark_as_alternative_to_not": {
+			input:        `"jakarta apache" !"Apache Lucene"`,
+			want:         `("default" = 'jakarta apache') AND (NOT("default" = 'Apache Lucene'))`,
+			defaultField: "default",
+		},
+		"implicit_and_with_exclamation_mark_as_alternative_to_not_and_default_field": {
+			input:        `"jakarta apache" !"Apache Lucene"`,
+			want:         `("default" = 'jakarta apache') AND (NOT("default" = 'Apache Lucene'))`,
+			defaultField: "default",
+		},
+		"exclamation_mark_inside_quotes_is_literal": {
+			input:        `"text with ! inside"`,
+			want:         `"default" = 'text with ! inside'`,
+			defaultField: "default",
+		},
+		"exclamation_mark_inside_regexp_is_literal": {
+			input: "field:/pattern with ! inside/",
+			want:  `"field" ~ '/pattern with ! inside/'`,
+		},
 	}
 
 	for name, tc := range tcs {
