@@ -249,6 +249,37 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: `foo:*`,
 			want:  `"foo" SIMILAR TO '%'`,
 		},
+		"implicit_and_with_subexpressions": {
+			input: "a:b c:d",
+			want:  `("a" = 'b') AND ("c" = 'd')`,
+		},
+		"implicit_and_with_negated_subexpressions": {
+			input: "-a:b -c:d",
+			want:  `(NOT("a" = 'b')) AND (NOT("c" = 'd'))`,
+		},
+		"implicit_and_with_explicit_negation": {
+			input: "a:b NOT c:d",
+			want:  `("a" = 'b') AND (NOT("c" = 'd'))`,
+		},
+		"implicit_and_with_subexpressions_and_default_field": {
+			input:        `title:"Foo" a b`,
+			want:         `(("title" = 'Foo') AND ("default" = 'a')) AND ("default" = 'b')`,
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field": {
+			input:        `title:"Foo" -a:c b`,
+			want:         `("title" = 'Foo') AND (NOT(("a" = 'c') AND ("default" = 'b')))`,
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field_reversed": {
+			input:        `title:"Foo" a:c -b`,
+			want:         `(("title" = 'Foo') AND ("a" = 'c')) AND (NOT("default" = 'b'))`,
+			defaultField: "default",
+		},
+		"exclamation_mark_as_alternative_to_not": {
+			input: "a:b !c:d",
+			want:  `("a" = 'b') AND (NOT("c" = 'd'))`,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -589,6 +620,24 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 			input:      `foo:*`,
 			wantStr:    `"foo" SIMILAR TO $1`,
 			wantParams: []any{"%"},
+		},
+		"implicit_and_with_subexpressions_and_default_field": {
+			input:        `title:"Foo" a b`,
+			wantStr:      `(("title" = $1) AND ("default" = $2)) AND ("default" = $3)`,
+			wantParams:   []any{"Foo", "a", "b"},
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field": {
+			input:        `title:"Foo" -a:c b`,
+			wantStr:      `("title" = $1) AND (NOT(("a" = $2) AND ("default" = $3)))`,
+			wantParams:   []any{"Foo", "c", "b"},
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field_reversed": {
+			input:        `title:"Foo" a:c -b`,
+			wantStr:      `(("title" = $1) AND ("a" = $2)) AND (NOT("default" = $3))`,
+			wantParams:   []any{"Foo", "c", "b"},
+			defaultField: "default",
 		},
 	}
 
