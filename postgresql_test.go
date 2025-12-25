@@ -268,7 +268,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field": {
 			input:        `title:"Foo" -a:c b`,
-			want:         `("title" = 'Foo') AND (NOT(("a" = 'c') AND ("default" = 'b')))`,
+			want:         `(("title" = 'Foo') AND (NOT("a" = 'c'))) AND ("default" = 'b')`,
 			defaultField: "default",
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field_reversed": {
@@ -308,6 +308,18 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		"exclamation_mark_inside_regexp_is_literal": {
 			input: "field:/pattern with ! inside/",
 			want:  `"field" ~ '/pattern with ! inside/'`,
+		},
+		"implicit_and_with_multiple_clauses": {
+			input: `-(k1:v1) k2:v2 -k3:v3`,
+			want:  `((NOT("k1" = 'v1')) AND ("k2" = 'v2')) AND (NOT("k3" = 'v3'))`,
+		},
+		"implicit_and_with_multiple_clauses_inverted": {
+			input: `k2:v2 -k1:v1 k3:v3`,
+			want:  `(("k2" = 'v2') AND (NOT("k1" = 'v1'))) AND ("k3" = 'v3')`,
+		},
+		"parenthesized_precedence": {
+			input: `k1:v1 -(k2:v2 OR k3:v3)`,
+			want:  `("k1" = 'v1') AND (NOT(("k2" = 'v2') OR ("k3" = 'v3')))`,
 		},
 	}
 
@@ -658,7 +670,7 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field": {
 			input:        `title:"Foo" -a:c b`,
-			wantStr:      `("title" = $1) AND (NOT(("a" = $2) AND ("default" = $3)))`,
+			wantStr:      `(("title" = $1) AND (NOT("a" = $2))) AND ("default" = $3)`,
 			wantParams:   []any{"Foo", "c", "b"},
 			defaultField: "default",
 		},

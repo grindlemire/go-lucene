@@ -95,8 +95,8 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 					if !isTopToken {
 						implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
 						// act as if we just saw an AND and check if we need to reduce the
-						// current token stack first.
-						if !p.shouldShift(implAnd) {
+						// current token stack first. Keep reducing until we can shift the AND.
+						for !p.shouldShift(implAnd) {
 							err = p.reduce()
 							if err != nil {
 								return e, err
@@ -120,7 +120,7 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 				if !isTopToken {
 					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
-					if !p.shouldShift(implAnd) {
+					for !p.shouldShift(implAnd) {
 						err = p.reduce()
 						if err != nil {
 							return e, err
@@ -161,6 +161,13 @@ func (p *parser) shouldShift(next lex.Token) bool {
 
 	curr := p.nonTerminals[len(p.nonTerminals)-1]
 
+	// if we are ever attempting to move past a subexpr we need to parse it before moving on.
+	// This MUST be checked before terminal handling, otherwise we'd shift a terminal
+	// before reducing the parenthetical expression.
+	if anyClosingBracket(curr) {
+		return false
+	}
+
 	// if we have a terminal symbol then we always want to shift since it won't be
 	// matched by any rule
 	if lex.IsTerminal(next) {
@@ -176,11 +183,6 @@ func (p *parser) shouldShift(next lex.Token) bool {
 	// if we see it
 	if endingRangeSubExpr(next) {
 		return true
-	}
-
-	// if we are ever attempting to move past a subexpr we need to parse it before moving on
-	if anyClosingBracket(curr) {
-		return false
 	}
 
 	// shift if our current token has less precedence than the next token
