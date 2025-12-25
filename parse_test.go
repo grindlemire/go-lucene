@@ -590,11 +590,11 @@ func TestParseLucene(t *testing.T) {
 			),
 		},
 		"implicit_and_with_multiple_clauses": {
-			input: `-k2:v2 k1:v1 -k3:v3`,
+			input: `-(k1:v1) k2:v2 -k3:v3`,
 			want: expr.AND(
 				expr.AND(
-					expr.MUSTNOT(expr.Eq("k2", "v2")),
-					expr.Eq("k1", "v1"),
+					expr.MUSTNOT(expr.Eq("k1", "v1")),
+					expr.Eq("k2", "v2"),
 				),
 				expr.MUSTNOT(expr.Eq("k3", "v3")),
 			),
