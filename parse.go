@@ -95,8 +95,8 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 					if !isTopToken {
 						implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
 						// act as if we just saw an AND and check if we need to reduce the
-						// current token stack first.
-						if !p.shouldShift(implAnd) {
+						// current token stack first. Keep reducing until we can shift the AND.
+						for !p.shouldShift(implAnd) {
 							err = p.reduce()
 							if err != nil {
 								return e, err
@@ -120,7 +120,7 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 				if !isTopToken {
 					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
-					if !p.shouldShift(implAnd) {
+					for !p.shouldShift(implAnd) {
 						err = p.reduce()
 						if err != nil {
 							return e, err

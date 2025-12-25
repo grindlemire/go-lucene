@@ -268,7 +268,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field": {
 			input:        `title:"Foo" -a:c b`,
-			want:         `("title" = 'Foo') AND (NOT(("a" = 'c') AND ("default" = 'b')))`,
+			want:         `(("title" = 'Foo') AND (NOT("a" = 'c'))) AND ("default" = 'b')`,
 			defaultField: "default",
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field_reversed": {
@@ -658,7 +658,7 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field": {
 			input:        `title:"Foo" -a:c b`,
-			wantStr:      `("title" = $1) AND (NOT(("a" = $2) AND ("default" = $3)))`,
+			wantStr:      `(("title" = $1) AND (NOT("a" = $2))) AND ("default" = $3)`,
 			wantParams:   []any{"Foo", "c", "b"},
 			defaultField: "default",
 		},
