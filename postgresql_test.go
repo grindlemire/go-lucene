@@ -309,6 +309,18 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: "field:/pattern with ! inside/",
 			want:  `"field" ~ '/pattern with ! inside/'`,
 		},
+		"implicit_and_with_multiple_clauses": {
+			input: `-(k1:v1) k2:v2 -k3:v3`,
+			want:  `((NOT("k1" = 'v1')) AND ("k2" = 'v2')) AND (NOT("k3" = 'v3'))`,
+		},
+		"implicit_and_with_multiple_clauses_inverted": {
+			input: `k2:v2 -k1:v1 k3:v3`,
+			want:  `(("k2" = 'v2') AND (NOT("k1" = 'v1'))) AND ("k3" = 'v3')`,
+		},
+		"parenthesized_precedence": {
+			input: `k1:v1 -(k2:v2 OR k3:v3)`,
+			want:  `("k1" = 'v1') AND (NOT(("k2" = 'v2') OR ("k3" = 'v3')))`,
+		},
 	}
 
 	for name, tc := range tcs {

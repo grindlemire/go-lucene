@@ -609,6 +609,18 @@ func TestParseLucene(t *testing.T) {
 				expr.Eq("k3", "v3"),
 			),
 		},
+		"parenthesized_precedence": {
+			input: `k1:v1 -(k2:v2 OR k3:v3)`,
+			want: expr.AND(
+				expr.Eq("k1", "v1"),
+				expr.MUSTNOT(
+					expr.OR(
+						expr.Eq("k2", "v2"),
+						expr.Eq("k3", "v3"),
+					),
+				),
+			),
+		},
 	}
 
 	for name, tc := range tcs {
