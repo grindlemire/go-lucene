@@ -120,7 +120,7 @@ func TestSQLDriver(t *testing.T) {
 					expr.Not,
 				),
 			),
-			want: `(("a" = 'foo') OR ("b" ~ '/b*ar/')) AND (NOT("c" BETWEEN 'aaa' AND '*'))`,
+			want: `(("a" = 'foo') OR ("b" ~ 'b*ar')) AND (NOT("c" BETWEEN 'aaa' AND '*'))`,
 		},
 		"space_in_fieldname": {
 			input: expr.Eq("a b", 1),
@@ -132,7 +132,7 @@ func TestSQLDriver(t *testing.T) {
 		},
 		"regexp": {
 			input: expr.REGEXP("/b*ar/"),
-			want:  `'/b*ar/'`,
+			want:  `'b*ar'`,
 		},
 	}
 

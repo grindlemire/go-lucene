@@ -24,6 +24,24 @@ func literal(left, right string) (string, error) {
 	return left, nil
 }
 
+// regexpLiteral handles standalone regex literals, stripping the Lucene slash delimiters
+func regexpLiteral(left, right string) (string, error) {
+	if !utf8.ValidString(left) {
+		return "", fmt.Errorf("literal contains invalid utf8: %q", left)
+	}
+	if strings.ContainsRune(left, 0) {
+		return "", fmt.Errorf("literal contains null byte: %q", left)
+	}
+
+	// Strip the leading and trailing slashes from the regex pattern
+	// left is formatted as "'/.../'" so we extract the pattern between slashes
+	if len(left) >= 4 && left[1] == '/' && left[len(left)-2] == '/' {
+		return "'" + left[2:len(left)-2] + "'", nil
+	}
+
+	return left, nil
+}
+
 func equals(left, right string) (string, error) {
 	return fmt.Sprintf("%s = %s", left, right), nil
 }
@@ -34,6 +52,22 @@ func noop(left, right string) (string, error) {
 
 func like(left, right string) (string, error) {
 	if len(right) >= 4 && right[1] == '/' && right[len(right)-2] == '/' {
+		// Strip the leading and trailing slashes from the regex pattern
+		// right is formatted as "'/.../'" so we extract the pattern between slashes
+		stripped := "'" + right[2:len(right)-2] + "'"
+		return fmt.Sprintf("%s ~ %s", left, stripped), nil
+	}
+
+	right = strings.ReplaceAll(right, "*", "%")
+	right = strings.ReplaceAll(right, "?", "_")
+	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
+}
+
+// likeRender handles the Like operator with explicit isRegex flag
+// This is called from Render() which can determine if the right side is a Regexp expression
+func likeRender(left, right string, isRegex bool) (string, error) {
+	if isRegex {
+		// The slashes have already been stripped by regexpLiteral
 		return fmt.Sprintf("%s ~ %s", left, right), nil
 	}
 
@@ -42,12 +76,9 @@ func like(left, right string) (string, error) {
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
 }
 
-func likeParam(left, right string, params []any) (string, error) {
-	if len(params) == 1 {
-		pright := params[0].(string)
-		if len(pright) >= 4 && pright[0] == '/' && pright[len(pright)-1] == '/' {
-			return fmt.Sprintf("%s ~ %s", left, right), nil
-		}
+func likeParam(left, right string, params []any, isRegex bool) (string, error) {
+	if isRegex {
+		return fmt.Sprintf("%s ~ %s", left, right), nil
 	}
 
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil

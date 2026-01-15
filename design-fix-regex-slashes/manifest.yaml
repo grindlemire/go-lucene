@@ -1,0 +1,7 @@
+feature: fix-regex-slashes
+created: 2025-01-15T00:00:00Z
+design: design.md
+phases:
+  - file: phase-1-strip-regex-slashes.md
+    status: completed
+    depends-on: []
