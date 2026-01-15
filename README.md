@@ -26,21 +26,23 @@ filter, err := lucene.ToPostgres(query)
 // Result: (("name" = 'John Doe') AND ("age" >= 25 AND "age" <= 35))
 ```
 
-
 ## API Methods
 
 ### Direct SQL Generation
+
 ```go
 filter, err := lucene.ToPostgres(query)
 ```
 
 ### Parameterized Queries (Recommended)
+
 ```go
 filter, params, err := lucene.ToParameterizedPostgres(query)
 db.Query(sql, params...)
 ```
 
 ### Default Fields
+
 ```go
 filter, err := lucene.ToPostgres("red OR green", lucene.WithDefaultField("color"))
 // Result: ("color" = 'red') OR ("color" = 'green')
@@ -64,18 +66,20 @@ filter, err := lucene.ToPostgres("red OR green", lucene.WithDefaultField("color"
 | `field:*` | `"field" SIMILAR TO '%'` | Wildcard match (matches anything) |
 | `field:pattern*` | `"field" SIMILAR TO 'pattern%'` | Wildcard suffix |
 | `field:pattern?` | `"field" SIMILAR TO 'pattern_'` | Single character wildcard |
-| `field:/regex/` | `"field" ~ '/regex/'` | Regular expression match |
+| `field:/regex/` | `"field" ~ 'regex'` | Regular expression match |
 | `(field1:value1 OR field2:value2) AND field3:value3` | `(("field1" = 'value1') OR ("field2" = 'value2')) AND ("field3" = 'value3')` | Grouping |
 
 ## Examples
 
 ### Complex Query
+
 ```go
 query := `name:"John Doe" AND age:[25 TO 35] AND NOT status:inactive`
 // SQL: (("name" = 'John Doe') AND ("age" >= 25 AND "age" <= 35)) AND (NOT("status" = 'inactive'))
 ```
 
 ### Parameterized Output
+
 ```go
 filter, params, err := lucene.ToParameterizedPostgres(`color:red AND type:"gala"`)
 // SQL: ("color" = $1) AND ("type" = $2)
@@ -83,12 +87,14 @@ filter, params, err := lucene.ToParameterizedPostgres(`color:red AND type:"gala"
 ```
 
 ### Wildcard Queries
+
 ```go
 filter, err := lucene.ToPostgres(`name:John* AND email:*@example.com`)
 // SQL: ("name" SIMILAR TO 'John%') AND ("email" SIMILAR TO '%@example.com')
 ```
 
 ### Regular Expression Queries
+
 ```go
 filter, err := lucene.ToPostgres(`url:/example\.com\/.*\/`)
 // SQL: "url" ~ '/example\.com\/.*\/'
