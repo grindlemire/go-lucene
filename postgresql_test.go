@@ -88,15 +88,59 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"regexp": {
 			input: "a:/b [c]/",
-			want:  `"a" ~ '/b [c]/'`,
+			want:  `"a" ~ 'b [c]'`,
 		},
 		"regexp_with_keywords": {
 			input: `a:/b "[c]/`,
-			want:  `"a" ~ '/b "[c]/'`,
+			want:  `"a" ~ 'b "[c]'`,
 		},
 		"regexp_with_escaped_chars": {
 			input: `url:/example.com\/foo\/bar\/.*/`,
-			want:  `"url" ~ '/example.com\/foo\/bar\/.*/'`,
+			want:  `"url" ~ 'example.com\/foo\/bar\/.*'`,
+		},
+		"regexp_single_char_pattern": {
+			input: `field:/./`,
+			want:  `"field" ~ '.'`,
+		},
+		"regexp_alternation": {
+			input: `status:/(active|pending)/`,
+			want:  `"status" ~ '(active|pending)'`,
+		},
+		"regexp_one_or_more": {
+			input: `digits:/[0-9]+/`,
+			want:  `"digits" ~ '[0-9]+'`,
+		},
+		"regexp_optional_quantifier": {
+			input: `word:/colou?r/`,
+			want:  `"word" ~ 'colou?r'`,
+		},
+		"regexp_anchor_start": {
+			input: `name:/^John/`,
+			want:  `"name" ~ '^John'`,
+		},
+		"regexp_anchor_end": {
+			input: `name:/Smith$/`,
+			want:  `"name" ~ 'Smith$'`,
+		},
+		"regexp_digit_class": {
+			input: `code:/\d{3}/`,
+			want:  `"code" ~ '\d{3}'`,
+		},
+		"regexp_word_class": {
+			input: `token:/\w+/`,
+			want:  `"token" ~ '\w+'`,
+		},
+		"regexp_literal_backslash": {
+			input: `path:/foo\\bar/`,
+			want:  `"path" ~ 'foo\\bar'`,
+		},
+		"regexp_with_single_quote": {
+			input: `text:/it's/`,
+			want:  `"text" ~ 'it''s'`,
+		},
+		"regexp_percent_not_metachar": {
+			input: `value:/100%/`,
+			want:  `"value" ~ '100%'`,
 		},
 		"basic_default_AND": {
 			input: "a b",
@@ -307,7 +351,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"exclamation_mark_inside_regexp_is_literal": {
 			input: "field:/pattern with ! inside/",
-			want:  `"field" ~ '/pattern with ! inside/'`,
+			want:  `"field" ~ 'pattern with ! inside'`,
 		},
 		"implicit_and_with_multiple_clauses": {
 			input: `-(k1:v1) k2:v2 -k3:v3`,
@@ -447,17 +491,72 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		"regexp": {
 			input:      "a:/b [c]/",
 			wantStr:    `"a" ~ $1`,
-			wantParams: []any{"/b [c]/"},
+			wantParams: []any{"b [c]"},
 		},
 		"regexp_with_keywords": {
 			input:      `a:/b "[c]/`,
 			wantStr:    `"a" ~ $1`,
-			wantParams: []any{`/b "[c]/`},
+			wantParams: []any{`b "[c]`},
 		},
 		"regexp_with_escaped_chars": {
 			input:      `url:/example.com\/foo\/bar\/.*/`,
 			wantStr:    `"url" ~ $1`,
-			wantParams: []any{`/example.com\/foo\/bar\/.*/`},
+			wantParams: []any{`example.com\/foo\/bar\/.*`},
+		},
+		"regexp_single_char_pattern": {
+			input:      `field:/./`,
+			wantStr:    `"field" ~ $1`,
+			wantParams: []any{"."},
+		},
+		"regexp_alternation": {
+			input:      `status:/(active|pending)/`,
+			wantStr:    `"status" ~ $1`,
+			wantParams: []any{"(active|pending)"},
+		},
+		"regexp_one_or_more": {
+			input:      `digits:/[0-9]+/`,
+			wantStr:    `"digits" ~ $1`,
+			wantParams: []any{"[0-9]+"},
+		},
+		"regexp_optional_quantifier": {
+			input:      `word:/colou?r/`,
+			wantStr:    `"word" ~ $1`,
+			wantParams: []any{"colou?r"},
+		},
+		"regexp_anchor_start": {
+			input:      `name:/^John/`,
+			wantStr:    `"name" ~ $1`,
+			wantParams: []any{"^John"},
+		},
+		"regexp_anchor_end": {
+			input:      `name:/Smith$/`,
+			wantStr:    `"name" ~ $1`,
+			wantParams: []any{"Smith$"},
+		},
+		"regexp_digit_class": {
+			input:      `code:/\d{3}/`,
+			wantStr:    `"code" ~ $1`,
+			wantParams: []any{`\d{3}`},
+		},
+		"regexp_word_class": {
+			input:      `token:/\w+/`,
+			wantStr:    `"token" ~ $1`,
+			wantParams: []any{`\w+`},
+		},
+		"regexp_literal_backslash": {
+			input:      `path:/foo\\bar/`,
+			wantStr:    `"path" ~ $1`,
+			wantParams: []any{`foo\\bar`},
+		},
+		"regexp_with_single_quote": {
+			input:      `text:/it's/`,
+			wantStr:    `"text" ~ $1`,
+			wantParams: []any{"it's"},
+		},
+		"regexp_percent_not_metachar": {
+			input:      `value:/100%/`,
+			wantStr:    `"value" ~ $1`,
+			wantParams: []any{"100%"},
 		},
 		"basic_default_AND": {
 			input:      "a b",

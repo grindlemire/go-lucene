@@ -21,7 +21,7 @@ var Shared = map[expr.Operator]RenderFN{
 	// expr.Fuzzy:     unsupported,
 	// expr.Boost:     unsupported,
 	expr.Wild:      literal,
-	expr.Regexp:    literal,
+	expr.Regexp:    regexpLiteral, // strip Lucene slash delimiters from regex patterns
 	expr.Like:      like,
 	expr.Greater:   greater,
 	expr.GreaterEq: greaterEq,
@@ -60,11 +60,18 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		rparams = []any{"%"}
 	}
 
+	// Track if this is a regex pattern
+	isRegex := false
+
 	// if we are in a regular expression we need to convert the * to % and ? to _
 	if e.Op == expr.Like && len(rparams) > 0 {
 		rval := rparams[0].(string)
-		// keep the regexp intact if it is a // regexp
-		if len(rval) < 4 || rval[0] != '/' || rval[len(rval)-1] != '/' {
+		// check if it is a // regexp
+		if len(rval) >= 2 && rval[0] == '/' && rval[len(rval)-1] == '/' {
+			// Strip the leading and trailing slashes from the regex pattern
+			rparams[0] = rval[1 : len(rval)-1]
+			isRegex = true
+		} else {
 			rval = strings.ReplaceAll(rval, "*", "%")
 			rval = strings.ReplaceAll(rval, "?", "_")
 			rparams[0] = rval
@@ -91,7 +98,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	// if we have a like operator then we need to use the likeParam function instead of the default
 	// since we are replacing all the * with % and ? with _
 	if e.Op == expr.Like {
-		str, err := likeParam(left, right, rparams)
+		str, err := likeParam(left, right, rparams, isRegex)
 		return str, params, err
 	}
 
@@ -140,6 +147,16 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		if !b.isSimple(e.Right) {
 			right = "(" + right + ")"
 		}
+	}
+
+	// Special handling for Like operator to detect regex patterns
+	if e.Op == expr.Like {
+		// Check if the right side is a regex expression
+		isRegex := false
+		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
+			isRegex = true
+		}
+		return likeRender(left, right, isRegex)
 	}
 
 	fn, ok := b.RenderFNs[e.Op]
