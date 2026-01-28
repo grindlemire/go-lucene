@@ -96,8 +96,8 @@ filter, err := lucene.ToPostgres(`name:John* AND email:*@example.com`)
 ### Regular Expression Queries
 
 ```go
-filter, err := lucene.ToPostgres(`url:/example\.com\/.*\/`)
-// SQL: "url" ~ '/example\.com\/.*\/'
+filter, err := lucene.ToPostgres(`url:/example\.com\/.*/`)
+// SQL: "url" ~ 'example\.com\/.*'
 ```
 
 ## Custom SQL Drivers
