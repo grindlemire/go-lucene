@@ -43,7 +43,7 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.Rang("a", 1.1, 10, true),
 			want:  `"a" >= 1.10 AND "a" <= 10.00`,
 		},
-		"mixed_number_range_exlusive": {
+		"mixed_number_range_exclusive": {
 			input: expr.Rang("a", 1, 10.1, false),
 			want:  `"a" > 1.00 AND "a" < 10.10`,
 		},
@@ -51,7 +51,7 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.Rang("a", 1, 10, true),
 			want:  `"a" >= 1 AND "a" <= 10`,
 		},
-		"int_range_exlusive": {
+		"int_range_exclusive": {
 			input: expr.Rang("a", 1, 10, false),
 			want:  `"a" > 1 AND "a" < 10`,
 		},
@@ -59,7 +59,7 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.Rang("a", 1.0, 10.0, true),
 			want:  `"a" >= 1 AND "a" <= 10`,
 		},
-		"float_range_exlusive": {
+		"float_range_exclusive": {
 			input: expr.Rang("a", 1.0, 10.0, false),
 			want:  `"a" > 1 AND "a" < 10`,
 		},
