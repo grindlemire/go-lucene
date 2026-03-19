@@ -8,7 +8,7 @@ type ClickhouseDriver struct {
 }
 
 // NewPostgresDriver creates a new driver that will output a parsed lucene expression as a SQL filter.
-func NewClickhouseDriver() ClickhouseDriver {
+func NewClickhouseDriver(opts ...Option) ClickhouseDriver {
 	fns := map[expr.Operator]RenderFN{
 		expr.Literal: literal,
 	}
@@ -20,9 +20,18 @@ func NewClickhouseDriver() ClickhouseDriver {
 		}
 	}
 
-	return ClickhouseDriver{
+	driver := ClickhouseDriver{
 		Base{
-			RenderFNs: fns,
+			RenderFNs:     fns,
+			FieldBindings: map[string]FieldBinding{},
 		},
 	}
+
+	for _, opt := range opts {
+		if err := opt(&driver); err != nil {
+			panic(err)
+		}
+	}
+
+	return driver
 }

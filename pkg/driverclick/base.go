@@ -34,7 +34,8 @@ var Shared = map[expr.Operator]RenderFN{
 
 // Base is the base driver that is embedded in each driver
 type Base struct {
-	RenderFNs map[expr.Operator]RenderFN
+	RenderFNs     map[expr.Operator]RenderFN
+	FieldBindings map[string]FieldBinding
 }
 
 // Render will render the expression based on the renderFNs provided by the driver.
@@ -77,7 +78,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return s, fmt.Errorf("unable to render operator [%s]", e.Op)
 	}
 
-	return fn(left, right)
+	return fn(b, left, right)
 }
 
 func (b Base) isSimple(in any) bool {
