@@ -55,16 +55,18 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 
 	// edge case for a standalone wildcard on a like operator.
 	// Convert to a regular expression that matches anything
+	standaloneWild := false
 	if right == "'*'" && e.Op == expr.Like {
 		right = "?"
 		rparams = []any{"%"}
+		standaloneWild = true
 	}
 
 	// Track if this is a regex pattern
 	isRegex := false
 
 	// if we are in a regular expression we need to convert the * to % and ? to _
-	if e.Op == expr.Like && len(rparams) > 0 {
+	if e.Op == expr.Like && len(rparams) > 0 && !standaloneWild {
 		rval := rparams[0].(string)
 		// check if it is a // regexp
 		if len(rval) >= 2 && rval[0] == '/' && rval[len(rval)-1] == '/' {
@@ -72,6 +74,8 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 			rparams[0] = rval[1 : len(rval)-1]
 			isRegex = true
 		} else {
+			rval = strings.ReplaceAll(rval, "%", `\%`)
+			rval = strings.ReplaceAll(rval, "_", `\_`)
 			rval = strings.ReplaceAll(rval, "*", "%")
 			rval = strings.ReplaceAll(rval, "?", "_")
 			rparams[0] = rval

@@ -32,7 +32,7 @@ func TestSQLDriver(t *testing.T) {
 			want:  `NOT("a" = 1)`,
 		},
 		"simple_like": {
-			input: expr.LIKE("a", "%(b|d)%"),
+			input: expr.LIKE("a", "*(b|d)*"),
 			want:  `"a" SIMILAR TO '%(b|d)%'`,
 		},
 		"string_range": {
@@ -133,6 +133,22 @@ func TestSQLDriver(t *testing.T) {
 		"regexp": {
 			input: expr.REGEXP("/b*ar/"),
 			want:  `'b*ar'`,
+		},
+		"like_with_literal_percent": {
+			input: expr.LIKE("field", "100%*"),
+			want:  `"field" SIMILAR TO '100\%%'`,
+		},
+		"like_with_literal_underscore": {
+			input: expr.LIKE("field", "foo_bar*"),
+			want:  `"field" SIMILAR TO 'foo\_bar%'`,
+		},
+		"like_without_special_chars": {
+			input: expr.LIKE("field", "clean*"),
+			want:  `"field" SIMILAR TO 'clean%'`,
+		},
+		"like_percent_and_underscore_mixed": {
+			input: expr.LIKE("field", "100%_test*"),
+			want:  `"field" SIMILAR TO '100\%\_test%'`,
 		},
 	}
 

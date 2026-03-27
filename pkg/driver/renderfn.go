@@ -58,6 +58,8 @@ func like(left, right string) (string, error) {
 		return fmt.Sprintf("%s ~ %s", left, stripped), nil
 	}
 
+	right = strings.ReplaceAll(right, "%", `\%`)
+	right = strings.ReplaceAll(right, "_", `\_`)
 	right = strings.ReplaceAll(right, "*", "%")
 	right = strings.ReplaceAll(right, "?", "_")
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
@@ -71,6 +73,8 @@ func likeRender(left, right string, isRegex bool) (string, error) {
 		return fmt.Sprintf("%s ~ %s", left, right), nil
 	}
 
+	right = strings.ReplaceAll(right, "%", `\%`)
+	right = strings.ReplaceAll(right, "_", `\_`)
 	right = strings.ReplaceAll(right, "*", "%")
 	right = strings.ReplaceAll(right, "?", "_")
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
