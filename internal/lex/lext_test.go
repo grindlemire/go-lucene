@@ -238,6 +238,33 @@ func TestLex(t *testing.T) {
 				tok(TQuoted, "\"works well\""),
 			},
 		},
+		"percent_sign_standalone": {
+			in: "100%",
+			expected: []Token{
+				tok(TLiteral, "100%"),
+			},
+		},
+		"percent_sign_mid_word": {
+			in: "DMSO100%",
+			expected: []Token{
+				tok(TLiteral, "DMSO100%"),
+			},
+		},
+		"percent_sign_with_other_term": {
+			in: "DMSO 100%",
+			expected: []Token{
+				tok(TLiteral, "DMSO"),
+				tok(TLiteral, "100%"),
+			},
+		},
+		"percent_sign_field_value": {
+			in: "concentration:100%",
+			expected: []Token{
+				tok(TLiteral, "concentration"),
+				tok(TColon, ":"),
+				tok(TLiteral, "100%"),
+			},
+		},
 	}
 
 	for name, tc := range tcs {
