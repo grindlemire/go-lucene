@@ -108,7 +108,7 @@ func LESSEQ(a any, b any) *Expression {
 	return Expr(a, LessEq, b)
 }
 
-// LIKE creates a new fuzzy matching LIKE expression
+// LIKE creates a LIKE expression. b uses Lucene wildcard syntax (* and ?, not SQL % and _).
 func LIKE(a any, b any) *Expression {
 	return Expr(a, Like, b)
 }
