@@ -219,7 +219,7 @@ func lexSpace(l *Lexer) tokenStateFn {
 func lexVal(l *Lexer) tokenStateFn {
 	l.start = l.pos
 	switch r := l.next(); {
-	case isAlphaNumeric(r) || isWildcard(r) || isEscape(r):
+	case isAlphaNumeric(r) || isWildcard(r) || isEscape(r) || r == '%':
 		l.backup()
 		return lexWord
 	case isSymbol(r):
@@ -287,7 +287,7 @@ func lexWord(l *Lexer) tokenStateFn {
 loop:
 	for {
 		switch r := l.next(); {
-		case isAlphaNumeric(r) || isWildcard(r) || r == '.' || r == '-':
+		case isAlphaNumeric(r) || isWildcard(r) || r == '.' || r == '-' || r == '%':
 			// do nothing
 		case isEscape(r):
 			l.next() // just ignore the next character

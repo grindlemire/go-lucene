@@ -621,6 +621,28 @@ func TestParseLucene(t *testing.T) {
 				),
 			),
 		},
+		// percent sign tests — % is not a reserved Lucene character and must
+		// be treated as a regular literal character in bare terms.
+		"percent_sign_bare_literal": {
+			input: "100%",
+			want:  expr.Lit("100%"),
+		},
+		"percent_sign_implicit_and": {
+			input: "DMSO 100%",
+			want:  expr.AND(expr.Lit("DMSO"), expr.Lit("100%")),
+		},
+		"percent_sign_explicit_and": {
+			input: "DMSO AND 100%",
+			want:  expr.AND(expr.Lit("DMSO"), expr.Lit("100%")),
+		},
+		"percent_sign_field_value": {
+			input: "concentration:100%",
+			want:  expr.Eq("concentration", "100%"),
+		},
+		"percent_sign_mid_word": {
+			input: "50%done",
+			want:  expr.Lit("50%done"),
+		},
 	}
 
 	for name, tc := range tcs {
