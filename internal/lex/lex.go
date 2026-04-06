@@ -206,7 +206,7 @@ func lexSpace(l *Lexer) tokenStateFn {
 		switch l.next() {
 		case eof:
 			return nil
-		case ' ', '\t', '\r', '\n':
+		case ' ', '\t', '\r', '\n', ',':
 			continue
 		default:
 			// transition to being in a value

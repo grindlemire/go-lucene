@@ -643,6 +643,71 @@ func TestParseLucene(t *testing.T) {
 			input: "50%done",
 			want:  expr.Lit("50%done"),
 		},
+		// comma tests — unquoted commas are word boundaries; quoted commas are preserved literally
+		"comma_as_word_boundary": {
+			input: "foo, bar",
+			want:  expr.AND(expr.Lit("foo"), expr.Lit("bar")),
+		},
+		"comma_only_separator": {
+			input: "foo,bar",
+			want:  expr.AND(expr.Lit("foo"), expr.Lit("bar")),
+		},
+		"comma_multiple_terms": {
+			input: "foo, bar, baz",
+			want:  expr.AND(expr.AND(expr.Lit("foo"), expr.Lit("bar")), expr.Lit("baz")),
+		},
+		"quoted_phrase_with_comma_preserved": {
+			input: `"foo, bar"`,
+			want:  expr.Lit("foo, bar"),
+		},
+		"quoted_phrase_with_comma_in_field_value": {
+			input: `name:"Smith, John"`,
+			want:  expr.Eq("name", "Smith, John"),
+		},
+		"quoted_phrase_with_comma_in_compound": {
+			input: `"foo, bar" AND baz`,
+			want:  expr.AND(expr.Lit("foo, bar"), expr.Lit("baz")),
+		},
+		"escaped_brackets_with_wildcard_and_comma_separated_terms": {
+			input: `\[*\] Actual go routines \[*\], allocated objects in bytes \[*\], allocated objects \[*\]`,
+			want: expr.AND(
+				expr.AND(
+					expr.AND(
+						expr.AND(
+							expr.AND(
+								expr.AND(
+									expr.AND(
+										expr.AND(
+											expr.AND(
+												expr.AND(
+													expr.AND(
+														expr.AND(
+															expr.WILD(`\[*\]`),
+															expr.Lit("Actual"),
+														),
+														expr.Lit("go"),
+													),
+													expr.Lit("routines"),
+												),
+												expr.WILD(`\[*\]`),
+											),
+											expr.Lit("allocated"),
+										),
+										expr.Lit("objects"),
+									),
+									expr.Lit("in"),
+								),
+								expr.Lit("bytes"),
+							),
+							expr.WILD(`\[*\]`),
+						),
+						expr.Lit("allocated"),
+					),
+					expr.Lit("objects"),
+				),
+				expr.WILD(`\[*\]`),
+			),
+		},
 	}
 
 	for name, tc := range tcs {
