@@ -265,6 +265,58 @@ func TestLex(t *testing.T) {
 				tok(TLiteral, "100%"),
 			},
 		},
+		"comma_treated_as_separator": {
+			in: "a, b",
+			expected: []Token{
+				tok(TLiteral, "a"),
+				tok(TLiteral, "b"),
+			},
+		},
+		"comma_between_terms": {
+			in: `\[*\] Actual go routines \[*\], allocated objects`,
+			expected: []Token{
+				tok(TLiteral, `\[*\]`),
+				tok(TLiteral, "Actual"),
+				tok(TLiteral, "go"),
+				tok(TLiteral, "routines"),
+				tok(TLiteral, `\[*\]`),
+				tok(TLiteral, "allocated"),
+				tok(TLiteral, "objects"),
+			},
+		},
+		"semicolon_treated_as_separator": {
+			in: "a; b",
+			expected: []Token{
+				tok(TLiteral, "a"),
+				tok(TLiteral, "b"),
+			},
+		},
+		"at_sign_in_literal": {
+			in: "user@example.com",
+			expected: []Token{
+				tok(TLiteral, "user@example.com"),
+			},
+		},
+		"at_sign_field_value": {
+			in: "email:user@example.com",
+			expected: []Token{
+				tok(TLiteral, "email"),
+				tok(TColon, ":"),
+				tok(TLiteral, "user@example.com"),
+			},
+		},
+		"hash_in_literal": {
+			in: "#channel",
+			expected: []Token{
+				tok(TLiteral, "#channel"),
+			},
+		},
+		"dollar_in_literal": {
+			in: "$variable",
+			expected: []Token{
+				tok(TLiteral, "$variable"),
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -311,7 +363,7 @@ func finalizeExpected(in string, tokens []Token) (out []Token) {
 
 func movePastWhitespace(in string) (count int) {
 	for _, c := range in {
-		if !isSpace(c) {
+		if !isSpace(c) && c != ',' && c != ';' {
 			return count
 		}
 		count++

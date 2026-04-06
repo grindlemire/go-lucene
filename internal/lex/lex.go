@@ -206,7 +206,7 @@ func lexSpace(l *Lexer) tokenStateFn {
 		switch l.next() {
 		case eof:
 			return nil
-		case ' ', '\t', '\r', '\n':
+		case ' ', '\t', '\r', '\n', ',', ';':
 			continue
 		default:
 			// transition to being in a value
@@ -219,7 +219,7 @@ func lexSpace(l *Lexer) tokenStateFn {
 func lexVal(l *Lexer) tokenStateFn {
 	l.start = l.pos
 	switch r := l.next(); {
-	case isAlphaNumeric(r) || isWildcard(r) || isEscape(r) || r == '%':
+	case isAlphaNumeric(r) || isWildcard(r) || isEscape(r) || isLiteralChar(r):
 		l.backup()
 		return lexWord
 	case isSymbol(r):
@@ -287,7 +287,7 @@ func lexWord(l *Lexer) tokenStateFn {
 loop:
 	for {
 		switch r := l.next(); {
-		case isAlphaNumeric(r) || isWildcard(r) || r == '.' || r == '-' || r == '%':
+		case isAlphaNumeric(r) || isWildcard(r) || isLiteralChar(r) || r == '.' || r == '-':
 			// do nothing
 		case isEscape(r):
 			l.next() // just ignore the next character
@@ -391,6 +391,13 @@ func isSpace(r rune) bool {
 // isEscape checks whether the character is an escape character
 func isEscape(r rune) bool {
 	return r == '\\'
+}
+
+// isLiteralChar checks whether the character is allowed as part of a literal value
+// but is not alphanumeric, wildcard, or escape. These characters have no special
+// meaning in Lucene syntax and commonly appear in real-world search terms.
+func isLiteralChar(r rune) bool {
+	return r == '%' || r == '@' || r == '#' || r == '$'
 }
 
 // isSymbol checks whether the run is one of the reserved symbols
