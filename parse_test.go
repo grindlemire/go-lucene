@@ -643,6 +643,33 @@ func TestParseLucene(t *testing.T) {
 			input: "50%done",
 			want:  expr.Lit("50%done"),
 		},
+		// comma and semicolon are not Lucene operators and should be treated
+		// as whitespace separators (issue #48).
+		"comma_as_separator": {
+			input: "a, b",
+			want:  expr.AND(expr.Lit("a"), expr.Lit("b")),
+		},
+		"comma_between_multiple_terms": {
+			input: "a, b, c",
+			want:  expr.AND(expr.AND(expr.Lit("a"), expr.Lit("b")), expr.Lit("c")),
+		},
+		"semicolon_as_separator": {
+			input: "a; b",
+			want:  expr.AND(expr.Lit("a"), expr.Lit("b")),
+		},
+		// @, #, $ are valid literal characters.
+		"at_sign_in_literal": {
+			input: "user@example.com",
+			want:  expr.Lit("user@example.com"),
+		},
+		"hash_in_literal": {
+			input: "#channel",
+			want:  expr.Lit("#channel"),
+		},
+		"dollar_in_literal": {
+			input: "$var",
+			want:  expr.Lit("$var"),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -853,4 +880,28 @@ func FuzzParse(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in string) {
 		_, _ = Parse(in)
 	})
+}
+
+// TestParseSeparatorCharacters validates that commas, semicolons, and other
+// non-Lucene characters do not cause parse errors (issue #48).
+func TestParseSeparatorCharacters(t *testing.T) {
+	inputs := map[string]string{
+		"comma_from_issue_48":  `\[*\] Actual go routines \[*\], allocated objects in bytes \[*\], allocated objects \[*\]`,
+		"semicolons":           `a; b; c`,
+		"mixed_separators":     `a, b; c`,
+		"email_address":        `user@example.com`,
+		"hash_tag":             `#channel`,
+		"dollar_variable":      `$var`,
+		"field_with_at":        `recipient:user@example.com`,
+		"field_with_hash":      `tag:#important`,
+	}
+
+	for name, input := range inputs {
+		t.Run(name, func(t *testing.T) {
+			_, err := Parse(input)
+			if err != nil {
+				t.Fatalf("expected no error, got: %v", err)
+			}
+		})
+	}
 }

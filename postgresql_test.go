@@ -365,6 +365,23 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: `k1:v1 -(k2:v2 OR k3:v3)`,
 			want:  `("k1" = 'v1') AND (NOT(("k2" = 'v2') OR ("k3" = 'v3')))`,
 		},
+		"comma_separated_terms_with_default_field": {
+			input:        "foo, bar, baz",
+			want:         `(("default" = 'foo') AND ("default" = 'bar')) AND ("default" = 'baz')`,
+			defaultField: "default",
+		},
+		"comma_separated_field_values": {
+			input: "a:b, c:d",
+			want:  `("a" = 'b') AND ("c" = 'd')`,
+		},
+		"semicolon_separated_field_values": {
+			input: "a:b; c:d",
+			want:  `("a" = 'b') AND ("c" = 'd')`,
+		},
+		"email_field_value": {
+			input: "email:user@example.com",
+			want:  `"email" = 'user@example.com'`,
+		},
 	}
 
 	for name, tc := range tcs {
