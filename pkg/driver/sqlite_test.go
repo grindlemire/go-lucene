@@ -6,13 +6,175 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
-func TestSQLiteDriverBasic(t *testing.T) {
-	got, err := NewSQLiteDriver().Render(expr.Eq("a", 5))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestSQLiteDriver(t *testing.T) {
+	type tc struct {
+		input *expr.Expression
+		want  string
 	}
-	want := `"a" = 5`
-	if got != want {
-		t.Fatalf("wanted %s got %s", want, got)
+
+	tcs := map[string]tc{
+		"simple_equals": {
+			input: expr.Eq("a", 5),
+			want:  `"a" = 5`,
+		},
+		"simple_and": {
+			input: expr.AND(expr.Eq("a", 5), expr.Eq("b", "foo")),
+			want:  `("a" = 5) AND ("b" = 'foo')`,
+		},
+		"simple_or": {
+			input: expr.OR(expr.Eq("a", 5), expr.Eq("b", "foo")),
+			want:  `("a" = 5) OR ("b" = 'foo')`,
+		},
+		"simple_not": {
+			input: expr.NOT(expr.Eq("a", 1)),
+			want:  `NOT("a" = 1)`,
+		},
+		"simple_like_glob": {
+			input: expr.LIKE("a", "b*"),
+			want:  `"a" GLOB 'b*'`,
+		},
+		"simple_like_question": {
+			input: expr.LIKE("a", "b?z"),
+			want:  `"a" GLOB 'b?z'`,
+		},
+		"string_range": {
+			input: expr.Rang("a", "foo", "bar", true),
+			want:  `"a" BETWEEN 'foo' AND 'bar'`,
+		},
+		"mixed_number_range": {
+			input: expr.Rang("a", 1.1, 10, true),
+			want:  `"a" >= 1.10 AND "a" <= 10.00`,
+		},
+		"mixed_number_range_exclusive": {
+			input: expr.Rang("a", 1, 10.1, false),
+			want:  `"a" > 1.00 AND "a" < 10.10`,
+		},
+		"int_range": {
+			input: expr.Rang("a", 1, 10, true),
+			want:  `"a" >= 1 AND "a" <= 10`,
+		},
+		"int_range_exclusive": {
+			input: expr.Rang("a", 1, 10, false),
+			want:  `"a" > 1 AND "a" < 10`,
+		},
+		"float_range": {
+			input: expr.Rang("a", 1.0, 10.0, true),
+			want:  `"a" >= 1 AND "a" <= 10`,
+		},
+		"float_range_exclusive": {
+			input: expr.Rang("a", 1.0, 10.0, false),
+			want:  `"a" > 1 AND "a" < 10`,
+		},
+		"lt_range": {
+			input: expr.Rang("a", "*", 10, false),
+			want:  `"a" < 10`,
+		},
+		"lte_range": {
+			input: expr.Rang("a", "*", 10, true),
+			want:  `"a" <= 10`,
+		},
+		"gt_range": {
+			input: expr.Rang("a", 1, "*", false),
+			want:  `"a" > 1`,
+		},
+		"gte_range": {
+			input: expr.Rang("a", 1, "*", true),
+			want:  `"a" >= 1`,
+		},
+		"lt_range_float": {
+			input: expr.Rang("a", "*", 10.5, false),
+			want:  `"a" < 10.50`,
+		},
+		"lte_range_float": {
+			input: expr.Rang("a", "*", 10.5, true),
+			want:  `"a" <= 10.50`,
+		},
+		"gt_range_float": {
+			input: expr.Rang("a", 1.5, "*", false),
+			want:  `"a" > 1.50`,
+		},
+		"gte_range_float": {
+			input: expr.Rang("a", 1.5, "*", true),
+			want:  `"a" >= 1.50`,
+		},
+		"lt": {
+			input: expr.LESS("a", 10),
+			want:  `"a" < 10`,
+		},
+		"lte": {
+			input: expr.LESSEQ("a", 10),
+			want:  `"a" <= 10`,
+		},
+		"gt": {
+			input: expr.GREATER("a", 10),
+			want:  `"a" > 10`,
+		},
+		"gte": {
+			input: expr.GREATEREQ("a", 10),
+			want:  `"a" >= 10`,
+		},
+		"must_ignored": {
+			input: expr.MUST(expr.Eq("a", 1)),
+			want:  `"a" = 1`,
+		},
+		"nested_filter": {
+			input: expr.Expr(
+				expr.Expr(
+					expr.Expr("a", expr.Equals, "foo"),
+					expr.Or,
+					expr.Expr("b", expr.Equals, expr.REGEXP("/b*ar/")),
+				),
+				expr.And,
+				expr.Expr(
+					expr.Rang("c", "aaa", "*", false),
+					expr.Not,
+				),
+			),
+			want: `(("a" = 'foo') OR ("b" REGEXP 'b*ar')) AND (NOT("c" BETWEEN 'aaa' AND '*'))`,
+		},
+		"space_in_fieldname": {
+			input: expr.Eq("a b", 1),
+			want:  `"a b" = 1`,
+		},
+		"equals_in_equals": {
+			input: expr.Eq("a", expr.Eq("b", 1)),
+			want:  `"a" = ("b" = 1)`,
+		},
+		"regexp": {
+			input: expr.REGEXP("/b*ar/"),
+			want:  `'b*ar'`,
+		},
+		"like_with_literal_percent": {
+			input: expr.LIKE("field", "100%*"),
+			want:  `"field" GLOB '100%*'`,
+		},
+		"like_with_literal_underscore": {
+			input: expr.LIKE("field", "foo_bar*"),
+			want:  `"field" GLOB 'foo_bar*'`,
+		},
+		"like_without_special_chars": {
+			input: expr.LIKE("field", "clean*"),
+			want:  `"field" GLOB 'clean*'`,
+		},
+		"bool_true": {
+			input: expr.Eq("active", true),
+			want:  `"active" = 1`,
+		},
+		"bool_false": {
+			input: expr.Eq("active", false),
+			want:  `"active" = 0`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := NewSQLiteDriver().Render(tc.input)
+			if err != nil {
+				t.Fatalf("got an unexpected error when rendering: %v", err)
+			}
+			if tc.want != got {
+				t.Fatalf(errTemplate, "generated sql does not match", tc.want, got)
+			}
+		})
 	}
 }
