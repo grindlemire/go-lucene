@@ -156,6 +156,10 @@ func TestSQLiteDriver(t *testing.T) {
 			input: expr.LIKE("field", "clean*"),
 			want:  `"field" GLOB 'clean*'`,
 		},
+		"like_percent_and_underscore_mixed": {
+			input: expr.LIKE("field", "100%_test*"),
+			want:  `"field" GLOB '100%_test*'`,
+		},
 		"bool_true": {
 			input: expr.Eq("active", true),
 			want:  `"active" = 1`,
