@@ -50,21 +50,6 @@ func noop(left, right string) (string, error) {
 	return left, nil
 }
 
-func like(left, right string) (string, error) {
-	if len(right) >= 4 && right[1] == '/' && right[len(right)-2] == '/' {
-		// Strip the leading and trailing slashes from the regex pattern
-		// right is formatted as "'/.../'" so we extract the pattern between slashes
-		stripped := "'" + right[2:len(right)-2] + "'"
-		return fmt.Sprintf("%s ~ %s", left, stripped), nil
-	}
-
-	right = strings.ReplaceAll(right, "%", `\%`)
-	right = strings.ReplaceAll(right, "_", `\_`)
-	right = strings.ReplaceAll(right, "*", "%")
-	right = strings.ReplaceAll(right, "?", "_")
-	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
-}
-
 // likeRender handles the Like operator with explicit isRegex flag
 // This is called from Render() which can determine if the right side is a Regexp expression
 func likeRender(left, right string, isRegex bool) (string, error) {

@@ -28,6 +28,7 @@ func NewPostgresDriver() PostgresDriver {
 	return PostgresDriver{
 		Base{
 			RenderFNs: fns,
+			Dialect:   postgresDialect{},
 		},
 	}
 }
@@ -57,4 +58,45 @@ func (p PostgresDriver) RenderParam(e *expr.Expression) (s string, params []any,
 	}
 
 	return result.String(), params, nil
+}
+
+// postgresDialect implements Dialect for PostgreSQL. It is a lift-and-shift
+// of the behavior previously baked into Base — SIMILAR TO for wildcards,
+// ~ for regex, SIMILAR TO '%' for standalone wildcard, Postgres-style
+// %/_ pattern escaping, and true/false bool literals.
+type postgresDialect struct{}
+
+func (postgresDialect) RenderLike(left, right string, isRegex bool) (string, error) {
+	return likeRender(left, right, isRegex)
+}
+
+func (postgresDialect) RenderLikeParam(left, right string, params []any, isRegex bool) (string, error) {
+	return likeParam(left, right, params, isRegex)
+}
+
+func (postgresDialect) RenderRange(left, right string) (string, error) {
+	return rang(left, right)
+}
+
+func (postgresDialect) RenderRangeParam(left, right string, params []any) (string, error) {
+	return rangParam(left, right, params)
+}
+
+func (postgresDialect) RenderStandaloneWild(left string) (string, error) {
+	return fmt.Sprintf("%s SIMILAR TO '%%'", left), nil
+}
+
+func (postgresDialect) EscapeLikePattern(pattern string) string {
+	pattern = strings.ReplaceAll(pattern, "%", `\%`)
+	pattern = strings.ReplaceAll(pattern, "_", `\_`)
+	pattern = strings.ReplaceAll(pattern, "*", "%")
+	pattern = strings.ReplaceAll(pattern, "?", "_")
+	return pattern
+}
+
+func (postgresDialect) SerializeBool(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }

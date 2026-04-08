@@ -775,8 +775,8 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"start asterisk_in_literal_are_regular_expression": {
 			input:      `foo:*`,
-			wantStr:    `"foo" SIMILAR TO $1`,
-			wantParams: []any{"%"},
+			wantStr:    `"foo" SIMILAR TO '%'`,
+			wantParams: []any{},
 		},
 		"implicit_and_with_subexpressions_and_default_field": {
 			input:        `title:"Foo" a b`,

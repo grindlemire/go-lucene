@@ -10,19 +10,15 @@ import (
 // Shared is the shared set of render functions that can be used as a base and overriden
 // for each flavor of sql
 var Shared = map[expr.Operator]RenderFN{
-	expr.Literal: literal,
-	expr.And:     basicCompound(expr.And),
-	expr.Or:      basicCompound(expr.Or),
-	expr.Not:     basicWrap(expr.Not),
-	expr.Equals:  equals,
-	expr.Range:   rang,
-	expr.Must:    noop,                // must doesn't really translate to sql
-	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
-	// expr.Fuzzy:     unsupported,
-	// expr.Boost:     unsupported,
+	expr.Literal:   literal,
+	expr.And:       basicCompound(expr.And),
+	expr.Or:        basicCompound(expr.Or),
+	expr.Not:       basicWrap(expr.Not),
+	expr.Equals:    equals,
+	expr.Must:      noop,                // must doesn't really translate to sql
+	expr.MustNot:   basicWrap(expr.Not), // must not is really just a negation
 	expr.Wild:      literal,
 	expr.Regexp:    regexpLiteral, // strip Lucene slash delimiters from regex patterns
-	expr.Like:      like,
 	expr.Greater:   greater,
 	expr.GreaterEq: greaterEq,
 	expr.Less:      less,
@@ -34,6 +30,20 @@ var Shared = map[expr.Operator]RenderFN{
 // Base is the base driver that is embedded in each driver
 type Base struct {
 	RenderFNs map[expr.Operator]RenderFN
+	// Dialect captures database-specific rendering for Like, Range, standalone
+	// wildcard, pattern escaping, and bool literals. If nil, Base falls back to
+	// a Postgres-compatible default to preserve backwards compatibility for
+	// custom drivers built against the pre-dialect API.
+	Dialect Dialect
+}
+
+// dialect returns the configured dialect, falling back to defaultDialect if
+// the Base was constructed without one (the historical extension API).
+func (b Base) dialect() Dialect {
+	if b.Dialect == nil {
+		return defaultDialect
+	}
+	return b.Dialect
 }
 
 // RenderParam will render the expression into a parameterized query. The returned string will contain placeholders
@@ -42,6 +52,8 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	if e == nil {
 		return "", params, nil
 	}
+
+	d := b.dialect()
 
 	left, lparams, err := b.serializeParams(e.Left)
 	if err != nil {
@@ -53,32 +65,23 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return s, params, err
 	}
 
-	// edge case for a standalone wildcard on a like operator.
-	// Convert to a regular expression that matches anything
-	standaloneWild := false
+	// Standalone wildcard on a Like operator: `field:*`. Route through the
+	// dialect so each database can decide how to represent "any value".
 	if right == "'*'" && e.Op == expr.Like {
-		right = "?"
-		rparams = []any{"%"}
-		standaloneWild = true
+		str, err := d.RenderStandaloneWild(left)
+		return str, lparams, err
 	}
 
-	// Track if this is a regex pattern
+	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect escape
+	// the wildcard pattern however it needs to.
 	isRegex := false
-
-	// if we are in a regular expression we need to convert the * to % and ? to _
-	if e.Op == expr.Like && len(rparams) > 0 && !standaloneWild {
+	if e.Op == expr.Like && len(rparams) > 0 {
 		rval := rparams[0].(string)
-		// check if it is a // regexp
 		if len(rval) >= 2 && rval[0] == '/' && rval[len(rval)-1] == '/' {
-			// Strip the leading and trailing slashes from the regex pattern
 			rparams[0] = rval[1 : len(rval)-1]
 			isRegex = true
 		} else {
-			rval = strings.ReplaceAll(rval, "%", `\%`)
-			rval = strings.ReplaceAll(rval, "_", `\_`)
-			rval = strings.ReplaceAll(rval, "*", "%")
-			rval = strings.ReplaceAll(rval, "?", "_")
-			rparams[0] = rval
+			rparams[0] = d.EscapeLikePattern(rval)
 		}
 	}
 
@@ -99,17 +102,13 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		}
 	}
 
-	// if we have a like operator then we need to use the likeParam function instead of the default
-	// since we are replacing all the * with % and ? with _
 	if e.Op == expr.Like {
-		str, err := likeParam(left, right, rparams, isRegex)
+		str, err := d.RenderLikeParam(left, right, rparams, isRegex)
 		return str, params, err
 	}
 
-	// if we have a range operator then we need to use the rangParam function instead of the default
-	// since we need to be able to infer the param types that are injected
 	if e.Op == expr.Range {
-		str, err := rangParam(left, right, rparams)
+		str, err := d.RenderRangeParam(left, right, rparams)
 		return str, params, err
 	}
 
@@ -127,6 +126,8 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	if e == nil {
 		return "", nil
 	}
+
+	d := b.dialect()
 
 	left, err := b.serialize(e.Left)
 	if err != nil {
@@ -153,14 +154,16 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		}
 	}
 
-	// Special handling for Like operator to detect regex patterns
 	if e.Op == expr.Like {
-		// Check if the right side is a regex expression
 		isRegex := false
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
 			isRegex = true
 		}
-		return likeRender(left, right, isRegex)
+		return d.RenderLike(left, right, isRegex)
+	}
+
+	if e.Op == expr.Range {
+		return d.RenderRange(left, right)
 	}
 
 	fn, ok := b.RenderFNs[e.Op]
@@ -233,6 +236,8 @@ func (b Base) serialize(in any) (s string, err error) {
 	case string:
 		// escape single quotes with double single quotes
 		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")), nil
+	case bool:
+		return b.dialect().SerializeBool(v), nil
 	default:
 		return fmt.Sprintf("%v", v), nil
 	}
