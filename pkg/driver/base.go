@@ -159,6 +159,13 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		}
 	}
 
+	// Standalone wildcard on a Like operator: `field:*`. Route through the
+	// dialect so each database can decide how to represent "any value".
+	// Symmetric with the branch in RenderParam.
+	if right == "'*'" && e.Op == expr.Like {
+		return d.RenderStandaloneWild(left)
+	}
+
 	if e.Op == expr.Like {
 		isRegex := false
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
