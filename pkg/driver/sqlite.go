@@ -11,6 +11,9 @@ import (
 // Notable differences from the Postgres driver:
 //   - Wildcards render as GLOB (case-sensitive, Unix glob syntax).
 //     Lucene's * and ? map 1:1 to GLOB's * and ?.
+//   - GLOB has no escape mechanism, so a literal * or ? inside a wildcard
+//     pattern cannot be matched. Use the regex form (field:/.../) if you
+//     need to match those characters literally.
 //   - Regex (/pattern/) renders as REGEXP. SQLite does not define regexp()
 //     by default — the caller must register a regexp() function on their
 //     connection (see modernc.org/sqlite.RegisterDeterministicScalarFunction
@@ -67,9 +70,11 @@ func (sqliteDialect) RenderStandaloneWild(left string) (string, error) {
 	return fmt.Sprintf("%s IS NOT NULL", left), nil
 }
 
-// EscapeLikePattern is the identity function for SQLite because lucene's
-// wildcard syntax (*, ?) is already the same as GLOB's. No escape characters
-// are inserted because GLOB does not support an escape mechanism.
+// EscapeLikePattern is the identity function for SQLite. Lucene's wildcard
+// syntax (* and ?) is already the same as GLOB's, so no translation is needed.
+// Note that GLOB has no escape mechanism — patterns containing a literal * or ?
+// cannot be expressed via the wildcard form; users must fall back to the regex
+// form for that.
 func (sqliteDialect) EscapeLikePattern(pattern string) string {
 	return pattern
 }
