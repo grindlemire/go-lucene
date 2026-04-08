@@ -4,6 +4,7 @@ import "github.com/grindlemire/go-lucene/pkg/driver"
 
 var (
 	postgres = driver.NewPostgresDriver()
+	sqlite   = driver.NewSQLiteDriver()
 )
 
 // ToPostgres is a wrapper that will render the lucene expression string as a postgres sql filter string.
@@ -25,4 +26,26 @@ func ToParameterizedPostgres(in string, opts ...Opt) (s string, params []any, er
 	}
 
 	return postgres.RenderParam(e)
+}
+
+// ToSQLite is a wrapper that will render the lucene expression string as a SQLite sql filter string.
+func ToSQLite(in string, opts ...Opt) (string, error) {
+	e, err := Parse(in, opts...)
+	if err != nil {
+		return "", err
+	}
+
+	return sqlite.Render(e)
+}
+
+// ToParameterizedSQLite is a wrapper that will render the lucene expression string as a SQLite sql filter
+// string with parameters. The returned string will contain ? placeholders that can be passed directly to a
+// Query statement.
+func ToParameterizedSQLite(in string, opts ...Opt) (s string, params []any, err error) {
+	e, err := Parse(in, opts...)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return sqlite.RenderParam(e)
 }
