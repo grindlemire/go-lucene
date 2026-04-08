@@ -151,7 +151,6 @@ func TestSQLiteIntegrationRendered(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			where, err := lucene.ToSQLite(tc.lucene)
 			if err != nil {
@@ -182,7 +181,6 @@ func TestSQLiteIntegrationParameterized(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			where, params, err := lucene.ToParameterizedSQLite(tc.lucene)
 			if err != nil {
