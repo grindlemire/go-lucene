@@ -18,7 +18,12 @@ var Shared = map[expr.Operator]RenderFN{
 	expr.Must:      noop,                // must doesn't really translate to sql
 	expr.MustNot:   basicWrap(expr.Not), // must not is really just a negation
 	expr.Wild:      literal,
-	expr.Regexp:    regexpLiteral, // strip Lucene slash delimiters from regex patterns
+	// expr.Regexp stays in Shared because recursive serialization needs it:
+	// Render/RenderParam on a Like with a /regex/ right side calls serialize on
+	// that right, which recurses into Render and looks up RenderFNs[expr.Regexp]
+	// to strip the Lucene /.../ delimiters. Dialect-agnostic — every SQL dialect
+	// wants the delimiters stripped before handing the pattern to its regex operator.
+	expr.Regexp: regexpLiteral,
 	expr.Greater:   greater,
 	expr.GreaterEq: greaterEq,
 	expr.Less:      less,
