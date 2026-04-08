@@ -79,6 +79,22 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.Rang("a", 1, "*", true),
 			want:  `"a" >= 1`,
 		},
+		"lt_range_float": {
+			input: expr.Rang("a", "*", 10.5, false),
+			want:  `"a" < 10.50`,
+		},
+		"lte_range_float": {
+			input: expr.Rang("a", "*", 10.5, true),
+			want:  `"a" <= 10.50`,
+		},
+		"gt_range_float": {
+			input: expr.Rang("a", 1.5, "*", false),
+			want:  `"a" > 1.50`,
+		},
+		"gte_range_float": {
+			input: expr.Rang("a", 1.5, "*", true),
+			want:  `"a" >= 1.50`,
+		},
 		"lt": {
 			input: expr.LESS("a", 10),
 			want:  `"a" < 10`,

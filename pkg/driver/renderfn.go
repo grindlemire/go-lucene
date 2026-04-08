@@ -376,12 +376,12 @@ func toInts(rawMin, rawMax string) (iMin, iMax int, err error) {
 
 func toFloats(rawMin, rawMax string) (fMin, fMax float64, err error) {
 	fMin, err = strconv.ParseFloat(rawMin, 64)
-	if rawMin != "*" && err != nil {
+	if rawMin != "'*'" && err != nil {
 		return 0, 0, err
 	}
 
 	fMax, err = strconv.ParseFloat(rawMax, 64)
-	if rawMax != "*" && err != nil {
+	if rawMax != "'*'" && err != nil {
 		return 0, 0, err
 	}
 
