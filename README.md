@@ -206,3 +206,5 @@ expr, _ := lucene.Parse(`color:red`)
 filter, _ := mysqlDriver.Render(expr)
 // Result: `color` = 'red'
 ```
+
+**Note on dialect behavior:** A custom driver that leaves `driver.Base.Dialect` unset inherits Postgres-flavored rendering for Like, Range, standalone wildcards, pattern escaping, and bool literals. That means `field:pat*` renders as `SIMILAR TO 'pat%'`, `field:/regex/` renders with `~`, `field:*` renders as `SIMILAR TO '%'`, and bool literals render as `true`/`false`. If your target database needs different semantics, supply your own `driver.Dialect` implementation on the embedded `Base`. The built-in `SQLiteDriver` is a reference example: it sets a `Dialect` that emits `GLOB`, `REGEXP`, `IS NOT NULL`, and `1`/`0` respectively.
