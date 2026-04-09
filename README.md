@@ -59,7 +59,7 @@ db.Query(filter, params...)
 
 - Wildcards render as `GLOB` (case-sensitive, Unix glob syntax). Lucene's `*` and `?` map directly to GLOB's `*` and `?`.
 - GLOB has no escape mechanism. If you need to match a literal `*` or `?`, use the regex form (`field:/.../`) instead.
-- Regular expressions (`field:/pattern/`) render as `REGEXP`. SQLite does not provide a `regexp()` function by default — you must register one on your connection. With `modernc.org/sqlite` that looks like:
+- Regular expressions (`field:/pattern/`) render as `REGEXP`. SQLite does not provide a `regexp()` function by default, so you must register one on your connection. With `modernc.org/sqlite` that looks like:
 
 ```go
 import "modernc.org/sqlite"
@@ -80,9 +80,9 @@ func init() {
 
   With `mattn/go-sqlite3`, build with the `sqlite_regex` tag. Without registration, regex queries error at query time.
 
-- A standalone wildcard `field:*` renders as `"field" IS NOT NULL` — matches any row where the field has a non-null value, regardless of storage class.
-- Lucene wildcard alternation like `field:*(a|b)*` is **not supported** by GLOB; use the explicit regex form `field:/.*(a|b).*/` instead.
-- Parameter placeholders are `?`, not `$1, $2, …` as with Postgres.
+- A standalone wildcard `field:*` renders as `"field" IS NOT NULL`, which matches any row where the field has a non-null value, regardless of storage class.
+- Lucene wildcard alternation like `field:*(a|b)*` is not supported by GLOB. Use the explicit regex form `field:/.*(a|b).*/` instead.
+- Parameter placeholders are `?`, not `$1, $2, ...` as with Postgres.
 
 ### Default Fields
 
