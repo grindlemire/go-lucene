@@ -10,20 +10,20 @@ import (
 // Shared is the shared set of render functions that can be used as a base and overriden
 // for each flavor of sql
 var Shared = map[expr.Operator]RenderFN{
-	expr.Literal:   literal,
-	expr.And:       basicCompound(expr.And),
-	expr.Or:        basicCompound(expr.Or),
-	expr.Not:       basicWrap(expr.Not),
-	expr.Equals:    equals,
-	expr.Must:      noop,                // must doesn't really translate to sql
-	expr.MustNot:   basicWrap(expr.Not), // must not is really just a negation
-	expr.Wild:      literal,
+	expr.Literal: literal,
+	expr.And:     basicCompound(expr.And),
+	expr.Or:      basicCompound(expr.Or),
+	expr.Not:     basicWrap(expr.Not),
+	expr.Equals:  equals,
+	expr.Must:    noop,                // must doesn't really translate to sql
+	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
+	expr.Wild:    literal,
 	// expr.Regexp stays in Shared because recursive serialization needs it:
 	// Render/RenderParam on a Like with a /regex/ right side calls serialize on
 	// that right, which recurses into Render and looks up RenderFNs[expr.Regexp]
 	// to strip the Lucene /.../ delimiters. Dialect-agnostic — every SQL dialect
 	// wants the delimiters stripped before handing the pattern to its regex operator.
-	expr.Regexp: regexpLiteral,
+	expr.Regexp:    regexpLiteral,
 	expr.Greater:   greater,
 	expr.GreaterEq: greaterEq,
 	expr.Less:      less,
