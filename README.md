@@ -10,7 +10,7 @@ A zero-dependency Lucene query parser for Go that converts Lucene syntax into SQ
 - SQL injection safe with parameterized queries
 - Zero dependencies
 - Extensible with custom SQL drivers
-- PostgreSQL support out of the box
+- PostgreSQL and SQLite support out of the box
 
 ## Installation
 
@@ -23,6 +23,11 @@ go get github.com/grindlemire/go-lucene
 ```go
 query := `name:"John Doe" AND age:[25 TO 35]`
 filter, err := lucene.ToPostgres(query)
+// Result: (("name" = 'John Doe') AND ("age" >= 25 AND "age" <= 35))
+```
+
+```go
+filter, err := lucene.ToSQLite(query)
 // Result: (("name" = 'John Doe') AND ("age" >= 25 AND "age" <= 35))
 ```
 
@@ -40,6 +45,44 @@ filter, err := lucene.ToPostgres(query)
 filter, params, err := lucene.ToParameterizedPostgres(query)
 db.Query(sql, params...)
 ```
+
+### SQLite
+
+```go
+filter, err := lucene.ToSQLite(query)
+
+filter, params, err := lucene.ToParameterizedSQLite(query)
+db.Query(filter, params...)
+```
+
+**SQLite notes:**
+
+- Wildcards render as `GLOB` (case-sensitive, Unix glob syntax). Lucene's `*` and `?` map directly to GLOB's `*` and `?`.
+- GLOB has no escape mechanism. If you need to match a literal `*` or `?`, use the regex form (`field:/.../`) instead.
+- Regular expressions (`field:/pattern/`) render as `REGEXP`. SQLite does not provide a `regexp()` function by default — you must register one on your connection. With `modernc.org/sqlite` that looks like:
+
+```go
+import "modernc.org/sqlite"
+import "regexp"
+
+func init() {
+    sqlite.MustRegisterDeterministicScalarFunction(
+        "regexp",
+        2,
+        func(ctx *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+            pattern := args[0].(string)
+            value := args[1].(string)
+            return regexp.MatchString(pattern, value)
+        },
+    )
+}
+```
+
+  With `mattn/go-sqlite3`, build with the `sqlite_regex` tag. Without registration, regex queries error at query time.
+
+- A standalone wildcard `field:*` renders as `"field" IS NOT NULL` — matches any row where the field has a non-null value, regardless of storage class.
+- Lucene wildcard alternation like `field:*(a|b)*` is **not supported** by GLOB; use the explicit regex form `field:/.*(a|b).*/` instead.
+- Parameter placeholders are `?`, not `$1, $2, …` as with Postgres.
 
 ### Default Fields
 
@@ -68,6 +111,18 @@ filter, err := lucene.ToPostgres("red OR green", lucene.WithDefaultField("color"
 | `field:pattern?` | `"field" SIMILAR TO 'pattern_'` | Single character wildcard |
 | `field:/regex/` | `"field" ~ 'regex'` | Regular expression match |
 | `(field1:value1 OR field2:value2) AND field3:value3` | `(("field1" = 'value1') OR ("field2" = 'value2')) AND ("field3" = 'value3')` | Grouping |
+
+### SQLite differences
+
+For the SQLite driver, these operators render differently than the Postgres defaults shown above:
+
+| Lucene Query | SQLite Output |
+|---|---|
+| `field:*` | `"field" IS NOT NULL` |
+| `field:pattern*` | `"field" GLOB 'pattern*'` |
+| `field:pattern?` | `"field" GLOB 'pattern?'` |
+| `field:/regex/` | `"field" REGEXP 'regex'` (requires registered `regexp()` function) |
+| parameter placeholders | `?` (not `$1, $2, ...`) |
 
 ## Examples
 
