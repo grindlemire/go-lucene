@@ -144,6 +144,13 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return s, err
 	}
 
+	// Standalone wildcard on a Like operator: `field:*`. Route through the
+	// dialect so each database can decide how to represent "any value".
+	// Positioned before paren-wrap to stay symmetric with RenderParam.
+	if right == "'*'" && e.Op == expr.Like {
+		return d.RenderStandaloneWild(left)
+	}
+
 	if e.Op != expr.Range &&
 		e.Op != expr.Not &&
 		e.Op != expr.List &&
@@ -157,13 +164,6 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		if !b.isSimple(e.Right) {
 			right = "(" + right + ")"
 		}
-	}
-
-	// Standalone wildcard on a Like operator: `field:*`. Route through the
-	// dialect so each database can decide how to represent "any value".
-	// Symmetric with the branch in RenderParam.
-	if right == "'*'" && e.Op == expr.Like {
-		return d.RenderStandaloneWild(left)
 	}
 
 	if e.Op == expr.Like {
