@@ -62,17 +62,31 @@ db.Query(filter, params...)
 - Regular expressions (`field:/pattern/`) render as `REGEXP`. SQLite does not provide a `regexp()` function by default, so you must register one on your connection. With `modernc.org/sqlite` that looks like:
 
 ```go
-import "modernc.org/sqlite"
-import "regexp"
+import (
+    "database/sql/driver"
+    "regexp"
+
+    "modernc.org/sqlite"
+)
 
 func init() {
     sqlite.MustRegisterDeterministicScalarFunction(
         "regexp",
         2,
         func(ctx *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-            pattern := args[0].(string)
-            value := args[1].(string)
-            return regexp.MatchString(pattern, value)
+            pattern, ok := args[0].(string)
+            if !ok {
+                return false, nil
+            }
+            value, ok := args[1].(string)
+            if !ok {
+                return false, nil
+            }
+            matched, err := regexp.MatchString(pattern, value)
+            if err != nil {
+                return false, nil
+            }
+            return matched, nil
         },
     )
 }
