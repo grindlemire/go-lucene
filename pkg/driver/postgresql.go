@@ -14,20 +14,14 @@ type PostgresDriver struct {
 
 // NewPostgresDriver creates a new driver that will output postgres filter strings from parsed lucene expressions.
 func NewPostgresDriver() PostgresDriver {
-	fns := map[expr.Operator]RenderFN{
-		expr.Literal: literal,
-	}
-
+	fns := map[expr.Operator]RenderFN{}
 	for op, sharedFN := range Shared {
-		_, found := fns[op]
-		if !found {
-			fns[op] = sharedFN
-		}
+		fns[op] = sharedFN
 	}
-
 	return PostgresDriver{
 		Base{
 			RenderFNs: fns,
+			Dialect:   postgresDialect{},
 		},
 	}
 }
@@ -57,4 +51,45 @@ func (p PostgresDriver) RenderParam(e *expr.Expression) (s string, params []any,
 	}
 
 	return result.String(), params, nil
+}
+
+// postgresDialect implements Dialect for PostgreSQL. It is a lift-and-shift
+// of the behavior previously baked into Base — SIMILAR TO for wildcards,
+// ~ for regex, SIMILAR TO '%' for standalone wildcard, Postgres-style
+// %/_ pattern escaping, and true/false bool literals.
+type postgresDialect struct{}
+
+func (postgresDialect) RenderLike(left, right string, isRegex bool) (string, error) {
+	if isRegex {
+		return fmt.Sprintf("%s ~ %s", left, right), nil
+	}
+	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
+}
+
+func (postgresDialect) RenderStandaloneWild(left string) (string, error) {
+	return fmt.Sprintf("%s SIMILAR TO '%%'", left), nil
+}
+
+func (postgresDialect) EscapeLikePattern(pattern string) string {
+	pattern = strings.ReplaceAll(pattern, "%", `\%`)
+	pattern = strings.ReplaceAll(pattern, "_", `\_`)
+	pattern = strings.ReplaceAll(pattern, "*", "%")
+	pattern = strings.ReplaceAll(pattern, "?", "_")
+	return pattern
+}
+
+func (postgresDialect) SerializeBool(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+func (postgresDialect) BoolParam(b bool) any { return b }
+
+func (postgresDialect) QuoteColumn(name string) (string, error) {
+	if strings.ContainsRune(name, '"') {
+		return "", fmt.Errorf("column name contains a double quote: %q", name)
+	}
+	return `"` + name + `"`, nil
 }

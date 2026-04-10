@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestPostgresSQLEndToEnd(t *testing.T) {
+func TestSQLiteSQLEndToEnd(t *testing.T) {
 	type tc struct {
 		input        string
 		want         string
@@ -52,11 +52,11 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"basic_wild_equal_with_*": {
 			input: "a:b*",
-			want:  `"a" SIMILAR TO 'b%'`,
+			want:  `"a" GLOB 'b*'`,
 		},
 		"basic_wild_equal_with_?": {
 			input: "a:b?z",
-			want:  `"a" SIMILAR TO 'b_z'`,
+			want:  `"a" GLOB 'b?z'`,
 		},
 		"basic_inclusive_range": {
 			input: "a:[* TO 5]",
@@ -88,59 +88,59 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"regexp": {
 			input: "a:/b [c]/",
-			want:  `"a" ~ 'b [c]'`,
+			want:  `"a" REGEXP 'b [c]'`,
 		},
 		"regexp_with_keywords": {
 			input: `a:/b "[c]/`,
-			want:  `"a" ~ 'b "[c]'`,
+			want:  `"a" REGEXP 'b "[c]'`,
 		},
 		"regexp_with_escaped_chars": {
 			input: `url:/example.com\/foo\/bar\/.*/`,
-			want:  `"url" ~ 'example.com\/foo\/bar\/.*'`,
+			want:  `"url" REGEXP 'example.com\/foo\/bar\/.*'`,
 		},
 		"regexp_single_char_pattern": {
 			input: `field:/./`,
-			want:  `"field" ~ '.'`,
+			want:  `"field" REGEXP '.'`,
 		},
 		"regexp_alternation": {
 			input: `status:/(active|pending)/`,
-			want:  `"status" ~ '(active|pending)'`,
+			want:  `"status" REGEXP '(active|pending)'`,
 		},
 		"regexp_one_or_more": {
 			input: `digits:/[0-9]+/`,
-			want:  `"digits" ~ '[0-9]+'`,
+			want:  `"digits" REGEXP '[0-9]+'`,
 		},
 		"regexp_optional_quantifier": {
 			input: `word:/colou?r/`,
-			want:  `"word" ~ 'colou?r'`,
+			want:  `"word" REGEXP 'colou?r'`,
 		},
 		"regexp_anchor_start": {
 			input: `name:/^John/`,
-			want:  `"name" ~ '^John'`,
+			want:  `"name" REGEXP '^John'`,
 		},
 		"regexp_anchor_end": {
 			input: `name:/Smith$/`,
-			want:  `"name" ~ 'Smith$'`,
+			want:  `"name" REGEXP 'Smith$'`,
 		},
 		"regexp_digit_class": {
 			input: `code:/\d{3}/`,
-			want:  `"code" ~ '\d{3}'`,
+			want:  `"code" REGEXP '\d{3}'`,
 		},
 		"regexp_word_class": {
 			input: `token:/\w+/`,
-			want:  `"token" ~ '\w+'`,
+			want:  `"token" REGEXP '\w+'`,
 		},
 		"regexp_literal_backslash": {
 			input: `path:/foo\\bar/`,
-			want:  `"path" ~ 'foo\\bar'`,
+			want:  `"path" REGEXP 'foo\\bar'`,
 		},
 		"regexp_with_single_quote": {
 			input: `text:/it's/`,
-			want:  `"text" ~ 'it''s'`,
+			want:  `"text" REGEXP 'it''s'`,
 		},
 		"regexp_percent_not_metachar": {
 			input: `value:/100%/`,
-			want:  `"value" ~ '100%'`,
+			want:  `"value" REGEXP '100%'`,
 		},
 		"basic_default_AND": {
 			input: "a b",
@@ -291,7 +291,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"asterisk_in_literal_are_regular_expression": {
 			input: `foo:*`,
-			want:  `"foo" SIMILAR TO '%'`,
+			want:  `"foo" IS NOT NULL`,
 		},
 		"implicit_and_with_subexpressions": {
 			input: "a:b c:d",
@@ -351,7 +351,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"exclamation_mark_inside_regexp_is_literal": {
 			input: "field:/pattern with ! inside/",
-			want:  `"field" ~ 'pattern with ! inside'`,
+			want:  `"field" REGEXP 'pattern with ! inside'`,
 		},
 		"implicit_and_with_multiple_clauses": {
 			input: `-(k1:v1) k2:v2 -k3:v3`,
@@ -386,7 +386,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			got, err := ToPostgres(tc.input, WithDefaultField(tc.defaultField))
+			got, err := ToSQLite(tc.input, WithDefaultField(tc.defaultField))
 			if err != nil {
 				// if we got an expect error then we are fine
 				if tc.err != "" && strings.Contains(err.Error(), tc.err) {
@@ -410,7 +410,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 	}
 }
 
-func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
+func TestSQLiteParameterizedSQLEndToEnd(t *testing.T) {
 	type tc struct {
 		input        string
 		wantStr      string
@@ -426,67 +426,67 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		// },
 		"basic_equal": {
 			input:      "a:b",
-			wantStr:    `"a" = $1`,
+			wantStr:    `"a" = ?`,
 			wantParams: []any{"b"},
 		},
 		"basic_equal_with_number": {
 			input:      "a:5",
-			wantStr:    `"a" = $1`,
+			wantStr:    `"a" = ?`,
 			wantParams: []any{5},
 		},
 		"basic_greater_with_number": {
 			input:      "a:>22",
-			wantStr:    `"a" > $1`,
+			wantStr:    `"a" > ?`,
 			wantParams: []any{22},
 		},
 		"basic_greater_eq_with_number": {
 			input:      "a:>=22",
-			wantStr:    `"a" >= $1`,
+			wantStr:    `"a" >= ?`,
 			wantParams: []any{22},
 		},
 		"basic_less_with_number": {
 			input:      "a:<22",
-			wantStr:    `"a" < $1`,
+			wantStr:    `"a" < ?`,
 			wantParams: []any{22},
 		},
 		"basic_less_eq_with_number": {
 			input:      "a:<=22",
-			wantStr:    `"a" <= $1`,
+			wantStr:    `"a" <= ?`,
 			wantParams: []any{22},
 		},
 		"basic_greater_less_with_number": {
 			input:      "a:<22 AND b:>33",
-			wantStr:    `("a" < $1) AND ("b" > $2)`,
+			wantStr:    `("a" < ?) AND ("b" > ?)`,
 			wantParams: []any{22, 33},
 		},
 		"basic_greater_less_eq_with_number": {
 			input:      "a:<=22 AND b:>=33",
-			wantStr:    `("a" <= $1) AND ("b" >= $2)`,
+			wantStr:    `("a" <= ?) AND ("b" >= ?)`,
 			wantParams: []any{22, 33},
 		},
 		"basic_wild_equal_with_*": {
 			input:      "a:b*",
-			wantStr:    `"a" SIMILAR TO $1`,
-			wantParams: []any{"b%"},
+			wantStr:    `"a" GLOB ?`,
+			wantParams: []any{"b*"},
 		},
 		"basic_wild_equal_with_?": {
 			input:      "a:b?z",
-			wantStr:    `"a" SIMILAR TO $1`,
-			wantParams: []any{"b_z"},
+			wantStr:    `"a" GLOB ?`,
+			wantParams: []any{"b?z"},
 		},
 		"basic_inclusive_range": {
 			input:      "a:[* TO 5]",
-			wantStr:    `"a" <= $1`,
+			wantStr:    `"a" <= ?`,
 			wantParams: []any{5},
 		},
 		"basic_exclusive_range": {
 			input:      "a:{* TO 5}",
-			wantStr:    `"a" < $1`,
+			wantStr:    `"a" < ?`,
 			wantParams: []any{5},
 		},
 		"range_over_strings": {
 			input:      "a:{foo TO bar}",
-			wantStr:    `"a" > $1 AND "a" < $2`,
+			wantStr:    `"a" > ? AND "a" < ?`,
 			wantParams: []any{"foo", "bar"},
 		},
 		"basic_fuzzy": {
@@ -507,167 +507,167 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"regexp": {
 			input:      "a:/b [c]/",
-			wantStr:    `"a" ~ $1`,
+			wantStr:    `"a" REGEXP ?`,
 			wantParams: []any{"b [c]"},
 		},
 		"regexp_with_keywords": {
 			input:      `a:/b "[c]/`,
-			wantStr:    `"a" ~ $1`,
+			wantStr:    `"a" REGEXP ?`,
 			wantParams: []any{`b "[c]`},
 		},
 		"regexp_with_escaped_chars": {
 			input:      `url:/example.com\/foo\/bar\/.*/`,
-			wantStr:    `"url" ~ $1`,
+			wantStr:    `"url" REGEXP ?`,
 			wantParams: []any{`example.com\/foo\/bar\/.*`},
 		},
 		"regexp_single_char_pattern": {
 			input:      `field:/./`,
-			wantStr:    `"field" ~ $1`,
+			wantStr:    `"field" REGEXP ?`,
 			wantParams: []any{"."},
 		},
 		"regexp_alternation": {
 			input:      `status:/(active|pending)/`,
-			wantStr:    `"status" ~ $1`,
+			wantStr:    `"status" REGEXP ?`,
 			wantParams: []any{"(active|pending)"},
 		},
 		"regexp_one_or_more": {
 			input:      `digits:/[0-9]+/`,
-			wantStr:    `"digits" ~ $1`,
+			wantStr:    `"digits" REGEXP ?`,
 			wantParams: []any{"[0-9]+"},
 		},
 		"regexp_optional_quantifier": {
 			input:      `word:/colou?r/`,
-			wantStr:    `"word" ~ $1`,
+			wantStr:    `"word" REGEXP ?`,
 			wantParams: []any{"colou?r"},
 		},
 		"regexp_anchor_start": {
 			input:      `name:/^John/`,
-			wantStr:    `"name" ~ $1`,
+			wantStr:    `"name" REGEXP ?`,
 			wantParams: []any{"^John"},
 		},
 		"regexp_anchor_end": {
 			input:      `name:/Smith$/`,
-			wantStr:    `"name" ~ $1`,
+			wantStr:    `"name" REGEXP ?`,
 			wantParams: []any{"Smith$"},
 		},
 		"regexp_digit_class": {
 			input:      `code:/\d{3}/`,
-			wantStr:    `"code" ~ $1`,
+			wantStr:    `"code" REGEXP ?`,
 			wantParams: []any{`\d{3}`},
 		},
 		"regexp_word_class": {
 			input:      `token:/\w+/`,
-			wantStr:    `"token" ~ $1`,
+			wantStr:    `"token" REGEXP ?`,
 			wantParams: []any{`\w+`},
 		},
 		"regexp_literal_backslash": {
 			input:      `path:/foo\\bar/`,
-			wantStr:    `"path" ~ $1`,
+			wantStr:    `"path" REGEXP ?`,
 			wantParams: []any{`foo\\bar`},
 		},
 		"regexp_with_single_quote": {
 			input:      `text:/it's/`,
-			wantStr:    `"text" ~ $1`,
+			wantStr:    `"text" REGEXP ?`,
 			wantParams: []any{"it's"},
 		},
 		"regexp_percent_not_metachar": {
 			input:      `value:/100%/`,
-			wantStr:    `"value" ~ $1`,
+			wantStr:    `"value" REGEXP ?`,
 			wantParams: []any{"100%"},
 		},
 		"basic_default_AND": {
 			input:      "a b",
-			wantStr:    `$1 AND $2`,
+			wantStr:    `? AND ?`,
 			wantParams: []any{"a", "b"},
 		},
 		"default_to_AND_with_subexpressions": {
 			input:      "a:b c:d",
-			wantStr:    `("a" = $1) AND ("c" = $2)`,
+			wantStr:    `("a" = ?) AND ("c" = ?)`,
 			wantParams: []any{"b", "d"},
 		},
 		"basic_and": {
 			input:      "a AND b",
-			wantStr:    `$1 AND $2`,
+			wantStr:    `? AND ?`,
 			wantParams: []any{"a", "b"},
 		},
 		"and_with_nesting": {
 			input:      "a:foo AND b:bar",
-			wantStr:    `("a" = $1) AND ("b" = $2)`,
+			wantStr:    `("a" = ?) AND ("b" = ?)`,
 			wantParams: []any{"foo", "bar"},
 		},
 		"basic_or": {
 			input:      "a OR b",
-			wantStr:    `$1 OR $2`,
+			wantStr:    `? OR ?`,
 			wantParams: []any{"a", "b"},
 		},
 		"or_with_nesting": {
 			input:      "a:foo OR b:bar",
-			wantStr:    `("a" = $1) OR ("b" = $2)`,
+			wantStr:    `("a" = ?) OR ("b" = ?)`,
 			wantParams: []any{"foo", "bar"},
 		},
 		"range_operator_inclusive": {
 			input:      "a:[1 TO 5]",
-			wantStr:    `"a" >= $1 AND "a" <= $2`,
+			wantStr:    `"a" >= ? AND "a" <= ?`,
 			wantParams: []any{1, 5},
 		},
 		"range_operator_inclusive_unbound": {
 			input:      `a:[* TO 200]`,
-			wantStr:    `"a" <= $1`,
+			wantStr:    `"a" <= ?`,
 			wantParams: []any{200},
 		},
 		"range_operator_exclusive": {
 			input:      `a:{"ab" TO "az"}`,
-			wantStr:    `"a" > $1 AND "a" < $2`,
+			wantStr:    `"a" > ? AND "a" < ?`,
 			wantParams: []any{"ab", "az"},
 		},
 		"range_operator_exclusive_unbound": {
 			input:      `a:{2 TO *}`,
-			wantStr:    `"a" > $1`,
+			wantStr:    `"a" > ?`,
 			wantParams: []any{2},
 		},
 		"basic_not": {
 			input:      "NOT b",
-			wantStr:    `NOT($1)`,
+			wantStr:    `NOT(?)`,
 			wantParams: []any{"b"},
 		},
 		"nested_not": {
 			input:      "a:foo OR NOT b:bar",
-			wantStr:    `("a" = $1) OR (NOT("b" = $2))`,
+			wantStr:    `("a" = ?) OR (NOT("b" = ?))`,
 			wantParams: []any{"foo", "bar"},
 		},
 		"term_grouping": {
 			input:      "(a:foo OR b:bar) AND c:baz",
-			wantStr:    `(("a" = $1) OR ("b" = $2)) AND ("c" = $3)`,
+			wantStr:    `(("a" = ?) OR ("b" = ?)) AND ("c" = ?)`,
 			wantParams: []any{"foo", "bar", "baz"},
 		},
 		"value_grouping": {
 			input:      "a:(foo OR baz OR bar)",
-			wantStr:    `"a" IN ($1, $2, $3)`,
+			wantStr:    `"a" IN (?, ?, ?)`,
 			wantParams: []any{"foo", "baz", "bar"},
 		},
 		"basic_must": {
 			input:      "+a:b",
-			wantStr:    `"a" = $1`,
+			wantStr:    `"a" = ?`,
 			wantParams: []any{"b"},
 		},
 		"basic_must_not": {
 			input:      "-a:b",
-			wantStr:    `NOT("a" = $1)`,
+			wantStr:    `NOT("a" = ?)`,
 			wantParams: []any{"b"},
 		},
 		"basic_nested_must_not": {
 			input:      "d:e AND (-a:b AND +f:e)",
-			wantStr:    `("d" = $1) AND ((NOT("a" = $2)) AND ("f" = $3))`,
+			wantStr:    `("d" = ?) AND ((NOT("a" = ?)) AND ("f" = ?))`,
 			wantParams: []any{"e", "b", "e"},
 		},
 		"basic_escaping": {
 			input:      `a:\(1\+1\)\:2`,
-			wantStr:    `"a" = $1`,
+			wantStr:    `"a" = ?`,
 			wantParams: []any{"(1+1):2"},
 		},
 		"escaped_column_name": {
 			input:      `foo\ bar:b`,
-			wantStr:    `"foo bar" = $1`,
+			wantStr:    `"foo bar" = ?`,
 			wantParams: []any{"b"},
 		},
 		"boost_key_value": {
@@ -676,7 +676,7 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"nested_sub_expressions": {
 			input:      "((title:foo OR title:bar) AND (body:foo OR body:bar)) OR k:v",
-			wantStr:    `((("title" = $1) OR ("title" = $2)) AND (("body" = $3) OR ("body" = $4))) OR ("k" = $5)`,
+			wantStr:    `((("title" = ?) OR ("title" = ?)) AND (("body" = ?) OR ("body" = ?))) OR ("k" = ?)`,
 			wantParams: []any{"foo", "bar", "foo", "bar", "v"},
 		},
 		"fuzzy_key_value": {
@@ -685,122 +685,180 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"precedence_works": {
 			input:      "a:b AND c:d OR e:f OR h:i AND j:k",
-			wantStr:    `((("a" = $1) AND ("c" = $2)) OR ("e" = $3)) OR (("h" = $4) AND ("j" = $5))`,
+			wantStr:    `((("a" = ?) AND ("c" = ?)) OR ("e" = ?)) OR (("h" = ?) AND ("j" = ?))`,
 			wantParams: []any{"b", "d", "f", "i", "k"},
 		},
 		"test_precedence_weaving": {
 			input:      "a OR b AND c OR d",
-			wantStr:    `($1 OR ($2 AND $3)) OR $4`,
+			wantStr:    `(? OR (? AND ?)) OR ?`,
 			wantParams: []any{"a", "b", "c", "d"},
 		},
 		"test_precedence_weaving_with_not": {
 			input:      "NOT a OR b AND NOT c OR d",
-			wantStr:    `((NOT($1)) OR ($2 AND (NOT($3)))) OR $4`,
+			wantStr:    `((NOT(?)) OR (? AND (NOT(?)))) OR ?`,
 			wantParams: []any{"a", "b", "c", "d"},
 		},
 		"test_equals_in_precedence": {
 			input:      "a:az OR b:bz AND NOT c:z OR d",
-			wantStr:    `(("a" = $1) OR (("b" = $2) AND (NOT("c" = $3)))) OR $4`,
+			wantStr:    `(("a" = ?) OR (("b" = ?) AND (NOT("c" = ?)))) OR ?`,
 			wantParams: []any{"az", "bz", "z", "d"},
 		},
 		"test_parens_in_precedence": {
 			input:      "a AND (c OR d)",
-			wantStr:    `$1 AND ($2 OR $3)`,
+			wantStr:    `? AND (? OR ?)`,
 			wantParams: []any{"a", "c", "d"},
 		},
 		"test_range_precedence_simple": {
 			input:      "c:[* to -1] OR d",
-			wantStr:    `("c" <= $1) OR $2`,
+			wantStr:    `("c" <= ?) OR ?`,
 			wantParams: []any{-1, "d"},
 		},
 		"test_range_precedence": {
 			input:      "a OR b AND c:[* to -1] OR d",
-			wantStr:    `($1 OR ($2 AND ("c" <= $3))) OR $4`,
+			wantStr:    `(? OR (? AND ("c" <= ?))) OR ?`,
 			wantParams: []any{"a", "b", -1, "d"},
 		},
 		"test_full_precedence": {
 			input:      "a OR b AND c:[* to -1] OR d AND NOT +e:f",
-			wantStr:    `($1 OR ($2 AND ("c" <= $3))) OR ($4 AND (NOT("e" = $5)))`,
+			wantStr:    `(? OR (? AND ("c" <= ?))) OR (? AND (NOT("e" = ?)))`,
 			wantParams: []any{"a", "b", -1, "d", "f"},
 		},
 		"test_elastic_greater_than_precedence": {
 			input:      "a:>10 AND -b:<=-20",
-			wantStr:    `("a" > $1) AND (NOT("b" <= $2))`,
+			wantStr:    `("a" > ?) AND (NOT("b" <= ?))`,
 			wantParams: []any{10, -20},
 		},
 		"escape_quotes": {
 			input:      "a:'b'",
-			wantStr:    `"a" = $1`,
+			wantStr:    `"a" = ?`,
 			wantParams: []any{"'b'"},
 		},
 		"name_starts_with_number": {
 			input:      "1a:b",
-			wantStr:    `"1a" = $1`,
+			wantStr:    `"1a" = ?`,
 			wantParams: []any{"b"},
 		},
 		"default_field_and": {
 			input:        `title:"The Right Way" AND go`,
-			wantStr:      `("title" = $1) AND ("default" = $2)`,
+			wantStr:      `("title" = ?) AND ("default" = ?)`,
 			wantParams:   []any{"The Right Way", "go"},
 			defaultField: "default",
 		},
 		"default_field_or": {
 			input:        `title:"The Right Way" OR go`,
-			wantStr:      `("title" = $1) OR ("default" = $2)`,
+			wantStr:      `("title" = ?) OR ("default" = ?)`,
 			wantParams:   []any{"The Right Way", "go"},
 			defaultField: "default",
 		},
 		"default_field_not": {
 			input:        `title:"The Right Way" AND NOT(go)`,
-			wantStr:      `("title" = $1) AND (NOT("default" = $2))`,
+			wantStr:      `("title" = ?) AND (NOT("default" = ?))`,
 			wantParams:   []any{"The Right Way", "go"},
 			defaultField: "default",
 		},
 		"default_bare_field": {
 			input:        `this is an example`,
-			wantStr:      `((("default" = $1) AND ("default" = $2)) AND ("default" = $3)) AND ("default" = $4)`,
+			wantStr:      `((("default" = ?) AND ("default" = ?)) AND ("default" = ?)) AND ("default" = ?)`,
 			wantParams:   []any{"this", "is", "an", "example"},
 			defaultField: "default",
 		},
 		"default_single_literal": {
 			input:        `a`,
-			wantStr:      `"default" = $1`,
+			wantStr:      `"default" = ?`,
 			wantParams:   []any{"a"},
 			defaultField: "default",
 		},
 		"question_marks_in_literal_are_regular_expression": {
 			input:      `foo:abc?`,
-			wantStr:    `"foo" SIMILAR TO $1`,
-			wantParams: []any{"abc_"},
+			wantStr:    `"foo" GLOB ?`,
+			wantParams: []any{"abc?"},
 		},
 		"start asterisk_in_literal_are_regular_expression": {
 			input:      `foo:*`,
-			wantStr:    `"foo" SIMILAR TO '%'`,
+			wantStr:    `"foo" IS NOT NULL`,
 			wantParams: []any{},
 		},
 		"implicit_and_with_subexpressions_and_default_field": {
 			input:        `title:"Foo" a b`,
-			wantStr:      `(("title" = $1) AND ("default" = $2)) AND ("default" = $3)`,
+			wantStr:      `(("title" = ?) AND ("default" = ?)) AND ("default" = ?)`,
 			wantParams:   []any{"Foo", "a", "b"},
 			defaultField: "default",
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field": {
 			input:        `title:"Foo" -a:c b`,
-			wantStr:      `(("title" = $1) AND (NOT("a" = $2))) AND ("default" = $3)`,
+			wantStr:      `(("title" = ?) AND (NOT("a" = ?))) AND ("default" = ?)`,
 			wantParams:   []any{"Foo", "c", "b"},
 			defaultField: "default",
 		},
 		"implicit_and_with_negated_subexpressions_and_default_field_reversed": {
 			input:        `title:"Foo" a:c -b`,
-			wantStr:      `(("title" = $1) AND ("a" = $2)) AND (NOT("default" = $3))`,
+			wantStr:      `(("title" = ?) AND ("a" = ?)) AND (NOT("default" = ?))`,
 			wantParams:   []any{"Foo", "c", "b"},
 			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions": {
+			input:      "-a:b -c:d",
+			wantStr:    `(NOT("a" = ?)) AND (NOT("c" = ?))`,
+			wantParams: []any{"b", "d"},
+		},
+		"implicit_and_with_explicit_negation": {
+			input:      "a:b NOT c:d",
+			wantStr:    `("a" = ?) AND (NOT("c" = ?))`,
+			wantParams: []any{"b", "d"},
+		},
+		"implicit_and_with_explicit_subexpression_and_default_field": {
+			input:        `title:"Foo" a:b NOT c`,
+			wantStr:      `(("title" = ?) AND ("a" = ?)) AND (NOT("default" = ?))`,
+			wantParams:   []any{"Foo", "b", "c"},
+			defaultField: "default",
+		},
+		"implicit_and_with_explicit_subexpression_and_keyword_field": {
+			input:      `title:"Foo" a:b NOT k:c`,
+			wantStr:    `(("title" = ?) AND ("a" = ?)) AND (NOT("k" = ?))`,
+			wantParams: []any{"Foo", "b", "c"},
+		},
+		"implicit_and_with_quotes": {
+			input:        `"jakarta apache" -"Apache Lucene"`,
+			wantStr:      `("default" = ?) AND (NOT("default" = ?))`,
+			wantParams:   []any{"jakarta apache", "Apache Lucene"},
+			defaultField: "default",
+		},
+		"implicit_and_with_multiple_clauses": {
+			input:      `-(k1:v1) k2:v2 -k3:v3`,
+			wantStr:    `((NOT("k1" = ?)) AND ("k2" = ?)) AND (NOT("k3" = ?))`,
+			wantParams: []any{"v1", "v2", "v3"},
+		},
+		"parenthesized_precedence": {
+			input:      `k1:v1 -(k2:v2 OR k3:v3)`,
+			wantStr:    `("k1" = ?) AND (NOT(("k2" = ?) OR ("k3" = ?)))`,
+			wantParams: []any{"v1", "v2", "v3"},
+		},
+		"comma_separated_terms_with_default_field": {
+			input:        "foo, bar, baz",
+			wantStr:      `(("default" = ?) AND ("default" = ?)) AND ("default" = ?)`,
+			wantParams:   []any{"foo", "bar", "baz"},
+			defaultField: "default",
+		},
+		"comma_separated_field_values": {
+			input:      "a:b, c:d",
+			wantStr:    `("a" = ?) AND ("c" = ?)`,
+			wantParams: []any{"b", "d"},
+		},
+		"semicolon_separated_field_values": {
+			input:      "a:b; c:d",
+			wantStr:    `("a" = ?) AND ("c" = ?)`,
+			wantParams: []any{"b", "d"},
+		},
+		"email_field_value": {
+			input:      "email:user@example.com",
+			wantStr:    `"email" = ?`,
+			wantParams: []any{"user@example.com"},
 		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			gotStr, gotParams, err := ToParameterizedPostgres(tc.input, WithDefaultField(tc.defaultField))
+			gotStr, gotParams, err := ToParameterizedSQLite(tc.input, WithDefaultField(tc.defaultField))
 			if err != nil {
 				// if we got an expect error then we are fine
 				if tc.err != "" && strings.Contains(err.Error(), tc.err) {

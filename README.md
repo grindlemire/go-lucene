@@ -10,7 +10,7 @@ A zero-dependency Lucene query parser for Go that converts Lucene syntax into SQ
 - SQL injection safe with parameterized queries
 - Zero dependencies
 - Extensible with custom SQL drivers
-- PostgreSQL support out of the box
+- PostgreSQL and SQLite support out of the box
 
 ## Installation
 
@@ -23,6 +23,11 @@ go get github.com/grindlemire/go-lucene
 ```go
 query := `name:"John Doe" AND age:[25 TO 35]`
 filter, err := lucene.ToPostgres(query)
+// Result: (("name" = 'John Doe') AND ("age" >= 25 AND "age" <= 35))
+```
+
+```go
+filter, err := lucene.ToSQLite(query)
 // Result: (("name" = 'John Doe') AND ("age" >= 25 AND "age" <= 35))
 ```
 
@@ -40,6 +45,58 @@ filter, err := lucene.ToPostgres(query)
 filter, params, err := lucene.ToParameterizedPostgres(query)
 db.Query(sql, params...)
 ```
+
+### SQLite
+
+```go
+filter, err := lucene.ToSQLite(query)
+
+filter, params, err := lucene.ToParameterizedSQLite(query)
+db.Query(filter, params...)
+```
+
+**SQLite notes:**
+
+- Wildcards render as `GLOB` (case-sensitive, Unix glob syntax). Lucene's `*` and `?` map directly to GLOB's `*` and `?`.
+- GLOB has no escape mechanism. If you need to match a literal `*` or `?`, use the regex form (`field:/.../`) instead.
+- Regular expressions (`field:/pattern/`) render as `REGEXP`. SQLite does not provide a `regexp()` function by default, so you must register one on your connection. With `modernc.org/sqlite` that looks like:
+
+```go
+import (
+    "database/sql/driver"
+    "regexp"
+
+    "modernc.org/sqlite"
+)
+
+func init() {
+    sqlite.MustRegisterDeterministicScalarFunction(
+        "regexp",
+        2,
+        func(ctx *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+            pattern, ok := args[0].(string)
+            if !ok {
+                return false, nil
+            }
+            value, ok := args[1].(string)
+            if !ok {
+                return false, nil
+            }
+            matched, err := regexp.MatchString(pattern, value)
+            if err != nil {
+                return false, nil
+            }
+            return matched, nil
+        },
+    )
+}
+```
+
+  With `mattn/go-sqlite3`, build with the `sqlite_regex` tag. Without registration, regex queries error at query time.
+
+- A standalone wildcard `field:*` renders as `"field" IS NOT NULL`, which matches any row where the field has a non-null value, regardless of storage class.
+- GLOB does not support alternation. A wildcard pattern like `field:*(a|b)*` will match the **literal characters** `(a|b)`, not "a or b" as it would with Postgres's `SIMILAR TO`. Use the regex form `field:/.*(a|b).*/` for alternation in SQLite.
+- Parameter placeholders are `?`, not `$1, $2, ...` as with Postgres.
 
 ### Default Fields
 
@@ -60,7 +117,7 @@ filter, err := lucene.ToPostgres("red OR green", lucene.WithDefaultField("color"
 | `+field:value` | `"field" = 'value'` | Required (equivalent to no operator) |
 | `-field:value` | `NOT("field" = 'value')` | Prohibited (equivalent to NOT) |
 | `field:[min TO max]` | `"field" >= min AND "field" <= max` | Inclusive range |
-| `field:{min TO max}` | `"field" BETWEEN 'min' AND 'max'` (strings) or `"field" > min AND "field" < max` (numbers) | Exclusive range |
+| `field:{min TO max}` | `"field" > min AND "field" < max` | Exclusive range |
 | `field:[min TO *]` | `"field" >= min` | Open-ended range (min to infinity) |
 | `field:[* TO max]` | `"field" <= max` | Open-ended range (negative infinity to max) |
 | `field:*` | `"field" SIMILAR TO '%'` | Wildcard match (matches anything) |
@@ -68,6 +125,18 @@ filter, err := lucene.ToPostgres("red OR green", lucene.WithDefaultField("color"
 | `field:pattern?` | `"field" SIMILAR TO 'pattern_'` | Single character wildcard |
 | `field:/regex/` | `"field" ~ 'regex'` | Regular expression match |
 | `(field1:value1 OR field2:value2) AND field3:value3` | `(("field1" = 'value1') OR ("field2" = 'value2')) AND ("field3" = 'value3')` | Grouping |
+
+### SQLite differences
+
+For the SQLite driver, these operators render differently than the Postgres defaults shown above:
+
+| Lucene Query | SQLite Output |
+|---|---|
+| `field:*` | `"field" IS NOT NULL` |
+| `field:pattern*` | `"field" GLOB 'pattern*'` |
+| `field:pattern?` | `"field" GLOB 'pattern?'` |
+| `field:/regex/` | `"field" REGEXP 'regex'` (requires registered `regexp()` function) |
+| parameter placeholders | `?` (not `$1, $2, ...`) |
 
 ## Examples
 
@@ -137,3 +206,5 @@ expr, _ := lucene.Parse(`color:red`)
 filter, _ := mysqlDriver.Render(expr)
 // Result: `color` = 'red'
 ```
+
+**Note on dialect behavior:** A custom driver that leaves `driver.Base.Dialect` unset inherits Postgres-flavored rendering for Like, Range, standalone wildcards, pattern escaping, and bool literals. That means `field:pat*` renders as `SIMILAR TO 'pat%'`, `field:/regex/` renders with `~`, `field:*` renders as `SIMILAR TO '%'`, and bool literals render as `true`/`false`. If your target database needs different semantics, supply your own `driver.Dialect` implementation on the embedded `Base`. The built-in `SQLiteDriver` is a reference example: it sets a `Dialect` that emits `GLOB`, `REGEXP`, `IS NOT NULL`, and `1`/`0` respectively.
