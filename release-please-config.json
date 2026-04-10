@@ -1,0 +1,14 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "changelog-sections": [
+        { "type": "feat", "section": "Features" },
+        { "type": "fix", "section": "Bug Fixes" },
+        { "type": "chore", "section": "Miscellaneous" },
+        { "type": "docs", "section": "Documentation" },
+        { "type": "deps", "section": "Dependency Updates" }
+      ]
+    }
+  }
+}

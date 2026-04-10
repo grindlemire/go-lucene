@@ -1,0 +1,37 @@
+name: Release Please
+
+on:
+    push:
+        branches:
+            - main
+
+permissions:
+    contents: write
+    pull-requests: write
+
+jobs:
+    release-please:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: googleapis/release-please-action@v4
+              id: release
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: checkout repo
+              if: ${{ steps.release.outputs.release_created }}
+              uses: actions/checkout@v4
+
+            - name: setup go
+              if: ${{ steps.release.outputs.release_created }}
+              uses: actions/setup-go@v5
+              with:
+                  go-version: 'stable'
+
+            - name: test
+              if: ${{ steps.release.outputs.release_created }}
+              run: go test -v ./...
+
+            - name: fuzz test
+              if: ${{ steps.release.outputs.release_created }}
+              run: go test -v ./fuzz
