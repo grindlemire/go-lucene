@@ -10,12 +10,6 @@ type Dialect interface {
 	// isRegex is true when the right side came from a /regex/ literal.
 	RenderLike(left, right string, isRegex bool) (string, error)
 
-	// RenderRange renders a BETWEEN-style expression (non-parameterized).
-	RenderRange(left, right string) (string, error)
-
-	// RenderRangeParam is the parameterized variant.
-	RenderRangeParam(left, right string, params []any) (string, error)
-
 	// RenderStandaloneWild handles `field:*` — the "field has any value" case.
 	RenderStandaloneWild(left string) (string, error)
 

@@ -66,14 +66,6 @@ func (postgresDialect) RenderLike(left, right string, isRegex bool) (string, err
 	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
 }
 
-func (postgresDialect) RenderRange(left, right string) (string, error) {
-	return rang(left, right)
-}
-
-func (postgresDialect) RenderRangeParam(left, right string, params []any) (string, error) {
-	return rangParam(left, right, params)
-}
-
 func (postgresDialect) RenderStandaloneWild(left string) (string, error) {
 	return fmt.Sprintf("%s SIMILAR TO '%%'", left), nil
 }

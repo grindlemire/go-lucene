@@ -41,11 +41,11 @@ func TestSQLDriver(t *testing.T) {
 		},
 		"mixed_number_range": {
 			input: expr.Rang("a", 1.1, 10, true),
-			want:  `"a" >= 1.10 AND "a" <= 10.00`,
+			want:  `"a" >= 1.1 AND "a" <= 10`,
 		},
 		"mixed_number_range_exclusive": {
 			input: expr.Rang("a", 1, 10.1, false),
-			want:  `"a" > 1.00 AND "a" < 10.10`,
+			want:  `"a" > 1 AND "a" < 10.1`,
 		},
 		"int_range": {
 			input: expr.Rang("a", 1, 10, true),
@@ -81,19 +81,19 @@ func TestSQLDriver(t *testing.T) {
 		},
 		"lt_range_float": {
 			input: expr.Rang("a", "*", 10.5, false),
-			want:  `"a" < 10.50`,
+			want:  `"a" < 10.5`,
 		},
 		"lte_range_float": {
 			input: expr.Rang("a", "*", 10.5, true),
-			want:  `"a" <= 10.50`,
+			want:  `"a" <= 10.5`,
 		},
 		"gt_range_float": {
 			input: expr.Rang("a", 1.5, "*", false),
-			want:  `"a" > 1.50`,
+			want:  `"a" > 1.5`,
 		},
 		"gte_range_float": {
 			input: expr.Rang("a", 1.5, "*", true),
-			want:  `"a" >= 1.50`,
+			want:  `"a" >= 1.5`,
 		},
 		"float_range_high_precision": {
 			input: expr.Rang("a", 1.234, 5.678, true),
@@ -144,7 +144,7 @@ func TestSQLDriver(t *testing.T) {
 					expr.Not,
 				),
 			),
-			want: `(("a" = 'foo') OR ("b" ~ 'b*ar')) AND (NOT("c" BETWEEN 'aaa' AND '*'))`,
+			want: `(("a" = 'foo') OR ("b" ~ 'b*ar')) AND (NOT("c" > 'aaa'))`,
 		},
 		"space_in_fieldname": {
 			input: expr.Eq("a b", 1),

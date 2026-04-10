@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
@@ -10,14 +11,14 @@ import (
 // Shared is the shared set of render functions that can be used as a base and overriden
 // for each flavor of sql
 var Shared = map[expr.Operator]RenderFN{
-	expr.Literal: literal,
-	expr.And:     basicCompound(expr.And),
-	expr.Or:      basicCompound(expr.Or),
-	expr.Not:     basicWrap(expr.Not),
-	expr.Equals:  equals,
-	expr.Must:    noop,                // must doesn't really translate to sql
-	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
-	expr.Wild:    literal,
+	expr.Literal:   literal,
+	expr.And:       basicCompound(expr.And),
+	expr.Or:        basicCompound(expr.Or),
+	expr.Not:       basicWrap(expr.Not),
+	expr.Equals:    equals,
+	expr.Must:      noop,                // must doesn't really translate to sql
+	expr.MustNot:   basicWrap(expr.Not), // must not is really just a negation
+	expr.Wild:      literal,
 	expr.Greater:   greater,
 	expr.GreaterEq: greaterEq,
 	expr.Less:      less,
@@ -70,6 +71,13 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return s, params, err
 	}
 
+	// Range: access typed boundary directly, skip serializing right side
+	if e.Op == expr.Range {
+		boundary := e.Right.(*expr.RangeBoundary)
+		str, rangeParams, err := b.renderRangeParam(left, boundary)
+		return str, append(lparams, rangeParams...), err
+	}
+
 	right, rparams, err := b.serializeParams(e.Right)
 	if err != nil {
 		return s, params, err
@@ -96,8 +104,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 
 	params = append(lparams, rparams...)
 
-	if e.Op != expr.Range &&
-		e.Op != expr.Not &&
+	if e.Op != expr.Not &&
 		e.Op != expr.List &&
 		e.Op != expr.In &&
 		e.Op != expr.Literal &&
@@ -113,11 +120,6 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 
 	if e.Op == expr.Like {
 		str, err := d.RenderLike(left, right, isRegex)
-		return str, params, err
-	}
-
-	if e.Op == expr.Range {
-		str, err := d.RenderRangeParam(left, right, rparams)
 		return str, params, err
 	}
 
@@ -154,6 +156,12 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return s, err
 	}
 
+	// Range: access typed boundary directly, skip serializing right side
+	if e.Op == expr.Range {
+		boundary := e.Right.(*expr.RangeBoundary)
+		return b.renderRange(left, boundary)
+	}
+
 	right, err := b.serialize(e.Right)
 	if err != nil {
 		return s, err
@@ -166,8 +174,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return d.RenderStandaloneWild(left)
 	}
 
-	if e.Op != expr.Range &&
-		e.Op != expr.Not &&
+	if e.Op != expr.Not &&
 		e.Op != expr.List &&
 		e.Op != expr.In &&
 		e.Op != expr.Literal &&
@@ -192,10 +199,6 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 			right = "'" + inner + "'"
 		}
 		return d.RenderLike(left, right, isRegex)
-	}
-
-	if e.Op == expr.Range {
-		return d.RenderRange(left, right)
 	}
 
 	fn, ok := b.RenderFNs[e.Op]
@@ -246,21 +249,6 @@ func (b Base) serialize(in any) (s string, err error) {
 			strs = append(strs, s)
 		}
 		return strings.Join(strs, ", "), nil
-	case *expr.RangeBoundary:
-		min, err := b.serialize(v.Min)
-		if err != nil {
-			return "", err
-		}
-		max, err := b.serialize(v.Max)
-		if err != nil {
-			return "", err
-		}
-
-		if v.Inclusive {
-			return fmt.Sprintf("[%s, %s]", min, max), nil
-		}
-		return fmt.Sprintf("(%s, %s)", min, max), nil
-
 	case expr.Column:
 		if len(v) == 0 {
 			return "", fmt.Errorf("column name is empty")
@@ -308,22 +296,6 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 			params = append(params, eparams...)
 		}
 		return strings.Join(strs, ", "), params, nil
-	case *expr.RangeBoundary:
-		min, minParams, err := b.serializeParams(v.Min)
-		if err != nil {
-			return "", params, err
-		}
-		max, maxParams, err := b.serializeParams(v.Max)
-		if err != nil {
-			return "", params, err
-		}
-		params = append(minParams, maxParams...)
-
-		if v.Inclusive {
-			return fmt.Sprintf("[%s, %s]", min, max), params, nil
-		}
-		return fmt.Sprintf("(%s, %s)", min, max), params, nil
-
 	case expr.Column:
 		if len(v) == 0 {
 			return "", params, fmt.Errorf("column name is empty")
@@ -347,4 +319,114 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 	default:
 		return "?", []any{v}, nil
 	}
+}
+
+// extractBoundValue unwraps a range boundary value from its Expression wrapper.
+// Returns the raw Go value (int, float64, string) and whether the bound is unbounded (*).
+func extractBoundValue(bound any) (val any, unbounded bool) {
+	e, ok := bound.(*expr.Expression)
+	if !ok {
+		return bound, false
+	}
+	if e.Op == expr.Wild {
+		return nil, true
+	}
+	return e.Left, false
+}
+
+// formatRangeValue renders a range bound value as a SQL literal.
+func formatRangeValue(val any) string {
+	switch v := val.(type) {
+	case int:
+		return strconv.Itoa(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case string:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+	case expr.Column:
+		return fmt.Sprintf(`"%s"`, string(v))
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// isNumericBound checks whether a range bound value is numeric.
+func isNumericBound(val any) bool {
+	switch val.(type) {
+	case int, float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, error) {
+	minVal, minUnbounded := extractBoundValue(boundary.Min)
+	maxVal, maxUnbounded := extractBoundValue(boundary.Max)
+	inclusive := boundary.Inclusive
+
+	if minUnbounded && maxUnbounded {
+		return "1=1", nil
+	}
+
+	if minUnbounded {
+		maxStr := formatRangeValue(maxVal)
+		if inclusive {
+			return fmt.Sprintf("%s <= %s", left, maxStr), nil
+		}
+		return fmt.Sprintf("%s < %s", left, maxStr), nil
+	}
+
+	if maxUnbounded {
+		minStr := formatRangeValue(minVal)
+		if inclusive {
+			return fmt.Sprintf("%s >= %s", left, minStr), nil
+		}
+		return fmt.Sprintf("%s > %s", left, minStr), nil
+	}
+
+	minStr := formatRangeValue(minVal)
+	maxStr := formatRangeValue(maxVal)
+
+	if isNumericBound(minVal) || isNumericBound(maxVal) {
+		if inclusive {
+			return fmt.Sprintf("%s >= %s AND %s <= %s", left, minStr, left, maxStr), nil
+		}
+		return fmt.Sprintf("%s > %s AND %s < %s", left, minStr, left, maxStr), nil
+	}
+
+	return fmt.Sprintf("%s BETWEEN %s AND %s", left, minStr, maxStr), nil
+}
+
+func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (string, []any, error) {
+	minVal, minUnbounded := extractBoundValue(boundary.Min)
+	maxVal, maxUnbounded := extractBoundValue(boundary.Max)
+	inclusive := boundary.Inclusive
+
+	if minUnbounded && maxUnbounded {
+		return "1=1", nil, nil
+	}
+
+	if minUnbounded {
+		if inclusive {
+			return fmt.Sprintf("%s <= ?", left), []any{maxVal}, nil
+		}
+		return fmt.Sprintf("%s < ?", left), []any{maxVal}, nil
+	}
+
+	if maxUnbounded {
+		if inclusive {
+			return fmt.Sprintf("%s >= ?", left), []any{minVal}, nil
+		}
+		return fmt.Sprintf("%s > ?", left), []any{minVal}, nil
+	}
+
+	if isNumericBound(minVal) || isNumericBound(maxVal) {
+		if inclusive {
+			return fmt.Sprintf("%s >= ? AND %s <= ?", left, left), []any{minVal, maxVal}, nil
+		}
+		return fmt.Sprintf("%s > ? AND %s < ?", left, left), []any{minVal, maxVal}, nil
+	}
+
+	return fmt.Sprintf("%s BETWEEN ? AND ?", left), []any{minVal, maxVal}, nil
 }

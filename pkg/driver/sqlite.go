@@ -51,14 +51,6 @@ func (sqliteDialect) RenderLike(left, right string, isRegex bool) (string, error
 	return fmt.Sprintf("%s GLOB %s", left, right), nil
 }
 
-func (sqliteDialect) RenderRange(left, right string) (string, error) {
-	return rang(left, right)
-}
-
-func (sqliteDialect) RenderRangeParam(left, right string, params []any) (string, error) {
-	return rangParam(left, right, params)
-}
-
 func (sqliteDialect) RenderStandaloneWild(left string) (string, error) {
 	return fmt.Sprintf("%s IS NOT NULL", left), nil
 }
