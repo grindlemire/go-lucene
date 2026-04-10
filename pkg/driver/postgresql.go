@@ -84,3 +84,12 @@ func (postgresDialect) SerializeBool(b bool) string {
 	}
 	return "false"
 }
+
+func (postgresDialect) BoolParam(b bool) any { return b }
+
+func (postgresDialect) QuoteColumn(name string) (string, error) {
+	if strings.ContainsRune(name, '"') {
+		return "", fmt.Errorf("column name contains a double quote: %q", name)
+	}
+	return `"` + name + `"`, nil
+}

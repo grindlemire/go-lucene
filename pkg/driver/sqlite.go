@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
@@ -69,4 +70,18 @@ func (sqliteDialect) SerializeBool(b bool) string {
 		return "1"
 	}
 	return "0"
+}
+
+func (sqliteDialect) BoolParam(b bool) any {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (sqliteDialect) QuoteColumn(name string) (string, error) {
+	if strings.ContainsRune(name, '"') {
+		return "", fmt.Errorf("column name contains a double quote: %q", name)
+	}
+	return `"` + name + `"`, nil
 }

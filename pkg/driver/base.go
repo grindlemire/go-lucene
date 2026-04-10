@@ -253,13 +253,7 @@ func (b Base) serialize(in any) (s string, err error) {
 		if len(v) == 0 {
 			return "", fmt.Errorf("column name is empty")
 		}
-		if strings.ContainsRune(string(v), '"') {
-			return "", fmt.Errorf("column name contains a double quote: %q", v)
-		}
-		// Always escape column names with double quotes,
-		// otherwise we need to know the reserved words
-		// which might change in the future.
-		return fmt.Sprintf(`"%s"`, string(v)), nil
+		return b.dialect().QuoteColumn(string(v))
 	case string:
 		// escape single quotes with double single quotes
 		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")), nil
@@ -300,25 +294,13 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 		if len(v) == 0 {
 			return "", params, fmt.Errorf("column name is empty")
 		}
-		if strings.ContainsRune(string(v), '"') {
-			return "", params, fmt.Errorf("column name contains a double quote: %q", v)
+		quoted, err := b.dialect().QuoteColumn(string(v))
+		if err != nil {
+			return "", params, err
 		}
-		// Always escape column names with double quotes,
-		// otherwise we need to know the reserved words
-		// which might change in the future.
-		return fmt.Sprintf(`"%s"`, string(v)), params, nil
+		return quoted, params, nil
 	case bool:
-		// Use the dialect to determine the correct parameter value.
-		// Dialects that serialize bools as numeric strings (e.g. SQLite "1"/"0")
-		// need integer params; dialects with native bool support (e.g. Postgres)
-		// pass the Go bool directly.
-		if b.dialect().SerializeBool(true) == "1" {
-			if v {
-				return "?", []any{1}, nil
-			}
-			return "?", []any{0}, nil
-		}
-		return "?", []any{v}, nil
+		return "?", []any{b.dialect().BoolParam(v)}, nil
 	case string:
 		// if we have a '*' then we don't want to insert a param since
 		// it can be used either in a regexp or a range operator.

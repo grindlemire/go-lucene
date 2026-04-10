@@ -19,6 +19,17 @@ type Dialect interface {
 
 	// SerializeBool converts a Go bool to its SQL literal form.
 	SerializeBool(b bool) string
+
+	// BoolParam returns the parameter value for a boolean. Databases with
+	// native bool support (Postgres) return the Go bool directly; databases
+	// that store bools as integers (SQLite) return 1 or 0.
+	BoolParam(b bool) any
+
+	// QuoteColumn wraps a column name in the dialect's identifier quoting
+	// characters. Most databases use SQL-standard double quotes ("col"),
+	// but MySQL uses backticks (`col`). Returns an error if the name
+	// contains the quoting character itself.
+	QuoteColumn(name string) (string, error)
 }
 
 // defaultDialect is used by Base when no Dialect has been set on a driver
