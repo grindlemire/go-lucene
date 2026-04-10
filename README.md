@@ -95,7 +95,7 @@ func init() {
   With `mattn/go-sqlite3`, build with the `sqlite_regex` tag. Without registration, regex queries error at query time.
 
 - A standalone wildcard `field:*` renders as `"field" IS NOT NULL`, which matches any row where the field has a non-null value, regardless of storage class.
-- Lucene wildcard alternation like `field:*(a|b)*` is not supported by GLOB. Use the explicit regex form `field:/.*(a|b).*/` instead.
+- GLOB does not support alternation. A wildcard pattern like `field:*(a|b)*` will match the **literal characters** `(a|b)`, not "a or b" as it would with Postgres's `SIMILAR TO`. Use the regex form `field:/.*(a|b).*/` for alternation in SQLite.
 - Parameter placeholders are `?`, not `$1, $2, ...` as with Postgres.
 
 ### Default Fields
@@ -117,7 +117,7 @@ filter, err := lucene.ToPostgres("red OR green", lucene.WithDefaultField("color"
 | `+field:value` | `"field" = 'value'` | Required (equivalent to no operator) |
 | `-field:value` | `NOT("field" = 'value')` | Prohibited (equivalent to NOT) |
 | `field:[min TO max]` | `"field" >= min AND "field" <= max` | Inclusive range |
-| `field:{min TO max}` | `"field" BETWEEN 'min' AND 'max'` (strings) or `"field" > min AND "field" < max` (numbers) | Exclusive range |
+| `field:{min TO max}` | `"field" > min AND "field" < max` | Exclusive range |
 | `field:[min TO *]` | `"field" >= min` | Open-ended range (min to infinity) |
 | `field:[* TO max]` | `"field" <= max` | Open-ended range (negative infinity to max) |
 | `field:*` | `"field" SIMILAR TO '%'` | Wildcard match (matches anything) |

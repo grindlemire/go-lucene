@@ -6,6 +6,11 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
+// NOTE: GLOB does not support alternation. A wildcard pattern like *(b|d)*
+// matches the literal characters (b|d) in SQLite, whereas Postgres SIMILAR TO
+// treats it as alternation matching 'b' or 'd'. This is an inherent GLOB
+// limitation documented in the README.
+
 func TestSQLiteDriver(t *testing.T) {
 	type tc struct {
 		input *expr.Expression
@@ -37,9 +42,13 @@ func TestSQLiteDriver(t *testing.T) {
 			input: expr.LIKE("a", "b?z"),
 			want:  `"a" GLOB 'b?z'`,
 		},
-		"string_range": {
+		"string_range_inclusive": {
 			input: expr.Rang("a", "foo", "bar", true),
 			want:  `"a" BETWEEN 'foo' AND 'bar'`,
+		},
+		"string_range_exclusive": {
+			input: expr.Rang("a", "foo", "bar", false),
+			want:  `"a" > 'foo' AND "a" < 'bar'`,
 		},
 		"mixed_number_range": {
 			input: expr.Rang("a", 1.1, 10, true),
@@ -186,6 +195,48 @@ func TestSQLiteDriver(t *testing.T) {
 			}
 			if tc.want != got {
 				t.Fatalf(errTemplate, "generated sql does not match", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestSQLiteDriverParam(t *testing.T) {
+	type tc struct {
+		input      *expr.Expression
+		wantStr    string
+		wantParams []any
+	}
+
+	tcs := map[string]tc{
+		"bool_true_param": {
+			input:      expr.Eq("active", true),
+			wantStr:    `"active" = ?`,
+			wantParams: []any{1},
+		},
+		"bool_false_param": {
+			input:      expr.Eq("active", false),
+			wantStr:    `"active" = ?`,
+			wantParams: []any{0},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			gotStr, gotParams, err := NewSQLiteDriver().RenderParam(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotStr != tc.wantStr {
+				t.Fatalf(errTemplate, "generated sql does not match", tc.wantStr, gotStr)
+			}
+			if len(gotParams) != len(tc.wantParams) {
+				t.Fatalf("param count: want %d, got %d", len(tc.wantParams), len(gotParams))
+			}
+			for i := range gotParams {
+				if gotParams[i] != tc.wantParams[i] {
+					t.Fatalf("param[%d]: want %v (%T), got %v (%T)",
+						i, tc.wantParams[i], tc.wantParams[i], gotParams[i], gotParams[i])
+				}
 			}
 		})
 	}

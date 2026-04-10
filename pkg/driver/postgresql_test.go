@@ -35,9 +35,13 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.LIKE("a", "*(b|d)*"),
 			want:  `"a" SIMILAR TO '%(b|d)%'`,
 		},
-		"string_range": {
+		"string_range_inclusive": {
 			input: expr.Rang("a", "foo", "bar", true),
 			want:  `"a" BETWEEN 'foo' AND 'bar'`,
+		},
+		"string_range_exclusive": {
+			input: expr.Rang("a", "foo", "bar", false),
+			want:  `"a" > 'foo' AND "a" < 'bar'`,
 		},
 		"mixed_number_range": {
 			input: expr.Rang("a", 1.1, 10, true),

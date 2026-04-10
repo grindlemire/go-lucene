@@ -138,9 +138,8 @@ func TestSQLiteIntegrationRendered(t *testing.T) {
 		{"open_ended_lte", `price:[* TO 1]`, []int{2, 3}},
 		// inclusive gte: prices >= 2 -> 5.00
 		{"open_ended_gte", `price:[2 TO *]`, []int{4}},
-		// String ranges render as BETWEEN regardless of inclusive/exclusive,
-		// so this is `"name" BETWEEN 'a' AND 'd'`. "apple", "banana", "carrot"
-		// all match; "durian" is lexicographically > 'd' and "eggplant" > 'd'.
+		// Exclusive string range: `"name" > 'a' AND "name" < 'd'`.
+		// "apple", "banana", "carrot" are in (a, d); "durian" >= 'd', "eggplant" > 'd'.
 		{"string_range", `name:{a TO d}`, []int{1, 2, 3}},
 		{"in_list", `name:(apple OR banana OR carrot)`, []int{1, 2, 3}},
 		{"glob_prefix", `name:a*`, []int{1}},

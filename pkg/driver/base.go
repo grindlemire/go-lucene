@@ -307,6 +307,18 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 		// otherwise we need to know the reserved words
 		// which might change in the future.
 		return fmt.Sprintf(`"%s"`, string(v)), params, nil
+	case bool:
+		// Use the dialect to determine the correct parameter value.
+		// Dialects that serialize bools as numeric strings (e.g. SQLite "1"/"0")
+		// need integer params; dialects with native bool support (e.g. Postgres)
+		// pass the Go bool directly.
+		if b.dialect().SerializeBool(true) == "1" {
+			if v {
+				return "?", []any{1}, nil
+			}
+			return "?", []any{0}, nil
+		}
+		return "?", []any{v}, nil
 	case string:
 		// if we have a '*' then we don't want to insert a param since
 		// it can be used either in a regexp or a range operator.
@@ -395,7 +407,10 @@ func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, er
 		return fmt.Sprintf("%s > %s AND %s < %s", left, minStr, left, maxStr), nil
 	}
 
-	return fmt.Sprintf("%s BETWEEN %s AND %s", left, minStr, maxStr), nil
+	if inclusive {
+		return fmt.Sprintf("%s BETWEEN %s AND %s", left, minStr, maxStr), nil
+	}
+	return fmt.Sprintf("%s > %s AND %s < %s", left, minStr, left, maxStr), nil
 }
 
 func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (string, []any, error) {
@@ -428,5 +443,8 @@ func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (strin
 		return fmt.Sprintf("%s > ? AND %s < ?", left, left), []any{minVal, maxVal}, nil
 	}
 
-	return fmt.Sprintf("%s BETWEEN ? AND ?", left), []any{minVal, maxVal}, nil
+	if inclusive {
+		return fmt.Sprintf("%s BETWEEN ? AND ?", left), []any{minVal, maxVal}, nil
+	}
+	return fmt.Sprintf("%s > ? AND %s < ?", left, left), []any{minVal, maxVal}, nil
 }

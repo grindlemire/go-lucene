@@ -68,7 +68,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"range_over_strings": {
 			input: "a:{foo TO bar}",
-			want:  `"a" BETWEEN 'foo' AND 'bar'`,
+			want:  `"a" > 'foo' AND "a" < 'bar'`,
 		},
 		"basic_fuzzy": {
 			input: "b AND a~",
@@ -176,7 +176,7 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 		},
 		"range_operator_exclusive": {
 			input: `a:{"ab" TO "az"}`,
-			want:  `"a" BETWEEN 'ab' AND 'az'`,
+			want:  `"a" > 'ab' AND "a" < 'az'`,
 		},
 		"range_operator_exclusive_unbound": {
 			input: `a:{2 TO *}`,
@@ -486,7 +486,7 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"range_over_strings": {
 			input:      "a:{foo TO bar}",
-			wantStr:    `"a" BETWEEN $1 AND $2`,
+			wantStr:    `"a" > $1 AND "a" < $2`,
 			wantParams: []any{"foo", "bar"},
 		},
 		"basic_fuzzy": {
@@ -617,7 +617,7 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"range_operator_exclusive": {
 			input:      `a:{"ab" TO "az"}`,
-			wantStr:    `"a" BETWEEN $1 AND $2`,
+			wantStr:    `"a" > $1 AND "a" < $2`,
 			wantParams: []any{"ab", "az"},
 		},
 		"range_operator_exclusive_unbound": {

@@ -68,7 +68,7 @@ func TestSQLiteSQLEndToEnd(t *testing.T) {
 		},
 		"range_over_strings": {
 			input: "a:{foo TO bar}",
-			want:  `"a" BETWEEN 'foo' AND 'bar'`,
+			want:  `"a" > 'foo' AND "a" < 'bar'`,
 		},
 		"basic_fuzzy": {
 			input: "b AND a~",
@@ -176,7 +176,7 @@ func TestSQLiteSQLEndToEnd(t *testing.T) {
 		},
 		"range_operator_exclusive": {
 			input: `a:{"ab" TO "az"}`,
-			want:  `"a" BETWEEN 'ab' AND 'az'`,
+			want:  `"a" > 'ab' AND "a" < 'az'`,
 		},
 		"range_operator_exclusive_unbound": {
 			input: `a:{2 TO *}`,
@@ -486,7 +486,7 @@ func TestSQLiteParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"range_over_strings": {
 			input:      "a:{foo TO bar}",
-			wantStr:    `"a" BETWEEN ? AND ?`,
+			wantStr:    `"a" > ? AND "a" < ?`,
 			wantParams: []any{"foo", "bar"},
 		},
 		"basic_fuzzy": {
@@ -617,7 +617,7 @@ func TestSQLiteParameterizedSQLEndToEnd(t *testing.T) {
 		},
 		"range_operator_exclusive": {
 			input:      `a:{"ab" TO "az"}`,
-			wantStr:    `"a" BETWEEN ? AND ?`,
+			wantStr:    `"a" > ? AND "a" < ?`,
 			wantParams: []any{"ab", "az"},
 		},
 		"range_operator_exclusive_unbound": {
@@ -795,6 +795,64 @@ func TestSQLiteParameterizedSQLEndToEnd(t *testing.T) {
 			wantStr:      `(("title" = ?) AND ("a" = ?)) AND (NOT("default" = ?))`,
 			wantParams:   []any{"Foo", "c", "b"},
 			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions": {
+			input:      "-a:b -c:d",
+			wantStr:    `(NOT("a" = ?)) AND (NOT("c" = ?))`,
+			wantParams: []any{"b", "d"},
+		},
+		"implicit_and_with_explicit_negation": {
+			input:      "a:b NOT c:d",
+			wantStr:    `("a" = ?) AND (NOT("c" = ?))`,
+			wantParams: []any{"b", "d"},
+		},
+		"implicit_and_with_explicit_subexpression_and_default_field": {
+			input:        `title:"Foo" a:b NOT c`,
+			wantStr:      `(("title" = ?) AND ("a" = ?)) AND (NOT("default" = ?))`,
+			wantParams:   []any{"Foo", "b", "c"},
+			defaultField: "default",
+		},
+		"implicit_and_with_explicit_subexpression_and_keyword_field": {
+			input:      `title:"Foo" a:b NOT k:c`,
+			wantStr:    `(("title" = ?) AND ("a" = ?)) AND (NOT("k" = ?))`,
+			wantParams: []any{"Foo", "b", "c"},
+		},
+		"implicit_and_with_quotes": {
+			input:        `"jakarta apache" -"Apache Lucene"`,
+			wantStr:      `("default" = ?) AND (NOT("default" = ?))`,
+			wantParams:   []any{"jakarta apache", "Apache Lucene"},
+			defaultField: "default",
+		},
+		"implicit_and_with_multiple_clauses": {
+			input:      `-(k1:v1) k2:v2 -k3:v3`,
+			wantStr:    `((NOT("k1" = ?)) AND ("k2" = ?)) AND (NOT("k3" = ?))`,
+			wantParams: []any{"v1", "v2", "v3"},
+		},
+		"parenthesized_precedence": {
+			input:      `k1:v1 -(k2:v2 OR k3:v3)`,
+			wantStr:    `("k1" = ?) AND (NOT(("k2" = ?) OR ("k3" = ?)))`,
+			wantParams: []any{"v1", "v2", "v3"},
+		},
+		"comma_separated_terms_with_default_field": {
+			input:        "foo, bar, baz",
+			wantStr:      `(("default" = ?) AND ("default" = ?)) AND ("default" = ?)`,
+			wantParams:   []any{"foo", "bar", "baz"},
+			defaultField: "default",
+		},
+		"comma_separated_field_values": {
+			input:      "a:b, c:d",
+			wantStr:    `("a" = ?) AND ("c" = ?)`,
+			wantParams: []any{"b", "d"},
+		},
+		"semicolon_separated_field_values": {
+			input:      "a:b; c:d",
+			wantStr:    `("a" = ?) AND ("c" = ?)`,
+			wantParams: []any{"b", "d"},
+		},
+		"email_field_value": {
+			input:      "email:user@example.com",
+			wantStr:    `"email" = ?`,
+			wantParams: []any{"user@example.com"},
 		},
 	}
 
