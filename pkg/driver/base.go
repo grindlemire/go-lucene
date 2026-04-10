@@ -18,12 +18,6 @@ var Shared = map[expr.Operator]RenderFN{
 	expr.Must:    noop,                // must doesn't really translate to sql
 	expr.MustNot: basicWrap(expr.Not), // must not is really just a negation
 	expr.Wild:    literal,
-	// expr.Regexp stays in Shared because recursive serialization needs it:
-	// Render/RenderParam on a Like with a /regex/ right side calls serialize on
-	// that right, which recurses into Render and looks up RenderFNs[expr.Regexp]
-	// to strip the Lucene /.../ delimiters. Dialect-agnostic — every SQL dialect
-	// wants the delimiters stripped before handing the pattern to its regex operator.
-	expr.Regexp:    regexpLiteral,
 	expr.Greater:   greater,
 	expr.GreaterEq: greaterEq,
 	expr.Less:      less,
@@ -58,6 +52,17 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return "", params, nil
 	}
 
+	// Standalone Regexp expression: strip /.../ delimiters and return as a
+	// parameterized value. This mirrors what serializeParams does for nested
+	// Regexp sub-expressions.
+	if e.Op == expr.Regexp {
+		s, _ := e.Left.(string)
+		if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
+			s = s[1 : len(s)-1]
+		}
+		return "?", []any{s}, nil
+	}
+
 	d := b.dialect()
 
 	left, lparams, err := b.serializeParams(e.Left)
@@ -84,17 +89,8 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
 			isRegex = true
 		}
-		if len(rparams) > 0 {
-			if isRegex {
-				// Strip /.../ delimiters from the param value.
-				// (This will move to serializeParams in Commit 3.)
-				rval := rparams[0].(string)
-				if len(rval) >= 2 && rval[0] == '/' && rval[len(rval)-1] == '/' {
-					rparams[0] = rval[1 : len(rval)-1]
-				}
-			} else {
-				rparams[0] = d.EscapeLikePattern(rparams[0].(string))
-			}
+		if !isRegex && len(rparams) > 0 {
+			rparams[0] = d.EscapeLikePattern(rparams[0].(string))
 		}
 	}
 
@@ -138,6 +134,17 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 func (b Base) Render(e *expr.Expression) (s string, err error) {
 	if e == nil {
 		return "", nil
+	}
+
+	// Standalone Regexp expression: strip /.../ delimiters and return as a
+	// single-quoted literal. This mirrors what serialize does for nested
+	// Regexp sub-expressions.
+	if e.Op == expr.Regexp {
+		s, _ := e.Left.(string)
+		if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
+			s = s[1 : len(s)-1]
+		}
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
 	}
 
 	d := b.dialect()
@@ -221,6 +228,13 @@ func (b Base) serialize(in any) (s string, err error) {
 
 	switch v := in.(type) {
 	case *expr.Expression:
+		if v.Op == expr.Regexp {
+			s, _ := v.Left.(string)
+			if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
+				s = s[1 : len(s)-1]
+			}
+			return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
+		}
 		return b.Render(v)
 	case []*expr.Expression:
 		strs := []string{}
@@ -275,6 +289,13 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 
 	switch v := in.(type) {
 	case *expr.Expression:
+		if v.Op == expr.Regexp {
+			s, _ := v.Left.(string)
+			if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
+				s = s[1 : len(s)-1]
+			}
+			return "?", []any{s}, nil
+		}
 		return b.RenderParam(v)
 	case []*expr.Expression:
 		strs := []string{}
