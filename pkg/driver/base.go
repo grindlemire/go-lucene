@@ -80,13 +80,21 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect escape
 	// the wildcard pattern however it needs to.
 	isRegex := false
-	if e.Op == expr.Like && len(rparams) > 0 {
-		rval := rparams[0].(string)
-		if len(rval) >= 2 && rval[0] == '/' && rval[len(rval)-1] == '/' {
-			rparams[0] = rval[1 : len(rval)-1]
+	if e.Op == expr.Like {
+		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
 			isRegex = true
-		} else {
-			rparams[0] = d.EscapeLikePattern(rval)
+		}
+		if len(rparams) > 0 {
+			if isRegex {
+				// Strip /.../ delimiters from the param value.
+				// (This will move to serializeParams in Commit 3.)
+				rval := rparams[0].(string)
+				if len(rval) >= 2 && rval[0] == '/' && rval[len(rval)-1] == '/' {
+					rparams[0] = rval[1 : len(rval)-1]
+				}
+			} else {
+				rparams[0] = d.EscapeLikePattern(rparams[0].(string))
+			}
 		}
 	}
 
@@ -108,7 +116,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	}
 
 	if e.Op == expr.Like {
-		str, err := d.RenderLikeParam(left, right, rparams, isRegex)
+		str, err := d.RenderLike(left, right, isRegex)
 		return str, params, err
 	}
 
@@ -170,6 +178,11 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		isRegex := false
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
 			isRegex = true
+		}
+		if !isRegex && len(right) >= 2 && right[0] == '\'' && right[len(right)-1] == '\'' {
+			inner := right[1 : len(right)-1]
+			inner = d.EscapeLikePattern(inner)
+			right = "'" + inner + "'"
 		}
 		return d.RenderLike(left, right, isRegex)
 	}

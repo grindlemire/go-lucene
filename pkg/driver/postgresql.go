@@ -60,11 +60,10 @@ func (p PostgresDriver) RenderParam(e *expr.Expression) (s string, params []any,
 type postgresDialect struct{}
 
 func (postgresDialect) RenderLike(left, right string, isRegex bool) (string, error) {
-	return likeRender(left, right, isRegex)
-}
-
-func (postgresDialect) RenderLikeParam(left, right string, params []any, isRegex bool) (string, error) {
-	return likeParam(left, right, params, isRegex)
+	if isRegex {
+		return fmt.Sprintf("%s ~ %s", left, right), nil
+	}
+	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
 }
 
 func (postgresDialect) RenderRange(left, right string) (string, error) {

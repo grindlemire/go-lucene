@@ -10,11 +10,6 @@ type Dialect interface {
 	// isRegex is true when the right side came from a /regex/ literal.
 	RenderLike(left, right string, isRegex bool) (string, error)
 
-	// RenderLikeParam is the parameterized variant. params is the slice of
-	// values bound for the right-hand side; the dialect may rewrite them
-	// in place if needed.
-	RenderLikeParam(left, right string, params []any, isRegex bool) (string, error)
-
 	// RenderRange renders a BETWEEN-style expression (non-parameterized).
 	RenderRange(left, right string) (string, error)
 

@@ -50,29 +50,6 @@ func noop(left, right string) (string, error) {
 	return left, nil
 }
 
-// likeRender handles the Like operator with explicit isRegex flag
-// This is called from Render() which can determine if the right side is a Regexp expression
-func likeRender(left, right string, isRegex bool) (string, error) {
-	if isRegex {
-		// The slashes have already been stripped by regexpLiteral
-		return fmt.Sprintf("%s ~ %s", left, right), nil
-	}
-
-	right = strings.ReplaceAll(right, "%", `\%`)
-	right = strings.ReplaceAll(right, "_", `\_`)
-	right = strings.ReplaceAll(right, "*", "%")
-	right = strings.ReplaceAll(right, "?", "_")
-	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
-}
-
-func likeParam(left, right string, params []any, isRegex bool) (string, error) {
-	if isRegex {
-		return fmt.Sprintf("%s ~ %s", left, right), nil
-	}
-
-	return fmt.Sprintf("%s SIMILAR TO %s", left, right), nil
-}
-
 func inFn(left, right string) (string, error) {
 	return fmt.Sprintf("%s IN %s", left, right), nil
 }
