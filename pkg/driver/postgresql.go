@@ -14,17 +14,10 @@ type PostgresDriver struct {
 
 // NewPostgresDriver creates a new driver that will output postgres filter strings from parsed lucene expressions.
 func NewPostgresDriver() PostgresDriver {
-	fns := map[expr.Operator]RenderFN{
-		expr.Literal: literal,
-	}
-
+	fns := map[expr.Operator]RenderFN{}
 	for op, sharedFN := range Shared {
-		_, found := fns[op]
-		if !found {
-			fns[op] = sharedFN
-		}
+		fns[op] = sharedFN
 	}
-
 	return PostgresDriver{
 		Base{
 			RenderFNs: fns,
