@@ -97,6 +97,14 @@ func TestSQLiteDriver(t *testing.T) {
 			input: expr.Rang("a", 1.5, "*", true),
 			want:  `"a" >= 1.50`,
 		},
+		"float_range_high_precision": {
+			input: expr.Rang("a", 1.234, 5.678, true),
+			want:  `"a" >= 1.234 AND "a" <= 5.678`,
+		},
+		"float_range_high_precision_exclusive": {
+			input: expr.Rang("a", 1.234, 5.678, false),
+			want:  `"a" > 1.234 AND "a" < 5.678`,
+		},
 		"lt": {
 			input: expr.LESS("a", 10),
 			want:  `"a" < 10`,
