@@ -218,6 +218,16 @@ func TestSQLiteDriverParam(t *testing.T) {
 			wantStr:    `"active" = ?`,
 			wantParams: []any{0},
 		},
+		"string_range_inclusive_param": {
+			input:      expr.Rang("a", "foo", "bar", true),
+			wantStr:    `"a" BETWEEN ? AND ?`,
+			wantParams: []any{"foo", "bar"},
+		},
+		"string_range_exclusive_param": {
+			input:      expr.Rang("a", "foo", "bar", false),
+			wantStr:    `"a" > ? AND "a" < ?`,
+			wantParams: []any{"foo", "bar"},
+		},
 	}
 
 	for name, tc := range tcs {

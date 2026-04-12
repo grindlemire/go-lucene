@@ -8,6 +8,15 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
+// stripRegexpDelimiters removes surrounding /.../ delimiters from a Lucene
+// regexp literal, returning the inner pattern.
+func stripRegexpDelimiters(s string) string {
+	if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
 // Shared is the shared set of render functions that can be used as a base and overriden
 // for each flavor of sql
 var Shared = map[expr.Operator]RenderFN{
@@ -58,10 +67,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	// Regexp sub-expressions.
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
-		if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
-			s = s[1 : len(s)-1]
-		}
-		return "?", []any{s}, nil
+		return "?", []any{stripRegexpDelimiters(s)}, nil
 	}
 
 	d := b.dialect()
@@ -73,7 +79,10 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 
 	// Range: access typed boundary directly, skip serializing right side
 	if e.Op == expr.Range {
-		boundary := e.Right.(*expr.RangeBoundary)
+		boundary, ok := e.Right.(*expr.RangeBoundary)
+		if !ok {
+			return "", nil, fmt.Errorf("range operator requires *expr.RangeBoundary, got %T", e.Right)
+		}
 		str, rangeParams, err := b.renderRangeParam(left, boundary)
 		return str, append(lparams, rangeParams...), err
 	}
@@ -143,9 +152,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	// Regexp sub-expressions.
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
-		if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
-			s = s[1 : len(s)-1]
-		}
+		s = stripRegexpDelimiters(s)
 		return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
 	}
 
@@ -158,7 +165,10 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 
 	// Range: access typed boundary directly, skip serializing right side
 	if e.Op == expr.Range {
-		boundary := e.Right.(*expr.RangeBoundary)
+		boundary, ok := e.Right.(*expr.RangeBoundary)
+		if !ok {
+			return "", fmt.Errorf("range operator requires *expr.RangeBoundary, got %T", e.Right)
+		}
 		return b.renderRange(left, boundary)
 	}
 
@@ -169,9 +179,23 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 
 	// Standalone wildcard on a Like operator: `field:*`. Route through the
 	// dialect so each database can decide how to represent "any value".
-	// Positioned before paren-wrap to stay symmetric with RenderParam.
 	if right == "'*'" && e.Op == expr.Like {
 		return d.RenderStandaloneWild(left)
+	}
+
+	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect escape
+	// the wildcard pattern however it needs to. Positioned before paren-wrap
+	// to stay symmetric with RenderParam.
+	isRegex := false
+	if e.Op == expr.Like {
+		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
+			isRegex = true
+		}
+		if !isRegex && len(right) >= 2 && right[0] == '\'' && right[len(right)-1] == '\'' {
+			inner := right[1 : len(right)-1]
+			inner = d.EscapeLikePattern(inner)
+			right = "'" + inner + "'"
+		}
 	}
 
 	if e.Op != expr.Not &&
@@ -189,15 +213,6 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	}
 
 	if e.Op == expr.Like {
-		isRegex := false
-		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
-			isRegex = true
-		}
-		if !isRegex && len(right) >= 2 && right[0] == '\'' && right[len(right)-1] == '\'' {
-			inner := right[1 : len(right)-1]
-			inner = d.EscapeLikePattern(inner)
-			right = "'" + inner + "'"
-		}
 		return d.RenderLike(left, right, isRegex)
 	}
 
@@ -233,9 +248,7 @@ func (b Base) serialize(in any) (s string, err error) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
 			s, _ := v.Left.(string)
-			if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
-				s = s[1 : len(s)-1]
-			}
+			s = stripRegexpDelimiters(s)
 			return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
 		}
 		return b.Render(v)
@@ -273,10 +286,7 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
 			s, _ := v.Left.(string)
-			if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
-				s = s[1 : len(s)-1]
-			}
-			return "?", []any{s}, nil
+			return "?", []any{stripRegexpDelimiters(s)}, nil
 		}
 		return b.RenderParam(v)
 	case []*expr.Expression:
@@ -329,18 +339,18 @@ func extractBoundValue(bound any) (val any, unbounded bool) {
 }
 
 // formatRangeValue renders a range bound value as a SQL literal.
-func formatRangeValue(val any) string {
+func (b Base) formatRangeValue(val any) (string, error) {
 	switch v := val.(type) {
 	case int:
-		return strconv.Itoa(v)
+		return strconv.Itoa(v), nil
 	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64), nil
 	case string:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")), nil
 	case expr.Column:
-		return fmt.Sprintf(`"%s"`, string(v))
+		return b.dialect().QuoteColumn(string(v))
 	default:
-		return fmt.Sprintf("%v", v)
+		return fmt.Sprintf("%v", v), nil
 	}
 }
 
@@ -364,7 +374,10 @@ func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, er
 	}
 
 	if minUnbounded {
-		maxStr := formatRangeValue(maxVal)
+		maxStr, err := b.formatRangeValue(maxVal)
+		if err != nil {
+			return "", err
+		}
 		if inclusive {
 			return fmt.Sprintf("%s <= %s", left, maxStr), nil
 		}
@@ -372,15 +385,24 @@ func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, er
 	}
 
 	if maxUnbounded {
-		minStr := formatRangeValue(minVal)
+		minStr, err := b.formatRangeValue(minVal)
+		if err != nil {
+			return "", err
+		}
 		if inclusive {
 			return fmt.Sprintf("%s >= %s", left, minStr), nil
 		}
 		return fmt.Sprintf("%s > %s", left, minStr), nil
 	}
 
-	minStr := formatRangeValue(minVal)
-	maxStr := formatRangeValue(maxVal)
+	minStr, err := b.formatRangeValue(minVal)
+	if err != nil {
+		return "", err
+	}
+	maxStr, err := b.formatRangeValue(maxVal)
+	if err != nil {
+		return "", err
+	}
 
 	if isNumericBound(minVal) || isNumericBound(maxVal) {
 		if inclusive {

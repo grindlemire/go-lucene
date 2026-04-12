@@ -14,10 +14,6 @@ func TestSQLiteSQLEndToEnd(t *testing.T) {
 	}
 
 	tcs := map[string]tc{
-		// "single_literal": {
-		// 	input: "a",
-		// 	want:  `a`,
-		// },
 		"basic_equal": {
 			input: "a:b",
 			want:  `"a" = 'b'`,
@@ -420,10 +416,6 @@ func TestSQLiteParameterizedSQLEndToEnd(t *testing.T) {
 	}
 
 	tcs := map[string]tc{
-		// "single_literal": {
-		// 	input: "a",
-		// 	want:  `a`,
-		// },
 		"basic_equal": {
 			input:      "a:b",
 			wantStr:    `"a" = ?`,
