@@ -56,13 +56,18 @@ func (sqliteDialect) RenderStandaloneWild(left string) (string, error) {
 	return fmt.Sprintf("%s IS NOT NULL", left), nil
 }
 
-// EscapeLikePattern is the identity function for SQLite. Lucene's wildcard
-// syntax (* and ?) is already the same as GLOB's, so no translation is needed.
+// PrepareLikePattern is the identity function for SQLite. Lucene's wildcard
+// syntax (* and ?) is already the same as GLOB's, so no translation is needed,
+// and SQLite never falls back to regex based on pattern content.
 // Note that GLOB has no escape mechanism — patterns containing a literal * or ?
 // cannot be expressed via the wildcard form; users must fall back to the regex
 // form for that.
-func (sqliteDialect) EscapeLikePattern(pattern string) string {
-	return pattern
+func (sqliteDialect) PrepareLikePattern(pattern string) (string, bool) {
+	return pattern, false
+}
+
+func (sqliteDialect) EscapeStringLiteral(s string) string {
+	return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''"))
 }
 
 func (sqliteDialect) SerializeBool(b bool) string {
