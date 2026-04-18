@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/grindlemire/go-lucene.svg)](https://pkg.go.dev/github.com/grindlemire/go-lucene)
 
-Parse [Lucene](https://lucene.apache.org/core/9_4_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package.description) queries and turn them into SQL. No dependencies. PostgreSQL and SQLite work out of the box, and you can plug in your own dialect for anything else.
+Parse [Lucene](https://lucene.apache.org/core/9_4_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package.description) queries and turn them into SQL. No dependencies. PostgreSQL, SQLite, and MySQL work out of the box, and you can plug in your own dialect for anything else.
 
 ```go
 query := `name:"John Doe" AND age:[25 TO 35]`
@@ -17,6 +17,7 @@ sql, params, err := lucene.ToParameterizedPostgres(query)
 - [Usage](#usage)
 - [Operator reference](#operator-reference)
 - [SQLite](#sqlite)
+- [MySQL](#mysql)
 - [Custom drivers](#custom-drivers)
 
 ## Install
@@ -47,9 +48,17 @@ sql, params, err := lucene.ToParameterizedSQLite(`color:red AND type:"gala"`)
 // params: ["red", "gala"]
 ```
 
+MySQL also uses `?` placeholders and backtick-quoted identifiers:
+
+```go
+sql, params, err := lucene.ToParameterizedMySQL(`color:red AND type:"gala"`)
+// sql:    (`color` = ?) AND (`type` = ?)
+// params: ["red", "gala"]
+```
+
 ### Inline values
 
-If you don't need parameter binding (for example, when generating SQL for inspection), `ToPostgres` and `ToSQLite` embed values directly into the string:
+If you don't need parameter binding (for example, when generating SQL for inspection), `ToPostgres`, `ToSQLite`, and `ToMySQL` embed values directly into the string:
 
 ```go
 sql, err := lucene.ToPostgres(`name:"John Doe" AND age:[25 TO 35]`)
@@ -67,7 +76,7 @@ sql, err := lucene.ToPostgres(`red OR green`, lucene.WithDefaultField("color"))
 
 ## Operator reference
 
-Output below is Postgres. See [SQLite](#sqlite) for where SQLite differs.
+Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where those drivers differ.
 
 | Lucene | SQL | Notes |
 |---|---|---|
@@ -149,11 +158,57 @@ func init() {
 
 With `mattn/go-sqlite3`, build with the `sqlite_regex` tag.
 
+## MySQL
+
+MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL driver routes wildcards through `LIKE ... ESCAPE '#'` and falls back to `REGEXP` when a pattern uses SIMILAR-TO-only constructs (alternation, character classes, grouping):
+
+| Lucene | Postgres | MySQL |
+|---|---|---|
+| `field:value` | `"field" = 'value'` | `` `field` = 'value' `` |
+| `field:*` | `"field" SIMILAR TO '%'` | `` `field` IS NOT NULL `` |
+| `field:pat*` | `"field" SIMILAR TO 'pat%'` | `` `field` LIKE 'pat%' ESCAPE '#' `` |
+| `field:pat?` | `"field" SIMILAR TO 'pat_'` | `` `field` LIKE 'pat_' ESCAPE '#' `` |
+| `field:100%*` (literal `%`) | `"field" SIMILAR TO '100\%%'` | `` `field` LIKE '100#%%' ESCAPE '#' `` |
+| `field:*(a\|b)*` (passed via `expr.LIKE` — see note) | `"field" SIMILAR TO '%(a\|b)%'` | `` `field` REGEXP '^(?:.*(a\|b).*)$' `` |
+| `field:/regex/` | `"field" ~ 'regex'` | `` `field` REGEXP 'regex' `` |
+| bool literal `true` | `true` | `TRUE` |
+| parameters | `$1, $2, ...` | `?` |
+
+### Things to watch for
+
+**Identifiers always quote with backticks.** Column names containing a backtick are rejected at render time. The always-quote policy handles MySQL 8.0's expanded reserved-word list (`RANK`, `LEAD`, `WINDOW`, `ROWS`, etc.) automatically.
+
+**`LIKE` vs `REGEXP` is decided by pattern content.** Simple Lucene wildcards (`*`, `?`) stay on the index-friendly `LIKE` path. Patterns containing `|`, `()`, `[]`, `{}`, or `+` fall back to `REGEXP` with an anchored `^(?:...)$` translation so the match semantics line up with Postgres `SIMILAR TO`.
+
+**The `ESCAPE '#'` clause is intentional.** Using `#` instead of the default backslash keeps the rendered SQL portable across `sql_mode` settings — under `NO_BACKSLASH_ESCAPES`, a `\` escape clause would be reinterpreted and break the LIKE pattern.
+
+**Non-parameterized output is best-effort under `NO_BACKSLASH_ESCAPES`.** `ToMySQL` doubles backslashes in string literals (correct under the default `sql_mode`, portable under `NO_BACKSLASH_ESCAPES` in a harmless-but-literal way). If your server runs with `NO_BACKSLASH_ESCAPES`, use `ToParameterizedMySQL` — parameters travel over the wire protocol and bypass string-literal parsing entirely.
+
+**Case sensitivity follows the column collation.** `LIKE` and `REGEXP` honor the operand collation: a `_ci` collation matches case-insensitively, `_bin` matches case-sensitively. The driver can't fix this without parsing column metadata; if you need explicit casing, attach `BINARY` or `COLLATE` in your query.
+
+**Regex engine differs between MySQL 5.7 and 8.0.** 5.7 uses Henry Spencer POSIX regex; 8.0+ uses ICU. Perl-style escapes (`\d`, `\w`, `\s`) work on 8.0 but not on 5.7. For portability across versions use POSIX bracket classes (`[[:digit:]]`, `[[:space:]]`, `[[:alnum:]_]`).
+
+**Booleans render as `TRUE`/`FALSE` in SQL and pass through as Go `bool` as a parameter.** Both forms evaluate to `1`/`0` in MySQL. Against a `TINYINT(1)` column storing values other than 0 or 1, `col = TRUE` won't match those rows because `TRUE` is exactly `1` — this is a MySQL data-modeling quirk, not a driver bug.
+
 ## Custom drivers
 
-To target a database other than Postgres or SQLite, embed `driver.Base` and supply a `Dialect` that matches your database's semantics. The dialect covers the operators that actually vary between databases (wildcards, regex, standalone `*`, bool literals, identifier quoting); the simple operators (`AND`, `OR`, `=`, comparisons, `IN`, `NOT`) are handled by `driver.Base` through the shared `RenderFNs` map.
+To target a database other than Postgres, SQLite, or MySQL, embed `driver.Base` and supply a `Dialect` that matches your database's semantics. The dialect covers the operators that actually vary between databases (wildcards, regex, standalone `*`, bool literals, string-literal escaping, identifier quoting); the simple operators (`AND`, `OR`, `=`, comparisons, `IN`, `NOT`) are handled by `driver.Base` through the shared `RenderFNs` map.
 
-Here's a MySQL driver. MySQL uses backticks for identifiers, `LIKE` (not `SIMILAR TO`) for wildcards, and `REGEXP` for regex:
+The `Dialect` interface has seven methods:
+
+```go
+type Dialect interface {
+    RenderLike(left, right string, isRegex bool) (string, error)
+    RenderStandaloneWild(left string) (string, error)
+    PrepareLikePattern(pattern string) (transformed string, useRegex bool)
+    EscapeStringLiteral(s string) string
+    SerializeBool(b bool) string
+    BoolParam(b bool) any
+    QuoteColumn(name string) (string, error)
+}
+```
+
+Here's a sketch of a SQL Server dialect. SQL Server uses `[...]` for identifiers, `LIKE` with `%`/`_` for wildcards, no built-in regex:
 
 ```go
 import (
@@ -161,76 +216,72 @@ import (
     "strings"
 
     "github.com/grindlemire/go-lucene/pkg/driver"
+    "github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
-type MySQLDriver struct {
+type SQLServerDriver struct {
     driver.Base
 }
 
-func NewMySQLDriver() MySQLDriver {
+func NewSQLServerDriver() SQLServerDriver {
     fns := map[expr.Operator]driver.RenderFN{}
     for op, sharedFN := range driver.Shared {
         fns[op] = sharedFN
     }
-    return MySQLDriver{
-        Base: driver.Base{
-            RenderFNs: fns,
-            Dialect:   mysqlDialect{},
-        },
+    return SQLServerDriver{
+        Base: driver.Base{RenderFNs: fns, Dialect: sqlServerDialect{}},
     }
 }
 
-type mysqlDialect struct{}
+type sqlServerDialect struct{}
 
-func (mysqlDialect) RenderLike(left, right string, isRegex bool) (string, error) {
+func (sqlServerDialect) RenderLike(left, right string, isRegex bool) (string, error) {
     if isRegex {
-        return fmt.Sprintf("%s REGEXP %s", left, right), nil
+        return "", fmt.Errorf("SQL Server has no built-in regex operator")
     }
     return fmt.Sprintf("%s LIKE %s", left, right), nil
 }
 
-func (mysqlDialect) RenderStandaloneWild(left string) (string, error) {
+func (sqlServerDialect) RenderStandaloneWild(left string) (string, error) {
     return fmt.Sprintf("%s IS NOT NULL", left), nil
 }
 
-// Lucene * and ? map onto SQL LIKE's % and _.
-func (mysqlDialect) EscapeLikePattern(pattern string) string {
-    r := strings.NewReplacer("*", "%", "?", "_")
-    return r.Replace(pattern)
+func (sqlServerDialect) PrepareLikePattern(pattern string) (string, bool) {
+    // SQL Server LIKE uses % and _ like SIMILAR TO; escape literals with [].
+    pattern = strings.ReplaceAll(pattern, "%", "[%]")
+    pattern = strings.ReplaceAll(pattern, "_", "[_]")
+    pattern = strings.ReplaceAll(pattern, "*", "%")
+    pattern = strings.ReplaceAll(pattern, "?", "_")
+    return pattern, false
 }
 
-func (mysqlDialect) SerializeBool(b bool) string {
+func (sqlServerDialect) EscapeStringLiteral(s string) string {
+    return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func (sqlServerDialect) SerializeBool(b bool) string {
     if b {
         return "1"
     }
     return "0"
 }
 
-func (mysqlDialect) BoolParam(b bool) any {
+func (sqlServerDialect) BoolParam(b bool) any {
     if b {
         return 1
     }
     return 0
 }
 
-func (mysqlDialect) QuoteColumn(name string) (string, error) {
-    if strings.ContainsRune(name, '`') {
-        return "", fmt.Errorf("column name contains a backtick: %q", name)
+func (sqlServerDialect) QuoteColumn(name string) (string, error) {
+    if strings.ContainsRune(name, ']') {
+        return "", fmt.Errorf("column name contains a right bracket: %q", name)
     }
-    return "`" + name + "`", nil
+    return "[" + name + "]", nil
 }
 ```
 
-Usage:
-
-```go
-d := NewMySQLDriver()
-e, _ := lucene.Parse(`name:John* AND active:true`)
-sql, _ := d.Render(e)
-// (`name` LIKE 'John%') AND (`active` = 1)
-```
-
-The built-in `SQLiteDriver` ([pkg/driver/sqlite.go](pkg/driver/sqlite.go)) is another reference implementation worth reading.
+The three built-in drivers are the best reference implementations: [`pkg/driver/postgresql.go`](pkg/driver/postgresql.go), [`pkg/driver/sqlite.go`](pkg/driver/sqlite.go), and [`pkg/driver/mysql.go`](pkg/driver/mysql.go).
 
 ### Dialect defaults
 
@@ -238,4 +289,6 @@ A driver that leaves `driver.Base.Dialect` unset inherits Postgres-flavored rend
 
 ### Migrating from pre-Dialect drivers
 
-`expr.Like`, `expr.Range`, and `expr.Regexp` are no longer dispatched through `RenderFNs`. If a custom driver used to override any of those three through the map, move the logic into a `driver.Dialect` implementation (`RenderLike`, `RenderStandaloneWild`, `EscapeLikePattern`) and set it on `Base.Dialect`. Map entries for those operators are silently ignored.
+`expr.Like`, `expr.Range`, and `expr.Regexp` are no longer dispatched through `RenderFNs`. If a custom driver used to override any of those three through the map, move the logic into a `driver.Dialect` implementation (`RenderLike`, `RenderStandaloneWild`, `PrepareLikePattern`) and set it on `Base.Dialect`. Map entries for those operators are silently ignored.
+
+The `Dialect` interface evolved across releases: `EscapeLikePattern` was replaced by `PrepareLikePattern` (which additionally returns a `useRegex` flag so dialects can route alternation/grouping patterns to a regex path), and `EscapeStringLiteral` was added so dialects can control string-literal quoting (MySQL needs this to double backslashes under default `sql_mode`).
