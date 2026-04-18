@@ -208,3 +208,5 @@ filter, _ := mysqlDriver.Render(expr)
 ```
 
 **Note on dialect behavior:** A custom driver that leaves `driver.Base.Dialect` unset inherits Postgres-flavored rendering for Like, Range, standalone wildcards, pattern escaping, and bool literals. That means `field:pat*` renders as `SIMILAR TO 'pat%'`, `field:/regex/` renders with `~`, `field:*` renders as `SIMILAR TO '%'`, and bool literals render as `true`/`false`. If your target database needs different semantics, supply your own `driver.Dialect` implementation on the embedded `Base`. The built-in `SQLiteDriver` is a reference example: it sets a `Dialect` that emits `GLOB`, `REGEXP`, `IS NOT NULL`, and `1`/`0` respectively.
+
+**Migrating from pre-Dialect custom drivers:** `expr.Like`, `expr.Range`, and `expr.Regexp` are no longer dispatched through `RenderFNs`. If your custom driver previously overrode any of those three ops via the map, move that logic into a `driver.Dialect` implementation (`RenderLike`, `RenderStandaloneWild`, `EscapeLikePattern`) and set it on `Base.Dialect`. Overrides in `RenderFNs` for those ops are silently ignored.

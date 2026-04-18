@@ -17,8 +17,15 @@ func stripRegexpDelimiters(s string) string {
 	return s
 }
 
-// Shared is the shared set of render functions that can be used as a base and overriden
-// for each flavor of sql
+// Shared is the set of render functions for operators whose SQL is identical
+// across dialects (And, Or, Not, Equals, comparisons, In, List, Must, Wild).
+// Custom drivers embed these by copying Shared into their RenderFNs map.
+//
+// Database-specific operators — Like, Range, and Regexp — are intentionally
+// not in this map. They are dispatched through the Dialect interface
+// (for Like) or handled directly by Base (for Range and Regexp), so custom
+// drivers customize them by providing a Dialect implementation rather than
+// by overriding a RenderFN entry.
 var Shared = map[expr.Operator]RenderFN{
 	expr.Literal:   literal,
 	expr.And:       basicCompound(expr.And),
