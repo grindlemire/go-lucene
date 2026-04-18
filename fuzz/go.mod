@@ -1,6 +1,6 @@
 module github.com/grindlemire/go-lucene/fuzz
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/grindlemire/go-lucene v0.0.14

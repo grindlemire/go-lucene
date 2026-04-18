@@ -6,9 +6,12 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
-const errTemplate = "%s:\n    wanted %s\n    got    %s"
+// NOTE: GLOB does not support alternation. A wildcard pattern like *(b|d)*
+// matches the literal characters (b|d) in SQLite, whereas Postgres SIMILAR TO
+// treats it as alternation matching 'b' or 'd'. This is an inherent GLOB
+// limitation documented in the README.
 
-func TestSQLDriver(t *testing.T) {
+func TestSQLiteDriver(t *testing.T) {
 	type tc struct {
 		input *expr.Expression
 		want  string
@@ -31,9 +34,13 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.NOT(expr.Eq("a", 1)),
 			want:  `NOT("a" = 1)`,
 		},
-		"simple_like": {
-			input: expr.LIKE("a", "*(b|d)*"),
-			want:  `"a" SIMILAR TO '%(b|d)%'`,
+		"simple_like_glob": {
+			input: expr.LIKE("a", "b*"),
+			want:  `"a" GLOB 'b*'`,
+		},
+		"simple_like_question": {
+			input: expr.LIKE("a", "b?z"),
+			want:  `"a" GLOB 'b?z'`,
 		},
 		"string_range_inclusive": {
 			input: expr.Rang("a", "foo", "bar", true),
@@ -130,17 +137,9 @@ func TestSQLDriver(t *testing.T) {
 		"nested_filter": {
 			input: expr.Expr(
 				expr.Expr(
-					expr.Expr(
-						"a",
-						expr.Equals,
-						"foo",
-					),
+					expr.Expr("a", expr.Equals, "foo"),
 					expr.Or,
-					expr.Expr(
-						"b",
-						expr.Equals,
-						expr.REGEXP("/b*ar/"),
-					),
+					expr.Expr("b", expr.Equals, expr.REGEXP("/b*ar/")),
 				),
 				expr.And,
 				expr.Expr(
@@ -148,7 +147,7 @@ func TestSQLDriver(t *testing.T) {
 					expr.Not,
 				),
 			),
-			want: `(("a" = 'foo') OR ("b" ~ 'b*ar')) AND (NOT("c" > 'aaa'))`,
+			want: `(("a" = 'foo') OR ("b" REGEXP 'b*ar')) AND (NOT("c" > 'aaa'))`,
 		},
 		"space_in_fieldname": {
 			input: expr.Eq("a b", 1),
@@ -164,31 +163,90 @@ func TestSQLDriver(t *testing.T) {
 		},
 		"like_with_literal_percent": {
 			input: expr.LIKE("field", "100%*"),
-			want:  `"field" SIMILAR TO '100\%%'`,
+			want:  `"field" GLOB '100%*'`,
 		},
 		"like_with_literal_underscore": {
 			input: expr.LIKE("field", "foo_bar*"),
-			want:  `"field" SIMILAR TO 'foo\_bar%'`,
+			want:  `"field" GLOB 'foo_bar*'`,
 		},
 		"like_without_special_chars": {
 			input: expr.LIKE("field", "clean*"),
-			want:  `"field" SIMILAR TO 'clean%'`,
+			want:  `"field" GLOB 'clean*'`,
 		},
 		"like_percent_and_underscore_mixed": {
 			input: expr.LIKE("field", "100%_test*"),
-			want:  `"field" SIMILAR TO '100\%\_test%'`,
+			want:  `"field" GLOB '100%_test*'`,
+		},
+		"bool_true": {
+			input: expr.Eq("active", true),
+			want:  `"active" = 1`,
+		},
+		"bool_false": {
+			input: expr.Eq("active", false),
+			want:  `"active" = 0`,
 		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
-			got, err := NewPostgresDriver().Render(tc.input)
+			got, err := NewSQLiteDriver().Render(tc.input)
 			if err != nil {
 				t.Fatalf("got an unexpected error when rendering: %v", err)
 			}
-
 			if tc.want != got {
 				t.Fatalf(errTemplate, "generated sql does not match", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestSQLiteDriverParam(t *testing.T) {
+	type tc struct {
+		input      *expr.Expression
+		wantStr    string
+		wantParams []any
+	}
+
+	tcs := map[string]tc{
+		"bool_true_param": {
+			input:      expr.Eq("active", true),
+			wantStr:    `"active" = ?`,
+			wantParams: []any{1},
+		},
+		"bool_false_param": {
+			input:      expr.Eq("active", false),
+			wantStr:    `"active" = ?`,
+			wantParams: []any{0},
+		},
+		"string_range_inclusive_param": {
+			input:      expr.Rang("a", "foo", "bar", true),
+			wantStr:    `"a" BETWEEN ? AND ?`,
+			wantParams: []any{"foo", "bar"},
+		},
+		"string_range_exclusive_param": {
+			input:      expr.Rang("a", "foo", "bar", false),
+			wantStr:    `"a" > ? AND "a" < ?`,
+			wantParams: []any{"foo", "bar"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			gotStr, gotParams, err := NewSQLiteDriver().RenderParam(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotStr != tc.wantStr {
+				t.Fatalf(errTemplate, "generated sql does not match", tc.wantStr, gotStr)
+			}
+			if len(gotParams) != len(tc.wantParams) {
+				t.Fatalf("param count: want %d, got %d", len(tc.wantParams), len(gotParams))
+			}
+			for i := range gotParams {
+				if gotParams[i] != tc.wantParams[i] {
+					t.Fatalf("param[%d]: want %v (%T), got %v (%T)",
+						i, tc.wantParams[i], tc.wantParams[i], gotParams[i], gotParams[i])
+				}
 			}
 		})
 	}
