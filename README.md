@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/grindlemire/go-lucene.svg)](https://pkg.go.dev/github.com/grindlemire/go-lucene)
 
-Parse [Lucene](https://lucene.apache.org/core/9_4_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package.description) queries and turn them into SQL. No dependencies. PostgreSQL, SQLite, and MySQL work out of the box, and you can plug in your own dialect for anything else.
+Parse [Lucene](https://lucene.apache.org/core/9_4_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package.description) queries and turn them into SQL. No dependencies. PostgreSQL, SQLite, MySQL, and MariaDB work out of the box, and you can plug in your own dialect for anything else.
 
 ```go
 query := `name:"John Doe" AND age:[25 TO 35]`
@@ -169,7 +169,7 @@ MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | `` `field` LIKE 'pat%' ESCAPE '#' `` |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | `` `field` LIKE 'pat_' ESCAPE '#' `` |
 | `field:100%*` (literal `%`) | `"field" SIMILAR TO '100\%%'` | `` `field` LIKE '100#%%' ESCAPE '#' `` |
-| `field:*(a\|b)*` (passed via `expr.LIKE` — see note) | `"field" SIMILAR TO '%(a\|b)%'` | `` `field` REGEXP '^(?:.*(a\|b).*)$' `` |
+| `field:*(a\|b)*` (passed via `expr.LIKE`, see note) | `"field" SIMILAR TO '%(a\|b)%'` | `` `field` REGEXP '^(.*(a\|b).*)$' `` |
 | `field:/regex/` | `"field" ~ 'regex'` | `` `field` REGEXP 'regex' `` |
 | bool literal `true` | `true` | `TRUE` |
 | parameters | `$1, $2, ...` | `?` |
@@ -178,17 +178,29 @@ MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL
 
 **Identifiers always quote with backticks.** Column names containing a backtick are rejected at render time. The always-quote policy handles MySQL 8.0's expanded reserved-word list (`RANK`, `LEAD`, `WINDOW`, `ROWS`, etc.) automatically.
 
-**`LIKE` vs `REGEXP` is decided by pattern content.** Simple Lucene wildcards (`*`, `?`) stay on the index-friendly `LIKE` path. Patterns containing `|`, `()`, `[]`, `{}`, or `+` fall back to `REGEXP` with an anchored `^(?:...)$` translation so the match semantics line up with Postgres `SIMILAR TO`.
+**`LIKE` vs `REGEXP` is decided by pattern content.** Simple Lucene wildcards (`*`, `?`) stay on the index-friendly `LIKE` path. Patterns containing `|`, `()`, `[]`, `{}`, or `+` fall back to `REGEXP` with an anchored `^(...)$` translation so the match semantics line up with Postgres `SIMILAR TO`. A plain capturing group is used rather than `(?:...)` because the non-capturing form is a Perl extension that POSIX ERE (MySQL 5.7 / MariaDB 10.0-10.4) does not guarantee.
 
-**The `ESCAPE '#'` clause is intentional.** Using `#` instead of the default backslash keeps the rendered SQL portable across `sql_mode` settings — under `NO_BACKSLASH_ESCAPES`, a `\` escape clause would be reinterpreted and break the LIKE pattern.
+**The `ESCAPE '#'` clause is intentional.** Using `#` instead of the default backslash keeps the rendered SQL portable across `sql_mode` settings. Under `NO_BACKSLASH_ESCAPES`, a `\` escape clause would be reinterpreted and break the LIKE pattern.
 
-**Non-parameterized output is best-effort under `NO_BACKSLASH_ESCAPES`.** `ToMySQL` doubles backslashes in string literals (correct under the default `sql_mode`, portable under `NO_BACKSLASH_ESCAPES` in a harmless-but-literal way). If your server runs with `NO_BACKSLASH_ESCAPES`, use `ToParameterizedMySQL` — parameters travel over the wire protocol and bypass string-literal parsing entirely.
+**Non-parameterized output is best-effort under `NO_BACKSLASH_ESCAPES`.** `ToMySQL` doubles backslashes in string literals (correct under the default `sql_mode`, portable under `NO_BACKSLASH_ESCAPES` in a harmless-but-literal way). If your server runs with `NO_BACKSLASH_ESCAPES`, use `ToParameterizedMySQL` instead: parameters travel over the wire protocol and bypass string-literal parsing entirely.
 
 **Case sensitivity follows the column collation.** `LIKE` and `REGEXP` honor the operand collation: a `_ci` collation matches case-insensitively, `_bin` matches case-sensitively. The driver can't fix this without parsing column metadata; if you need explicit casing, attach `BINARY` or `COLLATE` in your query.
 
-**Regex engine differs between MySQL 5.7 and 8.0.** 5.7 uses Henry Spencer POSIX regex; 8.0+ uses ICU. Perl-style escapes (`\d`, `\w`, `\s`) work on 8.0 but not on 5.7. For portability across versions use POSIX bracket classes (`[[:digit:]]`, `[[:space:]]`, `[[:alnum:]_]`).
+**Regex engine varies by database and version.** MySQL 5.7 and MariaDB 10.0-10.4 use Henry Spencer POSIX regex. MySQL 8.0+ uses ICU. MariaDB 10.5+ uses PCRE2. Perl-style escapes (`\d`, `\w`, `\s`) work on ICU and PCRE2 but not on Henry Spencer. For portability across all four, use POSIX bracket classes (`[[:digit:]]`, `[[:space:]]`, `[[:alnum:]_]`).
 
-**Booleans render as `TRUE`/`FALSE` in SQL and pass through as Go `bool` as a parameter.** Both forms evaluate to `1`/`0` in MySQL. Against a `TINYINT(1)` column storing values other than 0 or 1, `col = TRUE` won't match those rows because `TRUE` is exactly `1` — this is a MySQL data-modeling quirk, not a driver bug.
+**Booleans render as `TRUE`/`FALSE` in SQL and pass through as Go `bool` as a parameter.** Both forms evaluate to `1`/`0` in MySQL. Against a `TINYINT(1)` column storing values other than 0 or 1, `col = TRUE` won't match those rows because `TRUE` is exactly `1`. That's a MySQL data-modeling quirk, not a driver bug.
+
+### MariaDB
+
+MariaDB uses the same driver. `lucene.ToMariaDB` and `lucene.ToParameterizedMariaDB` are aliases over the MySQL renderers.
+
+```go
+sql, params, err := lucene.ToParameterizedMariaDB(`color:red AND type:"gala"`)
+// sql:    (`color` = ?) AND (`type` = ?)
+// params: ["red", "gala"]
+```
+
+Every construct the driver emits (backtick quoting, `LIKE ... ESCAPE`, `REGEXP`, `BETWEEN`, `?` placeholders, bool literals) is identical on both databases, and the regex fallback avoids Perl extensions so it runs on every regex engine either database has shipped. No new dialect is needed; the MySQL test suite covers MariaDB by swapping `MYSQL_IMAGE=mariadb:10.x`.
 
 ## Custom drivers
 
