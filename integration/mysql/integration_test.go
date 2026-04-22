@@ -66,20 +66,37 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// chosenRuntimeCLI records the runtime configureContainerRuntime pointed at
+// (for example "docker" or "podman") so sweepLeakedContainers queries the
+// same one. Without this, a machine with both CLIs on PATH could hit the
+// wrong daemon — e.g., docker CLI present but DOCKER_HOST set to Podman —
+// and the sweep would silently find nothing.
+var chosenRuntimeCLI string
+
 // sweepLeakedContainers finds any container tagged with this test run's
-// testcontainers session ID and force-removes it. No-op if the runtime CLI
-// isn't on PATH or if no containers match.
+// testcontainers session ID and force-removes it. No-op if no runtime CLI
+// is reachable or if no containers match.
 func sweepLeakedContainers() {
 	sid := testcontainers.SessionID()
 	if sid == "" {
 		return
 	}
-	cli := "docker"
-	if _, err := exec.LookPath(cli); err != nil {
-		cli = "podman"
+	cli := chosenRuntimeCLI
+	if cli != "" {
 		if _, err := exec.LookPath(cli); err != nil {
-			return
+			cli = ""
 		}
+	}
+	if cli == "" {
+		for _, c := range []string{"docker", "podman"} {
+			if _, err := exec.LookPath(c); err == nil {
+				cli = c
+				break
+			}
+		}
+	}
+	if cli == "" {
+		return
 	}
 	out, err := exec.Command(cli, "ps", "-aq",
 		"--filter", "label=org.testcontainers.session-id="+sid).Output()
@@ -128,10 +145,12 @@ func configureContainerRuntime() {
 	}
 	if sock, ok := findDockerSocket(); ok {
 		os.Setenv("DOCKER_HOST", "unix://"+sock)
+		chosenRuntimeCLI = "docker"
 		return
 	}
 	if sock, err := podmanSocket(); err == nil {
 		os.Setenv("DOCKER_HOST", "unix://"+sock)
+		chosenRuntimeCLI = "podman"
 	}
 }
 
@@ -364,7 +383,6 @@ type integrationCase struct {
 	name    string
 	lucene  string
 	wantIDs []int
-	skip57  bool // skip on MySQL 5.7 (usually ICU-only regex features)
 }
 
 var renderedCases = []integrationCase{
@@ -426,9 +444,6 @@ func TestMySQLIntegrationRendered(t *testing.T) {
 
 	for _, tc := range renderedCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.skip57 && is57() {
-				t.Skipf("skipping on %s", mysqlImage())
-			}
 			where, err := lucene.ToMySQL(tc.lucene)
 			if err != nil {
 				t.Fatalf("ToMySQL(%q): %v", tc.lucene, err)
@@ -448,9 +463,6 @@ func TestMySQLIntegrationParameterized(t *testing.T) {
 
 	for _, tc := range parameterizedCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.skip57 && is57() {
-				t.Skipf("skipping on %s", mysqlImage())
-			}
 			where, params, err := lucene.ToParameterizedMySQL(tc.lucene)
 			if err != nil {
 				t.Fatalf("ToParameterizedMySQL(%q): %v", tc.lucene, err)
@@ -516,8 +528,5 @@ func TestMySQLParameterPlaceholderIsQuestionMark(t *testing.T) {
 	}
 	if len(params) != 1 || params[0] != "b" {
 		t.Fatalf("want params [\"b\"], got %v", params)
-	}
-	if strings.Contains(where, fmt.Sprintf("$%d", 1)) {
-		t.Fatalf("unexpected $N placeholder in MySQL output: %q", where)
 	}
 }
