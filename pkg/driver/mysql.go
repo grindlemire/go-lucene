@@ -16,7 +16,7 @@ import (
 //     LIKE ... ESCAPE '#' (sql_mode-portable: works under default mode,
 //     ANSI_QUOTES, and NO_BACKSLASH_ESCAPES).
 //   - Wildcard patterns that contain |, (), [], {}, or + render as REGEXP
-//     with an anchored ^(?:...)$ translation so the matching semantics line
+//     with an anchored ^(...)$ translation so the matching semantics line
 //     up with the Postgres SIMILAR TO path.
 //   - Regex (/pattern/) renders as REGEXP.
 //   - Standalone `field:*` renders as "`field` IS NOT NULL".
@@ -90,15 +90,19 @@ func luceneWildcardToLike(pattern string) string {
 // contain SIMILAR-TO-style alternation, grouping, or character classes) into
 // an anchored POSIX regex.
 //
-// The body is wrapped in a non-capturing group `^(?:...)$` so the anchors
-// apply to the whole pattern. Without the group, raw alternation like
-// `foo|bar` would parse as `(^foo)|(bar$)` because `|` has lower precedence
-// than the anchors in POSIX regex — diverging from the Postgres SIMILAR TO
-// whole-string semantics this method preserves.
+// The body is wrapped in a capturing group `^(...)$` so the anchors apply
+// to the whole pattern. Without the group, raw alternation like `foo|bar`
+// would parse as `(^foo)|(bar$)` because `|` has lower precedence than the
+// anchors in POSIX regex — diverging from the Postgres SIMILAR TO
+// whole-string semantics this method preserves. A capturing group (rather
+// than a non-capturing `(?:...)`) is used because the latter is a Perl
+// extension not guaranteed by POSIX ERE; MySQL 5.7's Henry Spencer engine
+// may reject it. The capture is unused so the extra allocation is
+// negligible.
 func luceneWildcardToRegex(pattern string) string {
 	var b strings.Builder
 	b.Grow(len(pattern) + 8)
-	b.WriteString("^(?:")
+	b.WriteString("^(")
 	for _, r := range pattern {
 		switch r {
 		case '*':

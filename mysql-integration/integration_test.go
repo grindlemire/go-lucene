@@ -190,6 +190,13 @@ var renderedCases = []integrationCase{
 	// Regex literal: explicit /regex/ syntax. POSIX bracket class works on
 	// both 5.7 and 8.0.
 	{name: "regexp_literal", lucene: `name:/^[ab].*/`, wantIDs: []int{1, 2}},
+	// Wildcard pattern containing a character class `[ab]` forces the
+	// LIKE→REGEXP fallback (pkg/driver/mysql.go:luceneWildcardToRegex).
+	// Exercises the anchored ^(...)$ wrapper on both 8.0 (ICU) and 5.7
+	// (Henry Spencer POSIX) — the capturing group form works on both
+	// engines; non-capturing `(?:...)` would not be guaranteed on 5.7.
+	// Lucene requires escaping `[` and `]` in a value position.
+	{name: "like_fallback_char_class", lucene: `name:\[ab\]*`, wantIDs: []int{1, 2}},
 	// Reserved-word column name: exercises always-backtick policy.
 	// `rank` is a reserved word in MySQL 8.0.
 	{name: "reserved_word_column", lucene: `rank:>=50`, wantIDs: []int{5, 6, 7}},

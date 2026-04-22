@@ -9,7 +9,7 @@ import (
 // NOTE: MySQL's LIKE does not support alternation, character classes, or
 // grouping. Lucene wildcard patterns containing |, (), [], {}, or + are
 // routed through PrepareLikePattern to the REGEXP path with an anchored
-// ^(?:...)$ translation so the match semantics line up with Postgres
+// ^(...)$ translation so the match semantics line up with Postgres
 // SIMILAR TO.
 
 func TestMySQLDriver(t *testing.T) {
@@ -180,19 +180,19 @@ func TestMySQLDriver(t *testing.T) {
 		},
 		"like_with_alternation": {
 			input: expr.LIKE("a", "*(b|d)*"),
-			want:  "`a` REGEXP '^(?:.*(b|d).*)$'",
+			want:  "`a` REGEXP '^(.*(b|d).*)$'",
 		},
 		"like_with_char_class": {
 			input: expr.LIKE("a", "foo[abc]*"),
-			want:  "`a` REGEXP '^(?:foo[abc].*)$'",
+			want:  "`a` REGEXP '^(foo[abc].*)$'",
 		},
 		"like_with_grouping": {
 			input: expr.LIKE("a", "(foo)*"),
-			want:  "`a` REGEXP '^(?:(foo).*)$'",
+			want:  "`a` REGEXP '^((foo).*)$'",
 		},
 		"like_regex_preserves_literal_underscore": {
 			input: expr.LIKE("a", "foo_bar|baz"),
-			want:  "`a` REGEXP '^(?:foo_bar|baz)$'",
+			want:  "`a` REGEXP '^(foo_bar|baz)$'",
 		},
 		"string_with_backslash": {
 			input: expr.Eq("path", `c:\foo\bar`),
@@ -256,7 +256,7 @@ func TestMySQLDriverParam(t *testing.T) {
 		"like_alternation_param": {
 			input:      expr.LIKE("a", "*(b|d)*"),
 			wantStr:    "`a` REGEXP ?",
-			wantParams: []any{"^(?:.*(b|d).*)$"},
+			wantParams: []any{"^(.*(b|d).*)$"},
 		},
 		"like_plain_wildcard_param": {
 			input:      expr.LIKE("a", "b*"),
