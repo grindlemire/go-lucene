@@ -3,6 +3,6 @@ go 1.25.0
 use (
 	.
 	./fuzz
-	./mysql-integration
-	./sqlite-integration
+	./integration/mysql
+	./integration/sqlite
 )

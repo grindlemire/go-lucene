@@ -1,8 +1,8 @@
-module github.com/grindlemire/go-lucene/mysql-integration
+module github.com/grindlemire/go-lucene/integration/mysql
 
 go 1.25.0
 
-replace github.com/grindlemire/go-lucene => ..
+replace github.com/grindlemire/go-lucene => ../..
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1
