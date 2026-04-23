@@ -107,14 +107,21 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	}
 
 	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect escape
-	// the wildcard pattern however it needs to.
+	// the wildcard pattern however it needs to. The dialect may additionally
+	// signal via PrepareLikePattern that a wildcard pattern should be rendered
+	// through the regex path (MySQL does this for patterns containing
+	// alternation, grouping, or character classes).
 	isRegex := false
 	if e.Op == expr.Like {
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
 			isRegex = true
 		}
 		if !isRegex && len(rparams) > 0 {
-			rparams[0] = d.EscapeLikePattern(rparams[0].(string))
+			transformed, useRegex := d.PrepareLikePattern(rparams[0].(string))
+			rparams[0] = transformed
+			if useRegex {
+				isRegex = true
+			}
 		}
 	}
 
@@ -159,8 +166,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	// Regexp sub-expressions.
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
-		s = stripRegexpDelimiters(s)
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
+		return b.dialect().EscapeStringLiteral(stripRegexpDelimiters(s)), nil
 	}
 
 	d := b.dialect()
@@ -190,9 +196,9 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return d.RenderStandaloneWild(left)
 	}
 
-	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect escape
-	// the wildcard pattern however it needs to. Positioned before paren-wrap
-	// to stay symmetric with RenderParam.
+	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect transform
+	// the pattern and optionally flip to the regex path. Positioned before
+	// paren-wrap to stay symmetric with RenderParam.
 	isRegex := false
 	if e.Op == expr.Like {
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
@@ -200,8 +206,11 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		}
 		if !isRegex && len(right) >= 2 && right[0] == '\'' && right[len(right)-1] == '\'' {
 			inner := right[1 : len(right)-1]
-			inner = d.EscapeLikePattern(inner)
-			right = "'" + inner + "'"
+			transformed, useRegex := d.PrepareLikePattern(inner)
+			right = "'" + transformed + "'"
+			if useRegex {
+				isRegex = true
+			}
 		}
 	}
 
@@ -255,8 +264,7 @@ func (b Base) serialize(in any) (s string, err error) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
 			s, _ := v.Left.(string)
-			s = stripRegexpDelimiters(s)
-			return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
+			return b.dialect().EscapeStringLiteral(stripRegexpDelimiters(s)), nil
 		}
 		return b.Render(v)
 	case []*expr.Expression:
@@ -275,8 +283,7 @@ func (b Base) serialize(in any) (s string, err error) {
 		}
 		return b.dialect().QuoteColumn(string(v))
 	case string:
-		// escape single quotes with double single quotes
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")), nil
+		return b.dialect().EscapeStringLiteral(v), nil
 	case bool:
 		return b.dialect().SerializeBool(v), nil
 	default:
@@ -353,7 +360,7 @@ func (b Base) formatRangeValue(val any) (string, error) {
 	case float64:
 		return strconv.FormatFloat(v, 'f', -1, 64), nil
 	case string:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")), nil
+		return b.dialect().EscapeStringLiteral(v), nil
 	case expr.Column:
 		return b.dialect().QuoteColumn(string(v))
 	default:

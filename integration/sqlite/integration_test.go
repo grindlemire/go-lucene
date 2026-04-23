@@ -10,6 +10,7 @@ package integration
 import (
 	"database/sql"
 	"database/sql/driver"
+	"os"
 	"regexp"
 	"testing"
 
@@ -20,6 +21,23 @@ import (
 
 	sqlitelib "modernc.org/sqlite"
 )
+
+// isIntegrationRun reports whether the INTEGRATION env var is set to a
+// truthy value.
+func isIntegrationRun() bool {
+	switch os.Getenv("INTEGRATION") {
+	case "1", "true", "TRUE", "yes", "YES":
+		return true
+	}
+	return false
+}
+
+func requireIntegration(t *testing.T) {
+	t.Helper()
+	if !isIntegrationRun() {
+		t.Skip("set INTEGRATION=1 to run integration tests")
+	}
+}
 
 func init() {
 	// Register a SQL function named "regexp" so SQLite's REGEXP operator
@@ -113,6 +131,7 @@ func equalInts(a, b []int) bool {
 }
 
 func TestSQLiteIntegrationRendered(t *testing.T) {
+	requireIntegration(t)
 	db := openTestDB(t)
 
 	cases := []struct {
@@ -166,6 +185,7 @@ func TestSQLiteIntegrationRendered(t *testing.T) {
 }
 
 func TestSQLiteIntegrationParameterized(t *testing.T) {
+	requireIntegration(t)
 	db := openTestDB(t)
 
 	cases := []struct {

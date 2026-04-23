@@ -1,8 +1,8 @@
-module github.com/grindlemire/go-lucene/sqlite-integration
+module github.com/grindlemire/go-lucene/integration/sqlite
 
 go 1.25.0
 
-replace github.com/grindlemire/go-lucene => ..
+replace github.com/grindlemire/go-lucene => ../..
 
 require (
 	github.com/grindlemire/go-lucene v0.0.0

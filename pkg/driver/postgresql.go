@@ -70,12 +70,16 @@ func (postgresDialect) RenderStandaloneWild(left string) (string, error) {
 	return fmt.Sprintf("%s SIMILAR TO '%%'", left), nil
 }
 
-func (postgresDialect) EscapeLikePattern(pattern string) string {
+func (postgresDialect) PrepareLikePattern(pattern string) (string, bool) {
 	pattern = strings.ReplaceAll(pattern, "%", `\%`)
 	pattern = strings.ReplaceAll(pattern, "_", `\_`)
 	pattern = strings.ReplaceAll(pattern, "*", "%")
 	pattern = strings.ReplaceAll(pattern, "?", "_")
-	return pattern
+	return pattern, false
+}
+
+func (postgresDialect) EscapeStringLiteral(s string) string {
+	return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''"))
 }
 
 func (postgresDialect) SerializeBool(b bool) string {
