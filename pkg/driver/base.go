@@ -17,6 +17,12 @@ func stripRegexpDelimiters(s string) string {
 	return s
 }
 
+// isNullExpr returns true if the value is a *expr.Expression with Op == Null.
+func isNullExpr(in any) bool {
+	e, ok := in.(*expr.Expression)
+	return ok && e.Op == expr.Null
+}
+
 // Shared is the set of render functions for operators whose SQL is identical
 // across dialects (And, Or, Not, Equals, comparisons, In, List, Must, Wild).
 // Custom drivers embed these by copying Shared into their RenderFNs map.
@@ -92,6 +98,20 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		}
 		str, rangeParams, err := b.renderRangeParam(left, boundary)
 		return str, append(lparams, rangeParams...), err
+	}
+
+	// Null right-hand side handling. Intercept before serializing the right
+	// side so dialects don't have to handle null themselves.
+	if isNullExpr(e.Right) {
+		switch e.Op {
+		case expr.Equals:
+			return fmt.Sprintf("%s IS NULL", left), lparams, nil
+		case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+			return "", nil, fmt.Errorf(
+				"comparison operator %s cannot be used with null; use field:null for IS NULL",
+				e.Op,
+			)
+		}
 	}
 
 	right, rparams, err := b.serializeParams(e.Right)
@@ -177,6 +197,20 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 			return "", fmt.Errorf("range operator requires *expr.RangeBoundary, got %T", e.Right)
 		}
 		return b.renderRange(left, boundary)
+	}
+
+	// Null right-hand side handling. Intercept before serializing the right
+	// side so dialects don't have to handle null themselves.
+	if isNullExpr(e.Right) {
+		switch e.Op {
+		case expr.Equals:
+			return fmt.Sprintf("%s IS NULL", left), nil
+		case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+			return "", fmt.Errorf(
+				"comparison operator %s cannot be used with null; use field:null for IS NULL",
+				e.Op,
+			)
+		}
 	}
 
 	right, err := b.serialize(e.Right)

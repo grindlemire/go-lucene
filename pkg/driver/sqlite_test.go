@@ -185,6 +185,10 @@ func TestSQLiteDriver(t *testing.T) {
 			input: expr.Eq("active", false),
 			want:  `"active" = 0`,
 		},
+		"equals_null": {
+			input: expr.Eq("a", expr.NULL()),
+			want:  `"a" IS NULL`,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -227,6 +231,11 @@ func TestSQLiteDriverParam(t *testing.T) {
 			input:      expr.Rang("a", "foo", "bar", false),
 			wantStr:    `"a" > ? AND "a" < ?`,
 			wantParams: []any{"foo", "bar"},
+		},
+		"equals_null_param": {
+			input:      expr.Eq("a", expr.NULL()),
+			wantStr:    `"a" IS NULL`,
+			wantParams: nil,
 		},
 	}
 

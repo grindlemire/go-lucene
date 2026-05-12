@@ -178,6 +178,10 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.LIKE("field", "100%_test*"),
 			want:  `"field" SIMILAR TO '100\%\_test%'`,
 		},
+		"equals_null": {
+			input: expr.Eq("a", expr.NULL()),
+			want:  `"a" IS NULL`,
+		},
 	}
 
 	for name, tc := range tcs {
