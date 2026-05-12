@@ -21,6 +21,30 @@ func TestParseLucene(t *testing.T) {
 			input: "a",
 			want:  expr.Lit("a"),
 		},
+		"bare_null": {
+			input: "field:null",
+			want:  expr.Eq("field", expr.NULL()),
+		},
+		"bare_null_uppercase": {
+			input: "field:NULL",
+			want:  expr.Eq("field", expr.NULL()),
+		},
+		"bare_null_mixed_case": {
+			input: "field:Null",
+			want:  expr.Eq("field", expr.NULL()),
+		},
+		"quoted_null_stays_string": {
+			input: `field:"null"`,
+			want:  expr.Eq("field", "null"),
+		},
+		"null_as_field_name_stays_string": {
+			input: "null:foo",
+			want:  expr.Eq("null", "foo"),
+		},
+		"null_wildcard_stays_wildcard": {
+			input: "field:nul*",
+			want:  expr.LIKE("field", "nul*"),
+		},
 		"basic_equal": {
 			input: "a:b",
 			want:  expr.Eq("a", "b"),
@@ -736,6 +760,11 @@ func TestParseLuceneWithDefaultField(t *testing.T) {
 			input:        "a AND b",
 			defaultField: "foo",
 			want:         expr.AND(expr.Eq("foo", "a"), expr.Eq("foo", "b")),
+		},
+		"standalone_null": {
+			input:        "null",
+			defaultField: "foo",
+			want:         expr.Eq("foo", expr.NULL()),
 		},
 	}
 

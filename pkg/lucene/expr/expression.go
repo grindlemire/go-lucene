@@ -217,6 +217,12 @@ func (c Column) GoString() string {
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {
+	// A bare null literal in column position (e.g. `null:foo`) is a column
+	// named "null", not a SQL NULL. Demote it to a literal column.
+	if e, ok := left.(*Expression); ok && e.Op == Null && operatesOnColumn(op) {
+		left = Lit(Column("null"))
+	}
+
 	if isStringlike(left) && operatesOnColumn(op) {
 		left = wrapInColumn(left)
 	}
