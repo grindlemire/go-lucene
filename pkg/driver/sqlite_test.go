@@ -189,6 +189,14 @@ func TestSQLiteDriver(t *testing.T) {
 			input: expr.Eq("a", expr.NULL()),
 			want:  `"a" IS NULL`,
 		},
+		"not_null_is_is_not_null": {
+			input: expr.NOT(expr.Eq("a", expr.NULL())),
+			want:  `"a" IS NOT NULL`,
+		},
+		"mustnot_null_is_is_not_null": {
+			input: expr.MUSTNOT(expr.Eq("a", expr.NULL())),
+			want:  `"a" IS NOT NULL`,
+		},
 	}
 
 	for name, tc := range tcs {

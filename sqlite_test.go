@@ -398,6 +398,14 @@ func TestSQLiteSQLEndToEnd(t *testing.T) {
 			input: "a:null OR b:5",
 			want:  `("a" IS NULL) OR ("b" = 5)`,
 		},
+		"not_field_null": {
+			input: "NOT a:null",
+			want:  `"a" IS NOT NULL`,
+		},
+		"minus_field_null": {
+			input: "-a:null",
+			want:  `"a" IS NOT NULL`,
+		},
 	}
 
 	for name, tc := range tcs {

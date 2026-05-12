@@ -23,6 +23,16 @@ func isNullExpr(in any) bool {
 	return ok && e.Op == expr.Null
 }
 
+// isNullEquals returns true if the value is an Expression of the form
+// Equals(left, Null). Used to collapse Not/MustNot wrappers into IS NOT NULL.
+func isNullEquals(in any) bool {
+	e, ok := in.(*expr.Expression)
+	if !ok || e.Op != expr.Equals {
+		return false
+	}
+	return isNullExpr(e.Right)
+}
+
 // Shared is the set of render functions for operators whose SQL is identical
 // across dialects (And, Or, Not, Equals, comparisons, In, List, Must, Wild).
 // Custom drivers embed these by copying Shared into their RenderFNs map.
@@ -81,6 +91,16 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
 		return "?", []any{stripRegexpDelimiters(s)}, nil
+	}
+
+	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
+	if (e.Op == expr.Not || e.Op == expr.MustNot) && isNullEquals(e.Left) {
+		inner, _ := e.Left.(*expr.Expression)
+		col, cparams, err := b.serializeParams(inner.Left)
+		if err != nil {
+			return "", cparams, err
+		}
+		return fmt.Sprintf("%s IS NOT NULL", col), cparams, nil
 	}
 
 	d := b.dialect()
@@ -181,6 +201,16 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		s, _ := e.Left.(string)
 		s = stripRegexpDelimiters(s)
 		return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
+	}
+
+	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
+	if (e.Op == expr.Not || e.Op == expr.MustNot) && isNullEquals(e.Left) {
+		inner, _ := e.Left.(*expr.Expression)
+		col, err := b.serialize(inner.Left)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s IS NOT NULL", col), nil
 	}
 
 	d := b.dialect()
