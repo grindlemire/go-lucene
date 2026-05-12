@@ -107,6 +107,10 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return "", params, nil
 	}
 
+	if e.Op == expr.Null {
+		return "", nil, fmt.Errorf("null cannot be rendered as a standalone value")
+	}
+
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
 	// parameterized value. This mirrors what serializeParams does for nested
 	// Regexp sub-expressions.
@@ -240,6 +244,10 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 func (b Base) Render(e *expr.Expression) (s string, err error) {
 	if e == nil {
 		return "", nil
+	}
+
+	if e.Op == expr.Null {
+		return "", fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
 	// Standalone Regexp expression: strip /.../ delimiters and return as a

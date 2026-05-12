@@ -221,3 +221,13 @@ func TestSQLDriver(t *testing.T) {
 		})
 	}
 }
+
+func TestBaseRenderRejectsStandaloneNull(t *testing.T) {
+	d := NewPostgresDriver()
+	if _, err := d.Render(expr.NULL()); err == nil {
+		t.Fatal("Render(NULL()) should have errored")
+	}
+	if _, _, err := d.RenderParam(expr.NULL()); err == nil {
+		t.Fatal("RenderParam(NULL()) should have errored")
+	}
+}
