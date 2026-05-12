@@ -426,6 +426,18 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: "a:<=null",
 			err:   "comparison operator LESS_EQ cannot be used with null",
 		},
+		"or_with_null_partitions": {
+			input: "a:(x OR null)",
+			want:  `("a" = 'x' OR "a" IS NULL)`,
+		},
+		"or_with_null_multi_partitions": {
+			input: "a:(x OR y OR null)",
+			want:  `("a" IN ('x', 'y') OR "a" IS NULL)`,
+		},
+		"or_all_null": {
+			input: "a:(null OR null)",
+			want:  `"a" IS NULL`,
+		},
 	}
 
 	for name, tc := range tcs {

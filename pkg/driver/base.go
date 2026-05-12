@@ -33,6 +33,28 @@ func isNullEquals(in any) bool {
 	return isNullExpr(e.Right)
 }
 
+// partitionNullsFromList walks the elements of an IN-list right-side (which is
+// always a List Expression whose Left is []*expr.Expression) and returns the
+// non-null members and how many nulls were found.
+func partitionNullsFromList(right any) (nonNulls []*expr.Expression, nullCount int, ok bool) {
+	list, isList := right.(*expr.Expression)
+	if !isList || list.Op != expr.List {
+		return nil, 0, false
+	}
+	items, isSlice := list.Left.([]*expr.Expression)
+	if !isSlice {
+		return nil, 0, false
+	}
+	for _, item := range items {
+		if item != nil && item.Op == expr.Null {
+			nullCount++
+			continue
+		}
+		nonNulls = append(nonNulls, item)
+	}
+	return nonNulls, nullCount, true
+}
+
 // Shared is the set of render functions for operators whose SQL is identical
 // across dialects (And, Or, Not, Equals, comparisons, In, List, Must, Wild).
 // Custom drivers embed these by copying Shared into their RenderFNs map.
@@ -131,6 +153,32 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 				"comparison operator %s cannot be used with null; use field:null for IS NULL",
 				e.Op,
 			)
+		}
+	}
+
+	// IN with null members -> partition into (IN (...) OR IS NULL).
+	if e.Op == expr.In {
+		nonNulls, nullCount, ok := partitionNullsFromList(e.Right)
+		if ok && nullCount > 0 {
+			switch len(nonNulls) {
+			case 0:
+				return fmt.Sprintf("%s IS NULL", left), lparams, nil
+			case 1:
+				rhs, rparams, err := b.serializeParams(nonNulls[0])
+				if err != nil {
+					return "", nil, err
+				}
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left),
+					append(lparams, rparams...), nil
+			default:
+				inList := &expr.Expression{Op: expr.List, Left: nonNulls}
+				inStr, inParams, err := b.serializeParams(inList)
+				if err != nil {
+					return "", nil, err
+				}
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, left),
+					append(lparams, inParams...), nil
+			}
 		}
 	}
 
@@ -240,6 +288,30 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 				"comparison operator %s cannot be used with null; use field:null for IS NULL",
 				e.Op,
 			)
+		}
+	}
+
+	// IN with null members -> partition into (IN (...) OR IS NULL).
+	if e.Op == expr.In {
+		nonNulls, nullCount, ok := partitionNullsFromList(e.Right)
+		if ok && nullCount > 0 {
+			switch len(nonNulls) {
+			case 0:
+				return fmt.Sprintf("%s IS NULL", left), nil
+			case 1:
+				rhs, err := b.serialize(nonNulls[0])
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left), nil
+			default:
+				inList := &expr.Expression{Op: expr.List, Left: nonNulls}
+				inStr, err := b.serialize(inList)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, left), nil
+			}
 		}
 	}
 

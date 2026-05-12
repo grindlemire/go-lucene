@@ -190,6 +190,22 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.MUSTNOT(expr.Eq("a", expr.NULL())),
 			want:  `"a" IS NOT NULL`,
 		},
+		"in_with_null_single_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.NULL())),
+			want:  `("a" = 'x' OR "a" IS NULL)`,
+		},
+		"in_with_null_multiple_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"), expr.NULL())),
+			want:  `("a" IN ('x', 'y') OR "a" IS NULL)`,
+		},
+		"in_all_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.NULL(), expr.NULL())),
+			want:  `"a" IS NULL`,
+		},
+		"in_no_null_unchanged": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"))),
+			want:  `"a" IN ('x', 'y')`,
+		},
 	}
 
 	for name, tc := range tcs {
