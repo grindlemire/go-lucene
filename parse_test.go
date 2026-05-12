@@ -45,6 +45,18 @@ func TestParseLucene(t *testing.T) {
 			input: "field:nul*",
 			want:  expr.LIKE("field", "nul*"),
 		},
+		"or_with_null_folds_to_in_list": {
+			input: "field:(a OR null)",
+			want:  expr.IN(expr.Lit("field"), expr.LIST(expr.Lit("a"), expr.NULL())),
+		},
+		"or_chain_with_null": {
+			input: "field:(a OR b OR null)",
+			want:  expr.IN(expr.Lit("field"), expr.LIST(expr.Lit("a"), expr.Lit("b"), expr.NULL())),
+		},
+		"or_with_only_nulls_folds": {
+			input: "field:(null OR null)",
+			want:  expr.IN(expr.Lit("field"), expr.LIST(expr.NULL(), expr.NULL())),
+		},
 		"basic_equal": {
 			input: "a:b",
 			want:  expr.Eq("a", "b"),
