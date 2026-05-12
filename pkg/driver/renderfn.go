@@ -13,14 +13,23 @@ import (
 type RenderFN func(left, right string) (string, error)
 
 func literal(left, right string) (string, error) {
-	if !utf8.ValidString(left) {
-		return "", fmt.Errorf("literal contains invalid utf8: %q", left)
+	if err := validateStringLiteral(left); err != nil {
+		return "", err
 	}
-	if strings.ContainsRune(left, 0) {
-		return "", fmt.Errorf("literal contains null byte: %q", left)
-	}
-
 	return left, nil
+}
+
+// validateStringLiteral enforces invariants required by SQL string literals
+// (valid UTF-8, no embedded NULs). Used by both the Literal renderfn and
+// dialect paths that emit string literals directly (e.g. standalone Regexp).
+func validateStringLiteral(s string) error {
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("literal contains invalid utf8: %q", s)
+	}
+	if strings.ContainsRune(s, 0) {
+		return fmt.Errorf("literal contains null byte: %q", s)
+	}
+	return nil
 }
 
 func equals(left, right string) (string, error) {

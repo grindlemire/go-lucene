@@ -116,7 +116,11 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	// Regexp sub-expressions.
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
-		return "?", []any{stripRegexpDelimiters(s)}, nil
+		s = stripRegexpDelimiters(s)
+		if err := validateStringLiteral(s); err != nil {
+			return "", nil, err
+		}
+		return "?", []any{s}, nil
 	}
 
 	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
@@ -256,6 +260,9 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
 		s = stripRegexpDelimiters(s)
+		if err := validateStringLiteral(s); err != nil {
+			return "", err
+		}
 		return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
 	}
 
@@ -400,6 +407,9 @@ func (b Base) serialize(in any) (s string, err error) {
 		if v.Op == expr.Regexp {
 			s, _ := v.Left.(string)
 			s = stripRegexpDelimiters(s)
+			if err := validateStringLiteral(s); err != nil {
+				return "", err
+			}
 			return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''")), nil
 		}
 		return b.Render(v)
@@ -437,7 +447,11 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
 			s, _ := v.Left.(string)
-			return "?", []any{stripRegexpDelimiters(s)}, nil
+			s = stripRegexpDelimiters(s)
+			if err := validateStringLiteral(s); err != nil {
+				return "", nil, err
+			}
+			return "?", []any{s}, nil
 		}
 		return b.RenderParam(v)
 	case []*expr.Expression:

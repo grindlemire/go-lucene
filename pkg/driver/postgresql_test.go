@@ -231,3 +231,26 @@ func TestBaseRenderRejectsStandaloneNull(t *testing.T) {
 		t.Fatal("RenderParam(NULL()) should have errored")
 	}
 }
+
+func TestStandaloneRegexpRejectsNullByteAndInvalidUTF8(t *testing.T) {
+	d := NewPostgresDriver()
+	cases := []struct {
+		name  string
+		input *expr.Expression
+	}{
+		{"null_byte", expr.REGEXP("/\x00/")},
+		{"invalid_utf8", expr.REGEXP("/\xff\xfe/")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name+"_render", func(t *testing.T) {
+			if _, err := d.Render(tc.input); err == nil {
+				t.Fatal("expected error, got nil")
+			}
+		})
+		t.Run(tc.name+"_render_param", func(t *testing.T) {
+			if _, _, err := d.RenderParam(tc.input); err == nil {
+				t.Fatal("expected error, got nil")
+			}
+		})
+	}
+}
