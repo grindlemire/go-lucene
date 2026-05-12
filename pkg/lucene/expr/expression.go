@@ -312,7 +312,7 @@ type jsonExpression struct {
 // MarshalJSON is a custom JSON serialization for the Expression
 func (e Expression) MarshalJSON() (out []byte, err error) {
 	// if we are in a leaf node just marshal the value
-	if e.Op == Literal || e.Op == Wild || e.Op == Regexp {
+	if e.Op == Literal || e.Op == Wild || e.Op == Regexp || e.Op == Null {
 		return json.Marshal(e.Left)
 	}
 
@@ -440,6 +440,11 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 
 func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 	e = ptr(empty())
+
+	// JSON `null` -> NULL expression.
+	if bytes.Equal(bytes.TrimSpace(in), []byte("null")) {
+		return NULL(), nil
+	}
 
 	// check if it is an int first because all ints can be parsed as floats
 	i, err := strconv.Atoi(string(in))

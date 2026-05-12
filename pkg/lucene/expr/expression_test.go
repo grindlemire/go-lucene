@@ -419,6 +419,31 @@ func TestNullValidation(t *testing.T) {
 	}
 }
 
+func TestNullJSONRoundTrip(t *testing.T) {
+	cases := []*Expression{
+		NULL(),
+		Eq("field", NULL()),
+		AND(Eq("field", NULL()), Eq("other", 5)),
+	}
+
+	for _, original := range cases {
+		raw, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("marshal failed: %v", err)
+		}
+
+		var round Expression
+		if err := json.Unmarshal(raw, &round); err != nil {
+			t.Fatalf("unmarshal failed: %v (json was: %s)", err, raw)
+		}
+
+		if !reflect.DeepEqual(original, &round) {
+			t.Fatalf("round-trip mismatch:\n  want %#v\n  got  %#v\n  json: %s",
+				original, &round, raw)
+		}
+	}
+}
+
 func jsonEqual(got string, want string) bool {
 	return stripWhitespace(got) == stripWhitespace(want)
 }
