@@ -378,6 +378,26 @@ func TestSQLiteSQLEndToEnd(t *testing.T) {
 			input: "email:user@example.com",
 			want:  `"email" = 'user@example.com'`,
 		},
+		"bare_null_is_null": {
+			input: "a:null",
+			want:  `"a" IS NULL`,
+		},
+		"bare_null_uppercase_is_null": {
+			input: "a:NULL",
+			want:  `"a" IS NULL`,
+		},
+		"quoted_null_is_string": {
+			input: `a:"null"`,
+			want:  `"a" = 'null'`,
+		},
+		"null_with_and": {
+			input: "a:null AND b:5",
+			want:  `("a" IS NULL) AND ("b" = 5)`,
+		},
+		"null_with_or": {
+			input: "a:null OR b:5",
+			want:  `("a" IS NULL) OR ("b" = 5)`,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -845,6 +865,16 @@ func TestSQLiteParameterizedSQLEndToEnd(t *testing.T) {
 			input:      "email:user@example.com",
 			wantStr:    `"email" = ?`,
 			wantParams: []any{"user@example.com"},
+		},
+		"bare_null_is_null_param": {
+			input:      "a:null",
+			wantStr:    `"a" IS NULL`,
+			wantParams: []any{},
+		},
+		"null_with_and_param": {
+			input:      "a:null AND b:5",
+			wantStr:    `("a" IS NULL) AND ("b" = ?)`,
+			wantParams: []any{5},
 		},
 	}
 
