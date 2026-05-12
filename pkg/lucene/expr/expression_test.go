@@ -377,6 +377,28 @@ func TestExprJSON(t *testing.T) {
 	}
 }
 
+func TestNullOperatorPlumbing(t *testing.T) {
+	n := NULL()
+	if n.Op != Null {
+		t.Fatalf("NULL() should have Op == Null, got %v", n.Op)
+	}
+	if n.Left != nil {
+		t.Fatalf("NULL() should have nil Left, got %v", n.Left)
+	}
+	if n.Right != nil {
+		t.Fatalf("NULL() should have nil Right, got %v", n.Right)
+	}
+	if got := n.String(); got != "null" {
+		t.Fatalf("NULL().String() = %q, want %q", got, "null")
+	}
+	if toString[Null] != "NULL" {
+		t.Fatalf("toString[Null] = %q, want %q", toString[Null], "NULL")
+	}
+	if fromString["NULL"] != Null {
+		t.Fatalf("fromString[\"NULL\"] = %v, want Null", fromString["NULL"])
+	}
+}
+
 func jsonEqual(got string, want string) bool {
 	return stripWhitespace(got) == stripWhitespace(want)
 }

@@ -31,6 +31,7 @@ const (
 	LessEq
 	In
 	List
+	Null
 )
 
 // String renders the operator as a string
@@ -58,6 +59,7 @@ var fromString = map[string]Operator{
 	"LESS_EQ":    LessEq,
 	"IN":         In,
 	"LIST":       List,
+	"NULL":       Null,
 }
 
 var toString = map[Operator]string{
@@ -80,4 +82,5 @@ var toString = map[Operator]string{
 	LessEq:    "LESS_EQ",
 	In:        "IN",
 	List:      "LIST",
+	Null:      "NULL",
 }

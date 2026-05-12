@@ -87,6 +87,14 @@ func REGEXP(in any) *Expression {
 	return Expr(in, Regexp)
 }
 
+// NULL represents a SQL null literal (the bare `null` keyword in lucene).
+// It is a leaf expression with no value in Left or Right.
+func NULL() *Expression {
+	e := ptr(empty())
+	e.Op = Null
+	return e
+}
+
 // Eq creates a new EQUALS expression
 func Eq(a any, b any) *Expression {
 	return Expr(a, Equals, b)

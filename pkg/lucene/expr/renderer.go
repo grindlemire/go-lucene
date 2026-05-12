@@ -27,6 +27,7 @@ var renderers = map[Operator]renderer{
 	Like:      renderBasic,
 	In:        renderBasic,
 	List:      renderList,
+	Null:      renderNullLiteral,
 }
 
 func renderEquals(e *Expression, verbose bool) string {
@@ -128,6 +129,13 @@ func renderList(e *Expression, verbose bool) string {
 	}
 
 	return fmt.Sprintf("(%s)", strings.Join(strs, ", "))
+}
+
+func renderNullLiteral(e *Expression, verbose bool) string {
+	if verbose {
+		return "NULL"
+	}
+	return "null"
 }
 
 func renderLiteral(e *Expression, verbose bool) string {
