@@ -470,15 +470,18 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 
 // extractBoundValue unwraps a range boundary value from its Expression wrapper.
 // Returns the raw Go value (int, float64, string) and whether the bound is unbounded (*).
-func extractBoundValue(bound any) (val any, unbounded bool) {
+func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 	e, ok := bound.(*expr.Expression)
 	if !ok {
-		return bound, false
+		return bound, false, nil
+	}
+	if e.Op == expr.Null {
+		return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
 	}
 	if e.Op == expr.Wild {
-		return nil, true
+		return nil, true, nil
 	}
-	return e.Left, false
+	return e.Left, false, nil
 }
 
 // formatRangeValue renders a range bound value as a SQL literal.
@@ -508,8 +511,14 @@ func isNumericBound(val any) bool {
 }
 
 func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, error) {
-	minVal, minUnbounded := extractBoundValue(boundary.Min)
-	maxVal, maxUnbounded := extractBoundValue(boundary.Max)
+	minVal, minUnbounded, err := extractBoundValue(boundary.Min)
+	if err != nil {
+		return "", err
+	}
+	maxVal, maxUnbounded, err := extractBoundValue(boundary.Max)
+	if err != nil {
+		return "", err
+	}
 	inclusive := boundary.Inclusive
 
 	if minUnbounded && maxUnbounded {
@@ -561,8 +570,14 @@ func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, er
 }
 
 func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (string, []any, error) {
-	minVal, minUnbounded := extractBoundValue(boundary.Min)
-	maxVal, maxUnbounded := extractBoundValue(boundary.Max)
+	minVal, minUnbounded, err := extractBoundValue(boundary.Min)
+	if err != nil {
+		return "", nil, err
+	}
+	maxVal, maxUnbounded, err := extractBoundValue(boundary.Max)
+	if err != nil {
+		return "", nil, err
+	}
 	inclusive := boundary.Inclusive
 
 	if minUnbounded && maxUnbounded {

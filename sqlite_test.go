@@ -434,6 +434,14 @@ func TestSQLiteSQLEndToEnd(t *testing.T) {
 			input: "a:(null OR null)",
 			want:  `"a" IS NULL`,
 		},
+		"range_min_null_errors": {
+			input: "a:[null TO 5]",
+			err:   "null is not allowed as a range bound",
+		},
+		"range_max_null_errors": {
+			input: "a:[1 TO null]",
+			err:   "null is not allowed as a range bound",
+		},
 	}
 
 	for name, tc := range tcs {
