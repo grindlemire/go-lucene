@@ -410,6 +410,22 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			input: "-a:null",
 			want:  `"a" IS NOT NULL`,
 		},
+		"gt_null_errors": {
+			input: "a:>null",
+			err:   "comparison operator GREATER cannot be used with null",
+		},
+		"lt_null_errors": {
+			input: "a:<null",
+			err:   "comparison operator LESS cannot be used with null",
+		},
+		"gte_null_errors": {
+			input: "a:>=null",
+			err:   "comparison operator GREATER_EQ cannot be used with null",
+		},
+		"lte_null_errors": {
+			input: "a:<=null",
+			err:   "comparison operator LESS_EQ cannot be used with null",
+		},
 	}
 
 	for name, tc := range tcs {
