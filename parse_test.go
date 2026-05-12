@@ -778,6 +778,11 @@ func TestParseLuceneWithDefaultField(t *testing.T) {
 			defaultField: "foo",
 			want:         expr.Eq("foo", expr.NULL()),
 		},
+		"empty_quoted_string": {
+			input:        `""`,
+			defaultField: "foo",
+			want:         expr.Eq("foo", expr.Lit("")),
+		},
 	}
 
 	for name, tc := range tcs {

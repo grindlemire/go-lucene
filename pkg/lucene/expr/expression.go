@@ -504,11 +504,15 @@ func literalToExpr(in any) *Expression {
 		return Lit(in)
 	}
 
+	if s == "" {
+		return Lit(s)
+	}
+
 	// if it has leading and trailing /'s then it probably is a regex.
 	// Note this needs to be checked before the wildcard check as a regex
 	// can contain * and ?.
 	// TODO this should probably check for escaping
-	if s[0] == '/' && s[len(s)-1] == '/' {
+	if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
 		return REGEXP(s)
 	}
 
