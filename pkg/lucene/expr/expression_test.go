@@ -399,6 +399,26 @@ func TestNullOperatorPlumbing(t *testing.T) {
 	}
 }
 
+func TestNullValidation(t *testing.T) {
+	if err := Validate(NULL()); err != nil {
+		t.Fatalf("Validate(NULL()) returned err: %v", err)
+	}
+
+	if err := Validate(Eq("field", NULL())); err != nil {
+		t.Fatalf("Validate(Eq(field, NULL())) returned err: %v", err)
+	}
+
+	list := LIST(Lit("a"), NULL())
+	if err := Validate(list); err != nil {
+		t.Fatalf("Validate(LIST containing NULL) returned err: %v", err)
+	}
+
+	bad := &Expression{Op: Null, Left: "x"}
+	if err := Validate(bad); err == nil {
+		t.Fatal("Validate(Null with Left) should have errored")
+	}
+}
+
 func jsonEqual(got string, want string) bool {
 	return stripWhitespace(got) == stripWhitespace(want)
 }

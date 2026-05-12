@@ -28,6 +28,7 @@ var validators = map[Operator]validator{
 	Like:      validateLike,
 	In:        validateIn,
 	List:      validateList,
+	Null:      validateNull,
 }
 
 func validateEquals(e *Expression) (err error) {
@@ -271,6 +272,19 @@ func validateRegexp(e *Expression) (err error) {
 	return nil
 }
 
+func validateNull(e *Expression) (err error) {
+	if e == nil {
+		return nil
+	}
+	if e.Left != nil {
+		return errors.New("NULL validation: must not have a left value")
+	}
+	if e.Right != nil {
+		return errors.New("NULL validation: must not have a right value")
+	}
+	return nil
+}
+
 func validateLike(e *Expression) (err error) {
 	if e == nil {
 		return nil
@@ -364,7 +378,13 @@ func isListOfLiteralExprs(in any) bool {
 
 func isLiteralExpr(in any) bool {
 	e, isExpr := in.(*Expression)
-	return isExpr && (e.Op == Literal || e.Op == Wild || e.Op == Regexp) && isLiteral(e.Left)
+	if !isExpr {
+		return false
+	}
+	if e.Op == Null {
+		return true
+	}
+	return (e.Op == Literal || e.Op == Wild || e.Op == Regexp) && isLiteral(e.Left)
 }
 
 func isLiteral(in any) bool {
