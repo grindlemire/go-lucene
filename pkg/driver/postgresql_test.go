@@ -178,6 +178,34 @@ func TestSQLDriver(t *testing.T) {
 			input: expr.LIKE("field", "100%_test*"),
 			want:  `"field" SIMILAR TO '100\%\_test%'`,
 		},
+		"equals_null": {
+			input: expr.Eq("a", expr.NULL()),
+			want:  `"a" IS NULL`,
+		},
+		"not_null_is_is_not_null": {
+			input: expr.NOT(expr.Eq("a", expr.NULL())),
+			want:  `"a" IS NOT NULL`,
+		},
+		"mustnot_null_is_is_not_null": {
+			input: expr.MUSTNOT(expr.Eq("a", expr.NULL())),
+			want:  `"a" IS NOT NULL`,
+		},
+		"in_with_null_single_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.NULL())),
+			want:  `("a" = 'x' OR "a" IS NULL)`,
+		},
+		"in_with_null_multiple_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"), expr.NULL())),
+			want:  `("a" IN ('x', 'y') OR "a" IS NULL)`,
+		},
+		"in_all_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.NULL(), expr.NULL())),
+			want:  `"a" IS NULL`,
+		},
+		"in_no_null_unchanged": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"))),
+			want:  `"a" IN ('x', 'y')`,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -189,6 +217,39 @@ func TestSQLDriver(t *testing.T) {
 
 			if tc.want != got {
 				t.Fatalf(errTemplate, "generated sql does not match", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestBaseRenderRejectsStandaloneNull(t *testing.T) {
+	d := NewPostgresDriver()
+	if _, err := d.Render(expr.NULL()); err == nil {
+		t.Fatal("Render(NULL()) should have errored")
+	}
+	if _, _, err := d.RenderParam(expr.NULL()); err == nil {
+		t.Fatal("RenderParam(NULL()) should have errored")
+	}
+}
+
+func TestStandaloneRegexpRejectsNullByteAndInvalidUTF8(t *testing.T) {
+	d := NewPostgresDriver()
+	cases := []struct {
+		name  string
+		input *expr.Expression
+	}{
+		{"null_byte", expr.REGEXP("/\x00/")},
+		{"invalid_utf8", expr.REGEXP("/\xff\xfe/")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name+"_render", func(t *testing.T) {
+			if _, err := d.Render(tc.input); err == nil {
+				t.Fatal("expected error, got nil")
+			}
+		})
+		t.Run(tc.name+"_render_param", func(t *testing.T) {
+			if _, _, err := d.RenderParam(tc.input); err == nil {
+				t.Fatal("expected error, got nil")
 			}
 		})
 	}

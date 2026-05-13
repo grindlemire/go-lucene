@@ -87,6 +87,14 @@ func REGEXP(in any) *Expression {
 	return Expr(in, Regexp)
 }
 
+// NULL represents a SQL null literal (the bare `null` keyword in lucene).
+// It is a leaf expression with no value in Left or Right.
+func NULL() *Expression {
+	e := ptr(empty())
+	e.Op = Null
+	return e
+}
+
 // Eq creates a new EQUALS expression
 func Eq(a any, b any) *Expression {
 	return Expr(a, Equals, b)
@@ -209,6 +217,12 @@ func (c Column) GoString() string {
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {
+	// A bare null literal in column position (e.g. `null:foo`) is a column
+	// named "null", not a SQL NULL. Demote it to a literal column.
+	if e, ok := left.(*Expression); ok && e.Op == Null && operatesOnColumn(op) {
+		left = Lit(Column("null"))
+	}
+
 	if isStringlike(left) && operatesOnColumn(op) {
 		left = wrapInColumn(left)
 	}
@@ -304,7 +318,7 @@ type jsonExpression struct {
 // MarshalJSON is a custom JSON serialization for the Expression
 func (e Expression) MarshalJSON() (out []byte, err error) {
 	// if we are in a leaf node just marshal the value
-	if e.Op == Literal || e.Op == Wild || e.Op == Regexp {
+	if e.Op == Literal || e.Op == Wild || e.Op == Regexp || e.Op == Null {
 		return json.Marshal(e.Left)
 	}
 
@@ -433,6 +447,11 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 	e = ptr(empty())
 
+	// JSON `null` -> NULL expression.
+	if bytes.Equal(bytes.TrimSpace(in), []byte("null")) {
+		return NULL(), nil
+	}
+
 	// check if it is an int first because all ints can be parsed as floats
 	i, err := strconv.Atoi(string(in))
 	if err == nil {
@@ -485,11 +504,15 @@ func literalToExpr(in any) *Expression {
 		return Lit(in)
 	}
 
+	if s == "" {
+		return Lit(s)
+	}
+
 	// if it has leading and trailing /'s then it probably is a regex.
 	// Note this needs to be checked before the wildcard check as a regex
 	// can contain * and ?.
 	// TODO this should probably check for escaping
-	if s[0] == '/' && s[len(s)-1] == '/' {
+	if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
 		return REGEXP(s)
 	}
 

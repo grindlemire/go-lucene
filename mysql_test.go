@@ -391,6 +391,22 @@ func TestMySQLSQLEndToEnd(t *testing.T) {
 			input: "a:foo_bar*",
 			want:  "`a` LIKE 'foo#_bar%' ESCAPE '#'",
 		},
+		"bare_null_is_null": {
+			input: "a:null",
+			want:  "`a` IS NULL",
+		},
+		"not_field_null": {
+			input: "NOT a:null",
+			want:  "`a` IS NOT NULL",
+		},
+		"or_with_null_partitions": {
+			input: "a:(x OR null)",
+			want:  "(`a` = 'x' OR `a` IS NULL)",
+		},
+		"gt_null_errors": {
+			input: "a:>null",
+			err:   "comparison operator GREATER cannot be used with null",
+		},
 	}
 
 	for name, tc := range tcs {

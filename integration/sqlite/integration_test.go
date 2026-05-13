@@ -167,6 +167,12 @@ func TestSQLiteIntegrationRendered(t *testing.T) {
 		// status = NULL is excluded.
 		{"standalone_star_is_not_null", `status:*`, []int{1, 2, 3, 4}},
 		{"regexp", `name:/^[ab].*/`, []int{1, 2}},
+		// Row 5 has status = NULL.
+		{"field_null_returns_null_rows", `status:null`, []int{5}},
+		{"not_field_null_returns_non_null_rows", `NOT status:null`, []int{1, 2, 3, 4}},
+		{"minus_field_null_returns_non_null_rows", `-status:null`, []int{1, 2, 3, 4}},
+		{"or_with_null_returns_both", `status:(active OR null)`, []int{1, 2, 4, 5}},
+		{"in_list_with_null", `status:(active OR inactive OR null)`, []int{1, 2, 3, 4, 5}},
 	}
 
 	for _, tc := range cases {
@@ -198,6 +204,9 @@ func TestSQLiteIntegrationParameterized(t *testing.T) {
 		{"glob", `name:a*`, []int{1}},
 		{"standalone_star", `status:*`, []int{1, 2, 3, 4}},
 		{"regexp", `name:/^[ab].*/`, []int{1, 2}},
+		{"field_null", `status:null`, []int{5}},
+		{"not_field_null", `NOT status:null`, []int{1, 2, 3, 4}},
+		{"or_with_null", `status:(active OR null)`, []int{1, 2, 4, 5}},
 	}
 
 	for _, tc := range cases {

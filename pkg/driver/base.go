@@ -17,6 +17,44 @@ func stripRegexpDelimiters(s string) string {
 	return s
 }
 
+// isNullExpr returns true if the value is a *expr.Expression with Op == Null.
+func isNullExpr(in any) bool {
+	e, ok := in.(*expr.Expression)
+	return ok && e.Op == expr.Null
+}
+
+// isNullEquals returns true if the value is an Expression of the form
+// Equals(left, Null). Used to collapse Not/MustNot wrappers into IS NOT NULL.
+func isNullEquals(in any) bool {
+	e, ok := in.(*expr.Expression)
+	if !ok || e.Op != expr.Equals {
+		return false
+	}
+	return isNullExpr(e.Right)
+}
+
+// partitionNullsFromList walks the elements of an IN-list right-side (which is
+// always a List Expression whose Left is []*expr.Expression) and returns the
+// non-null members and how many nulls were found.
+func partitionNullsFromList(right any) (nonNulls []*expr.Expression, nullCount int, ok bool) {
+	list, isList := right.(*expr.Expression)
+	if !isList || list.Op != expr.List {
+		return nil, 0, false
+	}
+	items, isSlice := list.Left.([]*expr.Expression)
+	if !isSlice {
+		return nil, 0, false
+	}
+	for _, item := range items {
+		if item != nil && item.Op == expr.Null {
+			nullCount++
+			continue
+		}
+		nonNulls = append(nonNulls, item)
+	}
+	return nonNulls, nullCount, true
+}
+
 // Shared is the set of render functions for operators whose SQL is identical
 // across dialects (And, Or, Not, Equals, comparisons, In, List, Must, Wild).
 // Custom drivers embed these by copying Shared into their RenderFNs map.
@@ -69,12 +107,30 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return "", params, nil
 	}
 
+	if e.Op == expr.Null {
+		return "", nil, fmt.Errorf("null cannot be rendered as a standalone value")
+	}
+
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
 	// parameterized value. This mirrors what serializeParams does for nested
 	// Regexp sub-expressions.
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
-		return "?", []any{stripRegexpDelimiters(s)}, nil
+		s = stripRegexpDelimiters(s)
+		if err := validateStringLiteral(s); err != nil {
+			return "", nil, err
+		}
+		return "?", []any{s}, nil
+	}
+
+	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
+	if (e.Op == expr.Not || e.Op == expr.MustNot) && isNullEquals(e.Left) {
+		inner, _ := e.Left.(*expr.Expression)
+		col, cparams, err := b.serializeParams(inner.Left)
+		if err != nil {
+			return "", cparams, err
+		}
+		return fmt.Sprintf("%s IS NOT NULL", col), cparams, nil
 	}
 
 	d := b.dialect()
@@ -92,6 +148,48 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		}
 		str, rangeParams, err := b.renderRangeParam(left, boundary)
 		return str, append(lparams, rangeParams...), err
+	}
+
+	// Null right-hand side handling. Intercept before serializing the right
+	// side so dialects don't have to handle null themselves.
+	if isNullExpr(e.Right) {
+		switch e.Op {
+		case expr.Equals:
+			return fmt.Sprintf("%s IS NULL", left), lparams, nil
+		case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+			return "", nil, fmt.Errorf(
+				"comparison operator %s cannot be used with null; use field:null for IS NULL",
+				e.Op,
+			)
+		}
+	}
+
+	// IN with null members -> partition into (IN (...) OR IS NULL).
+	if e.Op == expr.In {
+		nonNulls, nullCount, ok := partitionNullsFromList(e.Right)
+		if ok && nullCount > 0 {
+			switch len(nonNulls) {
+			case 0:
+				return fmt.Sprintf("%s IS NULL", left), lparams, nil
+			case 1:
+				rhs, rparams, err := b.serializeParams(nonNulls[0])
+				if err != nil {
+					return "", nil, err
+				}
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left),
+					append(lparams, rparams...), nil
+			default:
+				// Hand-roll the List rather than calling expr.LIST: that constructor
+				// takes ...any and would require boxing the []*expr.Expression slice.
+				inList := &expr.Expression{Op: expr.List, Left: nonNulls}
+				inStr, inParams, err := b.serializeParams(inList)
+				if err != nil {
+					return "", nil, err
+				}
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, left),
+					append(lparams, inParams...), nil
+			}
+		}
 	}
 
 	right, rparams, err := b.serializeParams(e.Right)
@@ -161,12 +259,30 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return "", nil
 	}
 
+	if e.Op == expr.Null {
+		return "", fmt.Errorf("null cannot be rendered as a standalone value")
+	}
+
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
 	// single-quoted literal. This mirrors what serialize does for nested
 	// Regexp sub-expressions.
 	if e.Op == expr.Regexp {
 		s, _ := e.Left.(string)
-		return b.dialect().EscapeStringLiteral(stripRegexpDelimiters(s)), nil
+		s = stripRegexpDelimiters(s)
+		if err := validateStringLiteral(s); err != nil {
+			return "", err
+		}
+		return b.dialect().EscapeStringLiteral(s), nil
+	}
+
+	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
+	if (e.Op == expr.Not || e.Op == expr.MustNot) && isNullEquals(e.Left) {
+		inner, _ := e.Left.(*expr.Expression)
+		col, err := b.serialize(inner.Left)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s IS NOT NULL", col), nil
 	}
 
 	d := b.dialect()
@@ -183,6 +299,46 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 			return "", fmt.Errorf("range operator requires *expr.RangeBoundary, got %T", e.Right)
 		}
 		return b.renderRange(left, boundary)
+	}
+
+	// Null right-hand side handling. Intercept before serializing the right
+	// side so dialects don't have to handle null themselves.
+	if isNullExpr(e.Right) {
+		switch e.Op {
+		case expr.Equals:
+			return fmt.Sprintf("%s IS NULL", left), nil
+		case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+			return "", fmt.Errorf(
+				"comparison operator %s cannot be used with null; use field:null for IS NULL",
+				e.Op,
+			)
+		}
+	}
+
+	// IN with null members -> partition into (IN (...) OR IS NULL).
+	if e.Op == expr.In {
+		nonNulls, nullCount, ok := partitionNullsFromList(e.Right)
+		if ok && nullCount > 0 {
+			switch len(nonNulls) {
+			case 0:
+				return fmt.Sprintf("%s IS NULL", left), nil
+			case 1:
+				rhs, err := b.serialize(nonNulls[0])
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left), nil
+			default:
+				// Hand-roll the List rather than calling expr.LIST: that constructor
+				// takes ...any and would require boxing the []*expr.Expression slice.
+				inList := &expr.Expression{Op: expr.List, Left: nonNulls}
+				inStr, err := b.serialize(inList)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, left), nil
+			}
+		}
 	}
 
 	right, err := b.serialize(e.Right)
@@ -264,7 +420,11 @@ func (b Base) serialize(in any) (s string, err error) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
 			s, _ := v.Left.(string)
-			return b.dialect().EscapeStringLiteral(stripRegexpDelimiters(s)), nil
+			s = stripRegexpDelimiters(s)
+			if err := validateStringLiteral(s); err != nil {
+				return "", err
+			}
+			return b.dialect().EscapeStringLiteral(s), nil
 		}
 		return b.Render(v)
 	case []*expr.Expression:
@@ -300,7 +460,11 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
 			s, _ := v.Left.(string)
-			return "?", []any{stripRegexpDelimiters(s)}, nil
+			s = stripRegexpDelimiters(s)
+			if err := validateStringLiteral(s); err != nil {
+				return "", nil, err
+			}
+			return "?", []any{s}, nil
 		}
 		return b.RenderParam(v)
 	case []*expr.Expression:
@@ -341,15 +505,18 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 
 // extractBoundValue unwraps a range boundary value from its Expression wrapper.
 // Returns the raw Go value (int, float64, string) and whether the bound is unbounded (*).
-func extractBoundValue(bound any) (val any, unbounded bool) {
+func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 	e, ok := bound.(*expr.Expression)
 	if !ok {
-		return bound, false
+		return bound, false, nil
+	}
+	if e.Op == expr.Null {
+		return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
 	}
 	if e.Op == expr.Wild {
-		return nil, true
+		return nil, true, nil
 	}
-	return e.Left, false
+	return e.Left, false, nil
 }
 
 // formatRangeValue renders a range bound value as a SQL literal.
@@ -379,8 +546,14 @@ func isNumericBound(val any) bool {
 }
 
 func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, error) {
-	minVal, minUnbounded := extractBoundValue(boundary.Min)
-	maxVal, maxUnbounded := extractBoundValue(boundary.Max)
+	minVal, minUnbounded, err := extractBoundValue(boundary.Min)
+	if err != nil {
+		return "", err
+	}
+	maxVal, maxUnbounded, err := extractBoundValue(boundary.Max)
+	if err != nil {
+		return "", err
+	}
 	inclusive := boundary.Inclusive
 
 	if minUnbounded && maxUnbounded {
@@ -432,8 +605,14 @@ func (b Base) renderRange(left string, boundary *expr.RangeBoundary) (string, er
 }
 
 func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (string, []any, error) {
-	minVal, minUnbounded := extractBoundValue(boundary.Min)
-	maxVal, maxUnbounded := extractBoundValue(boundary.Max)
+	minVal, minUnbounded, err := extractBoundValue(boundary.Min)
+	if err != nil {
+		return "", nil, err
+	}
+	maxVal, maxUnbounded, err := extractBoundValue(boundary.Max)
+	if err != nil {
+		return "", nil, err
+	}
 	inclusive := boundary.Inclusive
 
 	if minUnbounded && maxUnbounded {

@@ -76,6 +76,10 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				final = expr.Expr(p.defaultField, expr.Equals, final.Left)
 			}
 
+			if final.Op == expr.Null && p.defaultField != "" {
+				final = expr.Eq(p.defaultField, final)
+			}
+
 			return final, nil
 		}
 
@@ -266,6 +270,13 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	// if it is a quote then remove escape
 	if token.Typ == lex.TQuoted {
 		return expr.Lit(strings.ReplaceAll(token.Val, "\"", "")), nil
+	}
+
+	// bare `null` keyword (case-insensitive) -> typed null literal.
+	// Quoted "null" was already handled above; a wildcard like nul* is handled
+	// below (we only match exact `null` modulo case here).
+	if strings.EqualFold(token.Val, "null") {
+		return expr.NULL(), nil
 	}
 
 	// if it is a regexp then parse it

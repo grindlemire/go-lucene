@@ -84,7 +84,7 @@ func isChainedOrLiterals(in *expr.Expression) (out []*expr.Expression, ok bool) 
 		return out, false
 	}
 
-	if in.Op == expr.Literal {
+	if in.Op == expr.Literal || in.Op == expr.Null {
 		return []*expr.Expression{in}, true
 	}
 

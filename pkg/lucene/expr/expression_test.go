@@ -377,6 +377,73 @@ func TestExprJSON(t *testing.T) {
 	}
 }
 
+func TestNullOperatorPlumbing(t *testing.T) {
+	n := NULL()
+	if n.Op != Null {
+		t.Fatalf("NULL() should have Op == Null, got %v", n.Op)
+	}
+	if n.Left != nil {
+		t.Fatalf("NULL() should have nil Left, got %v", n.Left)
+	}
+	if n.Right != nil {
+		t.Fatalf("NULL() should have nil Right, got %v", n.Right)
+	}
+	if got := n.String(); got != "null" {
+		t.Fatalf("NULL().String() = %q, want %q", got, "null")
+	}
+	if toString[Null] != "NULL" {
+		t.Fatalf("toString[Null] = %q, want %q", toString[Null], "NULL")
+	}
+	if fromString["NULL"] != Null {
+		t.Fatalf("fromString[\"NULL\"] = %v, want Null", fromString["NULL"])
+	}
+}
+
+func TestNullValidation(t *testing.T) {
+	if err := Validate(NULL()); err != nil {
+		t.Fatalf("Validate(NULL()) returned err: %v", err)
+	}
+
+	if err := Validate(Eq("field", NULL())); err != nil {
+		t.Fatalf("Validate(Eq(field, NULL())) returned err: %v", err)
+	}
+
+	list := LIST(Lit("a"), NULL())
+	if err := Validate(list); err != nil {
+		t.Fatalf("Validate(LIST containing NULL) returned err: %v", err)
+	}
+
+	bad := &Expression{Op: Null, Left: "x"}
+	if err := Validate(bad); err == nil {
+		t.Fatal("Validate(Null with Left) should have errored")
+	}
+}
+
+func TestNullJSONRoundTrip(t *testing.T) {
+	cases := []*Expression{
+		NULL(),
+		Eq("field", NULL()),
+		AND(Eq("field", NULL()), Eq("other", 5)),
+	}
+
+	for _, original := range cases {
+		raw, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("marshal failed: %v", err)
+		}
+
+		var round Expression
+		if err := json.Unmarshal(raw, &round); err != nil {
+			t.Fatalf("unmarshal failed: %v (json was: %s)", err, raw)
+		}
+
+		if !reflect.DeepEqual(original, &round) {
+			t.Fatalf("round-trip mismatch:\n  want %#v\n  got  %#v\n  json: %s",
+				original, &round, raw)
+		}
+	}
+}
+
 func jsonEqual(got string, want string) bool {
 	return stripWhitespace(got) == stripWhitespace(want)
 }

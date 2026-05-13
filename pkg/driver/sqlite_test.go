@@ -185,6 +185,34 @@ func TestSQLiteDriver(t *testing.T) {
 			input: expr.Eq("active", false),
 			want:  `"active" = 0`,
 		},
+		"equals_null": {
+			input: expr.Eq("a", expr.NULL()),
+			want:  `"a" IS NULL`,
+		},
+		"not_null_is_is_not_null": {
+			input: expr.NOT(expr.Eq("a", expr.NULL())),
+			want:  `"a" IS NOT NULL`,
+		},
+		"mustnot_null_is_is_not_null": {
+			input: expr.MUSTNOT(expr.Eq("a", expr.NULL())),
+			want:  `"a" IS NOT NULL`,
+		},
+		"in_with_null_single_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.NULL())),
+			want:  `("a" = 'x' OR "a" IS NULL)`,
+		},
+		"in_with_null_multiple_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"), expr.NULL())),
+			want:  `("a" IN ('x', 'y') OR "a" IS NULL)`,
+		},
+		"in_all_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.NULL(), expr.NULL())),
+			want:  `"a" IS NULL`,
+		},
+		"in_no_null_unchanged": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"))),
+			want:  `"a" IN ('x', 'y')`,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -227,6 +255,11 @@ func TestSQLiteDriverParam(t *testing.T) {
 			input:      expr.Rang("a", "foo", "bar", false),
 			wantStr:    `"a" > ? AND "a" < ?`,
 			wantParams: []any{"foo", "bar"},
+		},
+		"equals_null_param": {
+			input:      expr.Eq("a", expr.NULL()),
+			wantStr:    `"a" IS NULL`,
+			wantParams: nil,
 		},
 	}
 
