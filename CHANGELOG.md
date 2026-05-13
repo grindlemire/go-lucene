@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.2.0](https://github.com/grindlemire/go-lucene/compare/v0.1.0...v0.2.0) (2026-05-13)
+
+
+### Features
+
+* add Null operator constant and NULL() constructor ([514d410](https://github.com/grindlemire/go-lucene/commit/514d4101b259fd0d49037bd653a3e61c4fadeda6))
+* marshal/unmarshal Null expressions as JSON null ([51fcea8](https://github.com/grindlemire/go-lucene/commit/51fcea8de417249976b8c9c1a5ea73e315498917))
+* NOT/-field:null renders as IS NOT NULL ([34222aa](https://github.com/grindlemire/go-lucene/commit/34222aa4c6adb7b130528faac99451e9d6328e85))
+* parser recognizes bare null as typed null literal ([7458431](https://github.com/grindlemire/go-lucene/commit/745843185d94e2268a182c36267d260e3001bbc6))
+* partition null members out of IN-list rendering ([b5c06a8](https://github.com/grindlemire/go-lucene/commit/b5c06a891197caac1c842c26e9e02442e4122e60))
+* reducer folds null into IN-list alongside literals ([12fb54a](https://github.com/grindlemire/go-lucene/commit/12fb54a41a42990294f4443abdfe60e219a2ebf7))
+* reject null in range bounds ([fb4e1f2](https://github.com/grindlemire/go-lucene/commit/fb4e1f26fc2e4209e9f309915f015b8b4e69301f))
+* reject standalone Null at the renderer entrypoint ([5d490a2](https://github.com/grindlemire/go-lucene/commit/5d490a2bd5d787a3a03a1b75b9154ff11f3dc179))
+* render Equals(field, Null) as IS NULL across SQL dialects ([4a81cab](https://github.com/grindlemire/go-lucene/commit/4a81cabb8ade2697cb299e00739b5baeba0b388a))
+* validate Null nodes and accept Null in literal-expr checks ([40b8c30](https://github.com/grindlemire/go-lucene/commit/40b8c306bc38fa50173e988d880105c56d3354d6))
+
+
+### Bug Fixes
+
+* literalToExpr panic on empty string ([311e75b](https://github.com/grindlemire/go-lucene/commit/311e75b1abaf84e1ca84f19f4e92af262dfe80e1))
+* validate utf8/null bytes for standalone Regexp renders ([1b175f9](https://github.com/grindlemire/go-lucene/commit/1b175f9a9ac407e163efa39846a77794a8720c71))
+
+
+### Documentation
+
+* comment why IN-partition hand-rolls the List expression ([d612e08](https://github.com/grindlemire/go-lucene/commit/d612e08a16ed4b6dc387f84f72841f5b460d2a5d))
+
 ## [0.1.0](https://github.com/grindlemire/go-lucene/compare/v0.0.33...v0.1.0) (2026-04-23)
 
 
