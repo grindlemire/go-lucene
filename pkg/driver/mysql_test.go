@@ -210,6 +210,22 @@ func TestMySQLDriver(t *testing.T) {
 			input: expr.Eq("active", false),
 			want:  "`active` = FALSE",
 		},
+		"equals_null": {
+			input: expr.Eq("a", expr.NULL()),
+			want:  "`a` IS NULL",
+		},
+		"not_null_is_is_not_null": {
+			input: expr.NOT(expr.Eq("a", expr.NULL())),
+			want:  "`a` IS NOT NULL",
+		},
+		"in_with_null_single_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.NULL())),
+			want:  "(`a` = 'x' OR `a` IS NULL)",
+		},
+		"in_with_null_multiple_non_null": {
+			input: expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"), expr.NULL())),
+			want:  "(`a` IN ('x', 'y') OR `a` IS NULL)",
+		},
 	}
 
 	for name, tc := range tcs {
