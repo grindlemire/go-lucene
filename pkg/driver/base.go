@@ -179,6 +179,8 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left),
 					append(lparams, rparams...), nil
 			default:
+				// Hand-roll the List rather than calling expr.LIST: that constructor
+				// takes ...any and would require boxing the []*expr.Expression slice.
 				inList := &expr.Expression{Op: expr.List, Left: nonNulls}
 				inStr, inParams, err := b.serializeParams(inList)
 				if err != nil {
@@ -320,6 +322,8 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 				}
 				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left), nil
 			default:
+				// Hand-roll the List rather than calling expr.LIST: that constructor
+				// takes ...any and would require boxing the []*expr.Expression slice.
 				inList := &expr.Expression{Op: expr.List, Left: nonNulls}
 				inStr, err := b.serialize(inList)
 				if err != nil {
