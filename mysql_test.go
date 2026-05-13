@@ -1,0 +1,903 @@
+package lucene
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestMySQLSQLEndToEnd(t *testing.T) {
+	type tc struct {
+		input        string
+		want         string
+		defaultField string
+		err          string
+	}
+
+	tcs := map[string]tc{
+		"basic_equal": {
+			input: "a:b",
+			want:  "`a` = 'b'",
+		},
+		"basic_equal_with_number": {
+			input: "a:5",
+			want:  "`a` = 5",
+		},
+		"basic_greater_with_number": {
+			input: "a:>22",
+			want:  "`a` > 22",
+		},
+		"basic_greater_eq_with_number": {
+			input: "a:>=22",
+			want:  "`a` >= 22",
+		},
+		"basic_less_with_number": {
+			input: "a:<22",
+			want:  "`a` < 22",
+		},
+		"basic_less_eq_with_number": {
+			input: "a:<=22",
+			want:  "`a` <= 22",
+		},
+		"basic_greater_less_with_number": {
+			input: "a:<22 AND b:>33",
+			want:  "(`a` < 22) AND (`b` > 33)",
+		},
+		"basic_greater_less_eq_with_number": {
+			input: "a:<=22 AND b:>=33",
+			want:  "(`a` <= 22) AND (`b` >= 33)",
+		},
+		"basic_wild_equal_with_*": {
+			input: "a:b*",
+			want:  "`a` LIKE 'b%' ESCAPE '#'",
+		},
+		"basic_wild_equal_with_?": {
+			input: "a:b?z",
+			want:  "`a` LIKE 'b_z' ESCAPE '#'",
+		},
+		"basic_inclusive_range": {
+			input: "a:[* TO 5]",
+			want:  "`a` <= 5",
+		},
+		"basic_exclusive_range": {
+			input: "a:{* TO 5}",
+			want:  "`a` < 5",
+		},
+		"range_over_strings": {
+			input: "a:{foo TO bar}",
+			want:  "`a` > 'foo' AND `a` < 'bar'",
+		},
+		"basic_fuzzy": {
+			input: "b AND a~",
+			err:   "unable to render operator [FUZZY]",
+		},
+		"fuzzy_power": {
+			input: "b AND a~10",
+			err:   "unable to render operator [FUZZY]",
+		},
+		"basic_boost": {
+			input: "b AND a^",
+			err:   "unable to render operator [BOOST]",
+		},
+		"boost_power": {
+			input: "b AND a^10",
+			err:   "unable to render operator [BOOST]",
+		},
+		"regexp": {
+			input: "a:/b [c]/",
+			want:  "`a` REGEXP 'b [c]'",
+		},
+		"regexp_with_keywords": {
+			input: `a:/b "[c]/`,
+			want:  "`a` REGEXP 'b \"[c]'",
+		},
+		"regexp_with_escaped_chars": {
+			input: `url:/example.com\/foo\/bar\/.*/`,
+			want:  "`url` REGEXP 'example.com\\\\/foo\\\\/bar\\\\/.*'",
+		},
+		"regexp_single_char_pattern": {
+			input: `field:/./`,
+			want:  "`field` REGEXP '.'",
+		},
+		"regexp_alternation": {
+			input: `status:/(active|pending)/`,
+			want:  "`status` REGEXP '(active|pending)'",
+		},
+		"regexp_one_or_more": {
+			input: `digits:/[0-9]+/`,
+			want:  "`digits` REGEXP '[0-9]+'",
+		},
+		"regexp_optional_quantifier": {
+			input: `word:/colou?r/`,
+			want:  "`word` REGEXP 'colou?r'",
+		},
+		"regexp_anchor_start": {
+			input: `name:/^John/`,
+			want:  "`name` REGEXP '^John'",
+		},
+		"regexp_anchor_end": {
+			input: `name:/Smith$/`,
+			want:  "`name` REGEXP 'Smith$'",
+		},
+		"regexp_digit_class": {
+			input: `code:/\d{3}/`,
+			want:  "`code` REGEXP '\\\\d{3}'",
+		},
+		"regexp_word_class": {
+			input: `token:/\w+/`,
+			want:  "`token` REGEXP '\\\\w+'",
+		},
+		"regexp_literal_backslash": {
+			input: `path:/foo\\bar/`,
+			want:  "`path` REGEXP 'foo\\\\\\\\bar'",
+		},
+		"regexp_with_single_quote": {
+			input: `text:/it's/`,
+			want:  "`text` REGEXP 'it''s'",
+		},
+		"regexp_percent_not_metachar": {
+			input: `value:/100%/`,
+			want:  "`value` REGEXP '100%'",
+		},
+		"basic_default_AND": {
+			input: "a b",
+			want:  "'a' AND 'b'",
+		},
+		"default_to_AND_with_subexpressions": {
+			input: "a:b c:d",
+			want:  "(`a` = 'b') AND (`c` = 'd')",
+		},
+		"basic_and": {
+			input: "a AND b",
+			want:  "'a' AND 'b'",
+		},
+		"and_with_nesting": {
+			input: "a:foo AND b:bar",
+			want:  "(`a` = 'foo') AND (`b` = 'bar')",
+		},
+		"basic_or": {
+			input: "a OR b",
+			want:  "'a' OR 'b'",
+		},
+		"or_with_nesting": {
+			input: "a:foo OR b:bar",
+			want:  "(`a` = 'foo') OR (`b` = 'bar')",
+		},
+		"range_operator_inclusive": {
+			input: "a:[1 TO 5]",
+			want:  "`a` >= 1 AND `a` <= 5",
+		},
+		"range_operator_inclusive_unbound": {
+			input: `a:[* TO 200]`,
+			want:  "`a` <= 200",
+		},
+		"range_operator_exclusive": {
+			input: `a:{"ab" TO "az"}`,
+			want:  "`a` > 'ab' AND `a` < 'az'",
+		},
+		"range_operator_exclusive_unbound": {
+			input: `a:{2 TO *}`,
+			want:  "`a` > 2",
+		},
+		"basic_not": {
+			input: "NOT b",
+			want:  "NOT('b')",
+		},
+		"nested_not": {
+			input: "a:foo OR NOT b:bar",
+			want:  "(`a` = 'foo') OR (NOT(`b` = 'bar'))",
+		},
+		"term_grouping": {
+			input: "(a:foo OR b:bar) AND c:baz",
+			want:  "((`a` = 'foo') OR (`b` = 'bar')) AND (`c` = 'baz')",
+		},
+		"value_grouping": {
+			input: "a:(foo OR baz OR bar)",
+			want:  "`a` IN ('foo', 'baz', 'bar')",
+		},
+		"basic_must": {
+			input: "+a:b",
+			want:  "`a` = 'b'",
+		},
+		"basic_must_not": {
+			input: "-a:b",
+			want:  "NOT(`a` = 'b')",
+		},
+		"basic_nested_must_not": {
+			input: "d:e AND (-a:b AND +f:e)",
+			want:  "(`d` = 'e') AND ((NOT(`a` = 'b')) AND (`f` = 'e'))",
+		},
+		"basic_escaping": {
+			input: `a:\(1\+1\)\:2`,
+			want:  "`a` = '(1+1):2'",
+		},
+		"escaped_column_name": {
+			input: `foo\ bar:b`,
+			want:  "`foo bar` = 'b'",
+		},
+		"boost_key_value": {
+			input: "a:b^2 AND foo",
+			err:   "unable to render operator [BOOST]",
+		},
+		"nested_sub_expressions": {
+			input: "((title:foo OR title:bar) AND (body:foo OR body:bar)) OR k:v",
+			want:  "(((`title` = 'foo') OR (`title` = 'bar')) AND ((`body` = 'foo') OR (`body` = 'bar'))) OR (`k` = 'v')",
+		},
+		"fuzzy_key_value": {
+			input: "a:b~2 AND foo",
+			err:   "unable to render operator [FUZZY]",
+		},
+		"precedence_works": {
+			input: "a:b AND c:d OR e:f OR h:i AND j:k",
+			want:  "(((`a` = 'b') AND (`c` = 'd')) OR (`e` = 'f')) OR ((`h` = 'i') AND (`j` = 'k'))",
+		},
+		"test_precedence_weaving": {
+			input: "a OR b AND c OR d",
+			want:  "('a' OR ('b' AND 'c')) OR 'd'",
+		},
+		"test_precedence_weaving_with_not": {
+			input: "NOT a OR b AND NOT c OR d",
+			want:  "((NOT('a')) OR ('b' AND (NOT('c')))) OR 'd'",
+		},
+		"test_equals_in_precedence": {
+			input: "a:az OR b:bz AND NOT c:z OR d",
+			want:  "((`a` = 'az') OR ((`b` = 'bz') AND (NOT(`c` = 'z')))) OR 'd'",
+		},
+		"test_parens_in_precedence": {
+			input: "a AND (c OR d)",
+			want:  "'a' AND ('c' OR 'd')",
+		},
+		"test_range_precedence_simple": {
+			input: "c:[* to -1] OR d",
+			want:  "(`c` <= -1) OR 'd'",
+		},
+		"test_range_precedence": {
+			input: "a OR b AND c:[* to -1] OR d",
+			want:  "('a' OR ('b' AND (`c` <= -1))) OR 'd'",
+		},
+		"test_full_precedence": {
+			input: "a OR b AND c:[* to -1] OR d AND NOT +e:f",
+			want:  "('a' OR ('b' AND (`c` <= -1))) OR ('d' AND (NOT(`e` = 'f')))",
+		},
+		"test_elastic_greater_than_precedence": {
+			input: "a:>10 AND -b:<=-20",
+			want:  "(`a` > 10) AND (NOT(`b` <= -20))",
+		},
+		"escape_quotes": {
+			input: "a:'b'",
+			want:  "`a` = '''b'''",
+		},
+		"name_starts_with_number": {
+			input: "1a:b",
+			want:  "`1a` = 'b'",
+		},
+		"default_field_and": {
+			input:        `title:"The Right Way" AND go`,
+			want:         "(`title` = 'The Right Way') AND (`default` = 'go')",
+			defaultField: "default",
+		},
+		"default_field_or": {
+			input:        `title:"The Right Way" OR go`,
+			want:         "(`title` = 'The Right Way') OR (`default` = 'go')",
+			defaultField: "default",
+		},
+		"default_field_not": {
+			input:        `title:"The Right Way" AND NOT(go)`,
+			want:         "(`title` = 'The Right Way') AND (NOT(`default` = 'go'))",
+			defaultField: "default",
+		},
+		"asterisk_in_literal_are_regular_expression": {
+			input: `foo:*`,
+			want:  "`foo` IS NOT NULL",
+		},
+		"implicit_and_with_subexpressions": {
+			input: "a:b c:d",
+			want:  "(`a` = 'b') AND (`c` = 'd')",
+		},
+		"implicit_and_with_negated_subexpressions": {
+			input: "-a:b -c:d",
+			want:  "(NOT(`a` = 'b')) AND (NOT(`c` = 'd'))",
+		},
+		"implicit_and_with_explicit_negation": {
+			input: "a:b NOT c:d",
+			want:  "(`a` = 'b') AND (NOT(`c` = 'd'))",
+		},
+		"implicit_and_with_subexpressions_and_default_field": {
+			input:        `title:"Foo" a b`,
+			want:         "((`title` = 'Foo') AND (`default` = 'a')) AND (`default` = 'b')",
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field": {
+			input:        `title:"Foo" -a:c b`,
+			want:         "((`title` = 'Foo') AND (NOT(`a` = 'c'))) AND (`default` = 'b')",
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field_reversed": {
+			input:        `title:"Foo" a:c -b`,
+			want:         "((`title` = 'Foo') AND (`a` = 'c')) AND (NOT(`default` = 'b'))",
+			defaultField: "default",
+		},
+		"implicit_and_with_explicit_subexpression_and_default_field": {
+			input:        `title:"Foo" a:b NOT c`,
+			want:         "((`title` = 'Foo') AND (`a` = 'b')) AND (NOT(`default` = 'c'))",
+			defaultField: "default",
+		},
+		"implicit_and_with_explicit_subexpression_and_keyword_field": {
+			input: `title:"Foo" a:b NOT k:c`,
+			want:  "((`title` = 'Foo') AND (`a` = 'b')) AND (NOT(`k` = 'c'))",
+		},
+		"implicit_and_with_quotes": {
+			input:        `"jakarta apache" -"Apache Lucene"`,
+			want:         "(`default` = 'jakarta apache') AND (NOT(`default` = 'Apache Lucene'))",
+			defaultField: "default",
+		},
+		"implicit_and_with_exclamation_mark_as_alternative_to_not": {
+			input:        `"jakarta apache" !"Apache Lucene"`,
+			want:         "(`default` = 'jakarta apache') AND (NOT(`default` = 'Apache Lucene'))",
+			defaultField: "default",
+		},
+		"implicit_and_with_exclamation_mark_as_alternative_to_not_and_default_field": {
+			input:        `"jakarta apache" !"Apache Lucene"`,
+			want:         "(`default` = 'jakarta apache') AND (NOT(`default` = 'Apache Lucene'))",
+			defaultField: "default",
+		},
+		"exclamation_mark_inside_quotes_is_literal": {
+			input:        `"text with ! inside"`,
+			want:         "`default` = 'text with ! inside'",
+			defaultField: "default",
+		},
+		"exclamation_mark_inside_regexp_is_literal": {
+			input: "field:/pattern with ! inside/",
+			want:  "`field` REGEXP 'pattern with ! inside'",
+		},
+		"implicit_and_with_multiple_clauses": {
+			input: `-(k1:v1) k2:v2 -k3:v3`,
+			want:  "((NOT(`k1` = 'v1')) AND (`k2` = 'v2')) AND (NOT(`k3` = 'v3'))",
+		},
+		"implicit_and_with_multiple_clauses_inverted": {
+			input: `k2:v2 -k1:v1 k3:v3`,
+			want:  "((`k2` = 'v2') AND (NOT(`k1` = 'v1'))) AND (`k3` = 'v3')",
+		},
+		"parenthesized_precedence": {
+			input: `k1:v1 -(k2:v2 OR k3:v3)`,
+			want:  "(`k1` = 'v1') AND (NOT((`k2` = 'v2') OR (`k3` = 'v3')))",
+		},
+		"comma_separated_terms_with_default_field": {
+			input:        "foo, bar, baz",
+			want:         "((`default` = 'foo') AND (`default` = 'bar')) AND (`default` = 'baz')",
+			defaultField: "default",
+		},
+		"comma_separated_field_values": {
+			input: "a:b, c:d",
+			want:  "(`a` = 'b') AND (`c` = 'd')",
+		},
+		"semicolon_separated_field_values": {
+			input: "a:b; c:d",
+			want:  "(`a` = 'b') AND (`c` = 'd')",
+		},
+		"email_field_value": {
+			input: "email:user@example.com",
+			want:  "`email` = 'user@example.com'",
+		},
+		// Note: raw `(`, `|`, `[` in a Lucene value aren't parseable via
+		// Lucene syntax without escaping (they have grouping/list meaning).
+		// The LIKE→REGEXP fallback and the regex translation for patterns
+		// containing these characters is exercised at the driver level in
+		// pkg/driver/mysql_test.go.
+		"like_literal_percent_e2e": {
+			input: "a:100%*",
+			want:  "`a` LIKE '100#%%' ESCAPE '#'",
+		},
+		"like_literal_underscore_e2e": {
+			input: "a:foo_bar*",
+			want:  "`a` LIKE 'foo#_bar%' ESCAPE '#'",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := ToMySQL(tc.input, WithDefaultField(tc.defaultField))
+			if err != nil {
+				// if we got an expect error then we are fine
+				if tc.err != "" && strings.Contains(err.Error(), tc.err) {
+					return
+				}
+				t.Fatalf("unexpected error rendering expression: %v", err)
+			}
+
+			if tc.err != "" {
+				t.Fatalf("\nexpected error [%s]\ngot: %s", tc.err, got)
+			}
+
+			if got != tc.want {
+				expr, err := Parse(tc.input)
+				if err != nil {
+					t.Fatalf("unable to parse expression: %v", err)
+				}
+				t.Fatalf("\nwant %s\ngot  %s\nparsed expression: %#v\n", tc.want, got, expr)
+			}
+		})
+	}
+}
+
+func TestMySQLParameterizedSQLEndToEnd(t *testing.T) {
+	type tc struct {
+		input        string
+		wantStr      string
+		wantParams   []any
+		defaultField string
+		err          string
+	}
+
+	tcs := map[string]tc{
+		"basic_equal": {
+			input:      "a:b",
+			wantStr:    "`a` = ?",
+			wantParams: []any{"b"},
+		},
+		"basic_equal_with_number": {
+			input:      "a:5",
+			wantStr:    "`a` = ?",
+			wantParams: []any{5},
+		},
+		"basic_greater_with_number": {
+			input:      "a:>22",
+			wantStr:    "`a` > ?",
+			wantParams: []any{22},
+		},
+		"basic_greater_eq_with_number": {
+			input:      "a:>=22",
+			wantStr:    "`a` >= ?",
+			wantParams: []any{22},
+		},
+		"basic_less_with_number": {
+			input:      "a:<22",
+			wantStr:    "`a` < ?",
+			wantParams: []any{22},
+		},
+		"basic_less_eq_with_number": {
+			input:      "a:<=22",
+			wantStr:    "`a` <= ?",
+			wantParams: []any{22},
+		},
+		"basic_greater_less_with_number": {
+			input:      "a:<22 AND b:>33",
+			wantStr:    "(`a` < ?) AND (`b` > ?)",
+			wantParams: []any{22, 33},
+		},
+		"basic_greater_less_eq_with_number": {
+			input:      "a:<=22 AND b:>=33",
+			wantStr:    "(`a` <= ?) AND (`b` >= ?)",
+			wantParams: []any{22, 33},
+		},
+		"basic_wild_equal_with_*": {
+			input:      "a:b*",
+			wantStr:    "`a` LIKE ? ESCAPE '#'",
+			wantParams: []any{"b%"},
+		},
+		"basic_wild_equal_with_?": {
+			input:      "a:b?z",
+			wantStr:    "`a` LIKE ? ESCAPE '#'",
+			wantParams: []any{"b_z"},
+		},
+		"basic_inclusive_range": {
+			input:      "a:[* TO 5]",
+			wantStr:    "`a` <= ?",
+			wantParams: []any{5},
+		},
+		"basic_exclusive_range": {
+			input:      "a:{* TO 5}",
+			wantStr:    "`a` < ?",
+			wantParams: []any{5},
+		},
+		"range_over_strings": {
+			input:      "a:{foo TO bar}",
+			wantStr:    "`a` > ? AND `a` < ?",
+			wantParams: []any{"foo", "bar"},
+		},
+		"basic_fuzzy": {
+			input: "b AND a~",
+			err:   "unable to render operator [FUZZY]",
+		},
+		"fuzzy_power": {
+			input: "b AND a~10",
+			err:   "unable to render operator [FUZZY]",
+		},
+		"basic_boost": {
+			input: "b AND a^",
+			err:   "unable to render operator [BOOST]",
+		},
+		"boost_power": {
+			input: "b AND a^10",
+			err:   "unable to render operator [BOOST]",
+		},
+		"regexp": {
+			input:      "a:/b [c]/",
+			wantStr:    "`a` REGEXP ?",
+			wantParams: []any{"b [c]"},
+		},
+		"regexp_with_keywords": {
+			input:      `a:/b "[c]/`,
+			wantStr:    "`a` REGEXP ?",
+			wantParams: []any{`b "[c]`},
+		},
+		"regexp_with_escaped_chars": {
+			input:      `url:/example.com\/foo\/bar\/.*/`,
+			wantStr:    "`url` REGEXP ?",
+			wantParams: []any{`example.com\/foo\/bar\/.*`},
+		},
+		"regexp_single_char_pattern": {
+			input:      `field:/./`,
+			wantStr:    "`field` REGEXP ?",
+			wantParams: []any{"."},
+		},
+		"regexp_alternation": {
+			input:      `status:/(active|pending)/`,
+			wantStr:    "`status` REGEXP ?",
+			wantParams: []any{"(active|pending)"},
+		},
+		"regexp_one_or_more": {
+			input:      `digits:/[0-9]+/`,
+			wantStr:    "`digits` REGEXP ?",
+			wantParams: []any{"[0-9]+"},
+		},
+		"regexp_optional_quantifier": {
+			input:      `word:/colou?r/`,
+			wantStr:    "`word` REGEXP ?",
+			wantParams: []any{"colou?r"},
+		},
+		"regexp_anchor_start": {
+			input:      `name:/^John/`,
+			wantStr:    "`name` REGEXP ?",
+			wantParams: []any{"^John"},
+		},
+		"regexp_anchor_end": {
+			input:      `name:/Smith$/`,
+			wantStr:    "`name` REGEXP ?",
+			wantParams: []any{"Smith$"},
+		},
+		"regexp_digit_class": {
+			input:      `code:/\d{3}/`,
+			wantStr:    "`code` REGEXP ?",
+			wantParams: []any{`\d{3}`},
+		},
+		"regexp_word_class": {
+			input:      `token:/\w+/`,
+			wantStr:    "`token` REGEXP ?",
+			wantParams: []any{`\w+`},
+		},
+		"regexp_literal_backslash": {
+			input:      `path:/foo\\bar/`,
+			wantStr:    "`path` REGEXP ?",
+			wantParams: []any{`foo\\bar`},
+		},
+		"regexp_with_single_quote": {
+			input:      `text:/it's/`,
+			wantStr:    "`text` REGEXP ?",
+			wantParams: []any{"it's"},
+		},
+		"regexp_percent_not_metachar": {
+			input:      `value:/100%/`,
+			wantStr:    "`value` REGEXP ?",
+			wantParams: []any{"100%"},
+		},
+		"basic_default_AND": {
+			input:      "a b",
+			wantStr:    `? AND ?`,
+			wantParams: []any{"a", "b"},
+		},
+		"default_to_AND_with_subexpressions": {
+			input:      "a:b c:d",
+			wantStr:    "(`a` = ?) AND (`c` = ?)",
+			wantParams: []any{"b", "d"},
+		},
+		"basic_and": {
+			input:      "a AND b",
+			wantStr:    `? AND ?`,
+			wantParams: []any{"a", "b"},
+		},
+		"and_with_nesting": {
+			input:      "a:foo AND b:bar",
+			wantStr:    "(`a` = ?) AND (`b` = ?)",
+			wantParams: []any{"foo", "bar"},
+		},
+		"basic_or": {
+			input:      "a OR b",
+			wantStr:    `? OR ?`,
+			wantParams: []any{"a", "b"},
+		},
+		"or_with_nesting": {
+			input:      "a:foo OR b:bar",
+			wantStr:    "(`a` = ?) OR (`b` = ?)",
+			wantParams: []any{"foo", "bar"},
+		},
+		"range_operator_inclusive": {
+			input:      "a:[1 TO 5]",
+			wantStr:    "`a` >= ? AND `a` <= ?",
+			wantParams: []any{1, 5},
+		},
+		"range_operator_inclusive_unbound": {
+			input:      `a:[* TO 200]`,
+			wantStr:    "`a` <= ?",
+			wantParams: []any{200},
+		},
+		"range_operator_exclusive": {
+			input:      `a:{"ab" TO "az"}`,
+			wantStr:    "`a` > ? AND `a` < ?",
+			wantParams: []any{"ab", "az"},
+		},
+		"range_operator_exclusive_unbound": {
+			input:      `a:{2 TO *}`,
+			wantStr:    "`a` > ?",
+			wantParams: []any{2},
+		},
+		"basic_not": {
+			input:      "NOT b",
+			wantStr:    `NOT(?)`,
+			wantParams: []any{"b"},
+		},
+		"nested_not": {
+			input:      "a:foo OR NOT b:bar",
+			wantStr:    "(`a` = ?) OR (NOT(`b` = ?))",
+			wantParams: []any{"foo", "bar"},
+		},
+		"term_grouping": {
+			input:      "(a:foo OR b:bar) AND c:baz",
+			wantStr:    "((`a` = ?) OR (`b` = ?)) AND (`c` = ?)",
+			wantParams: []any{"foo", "bar", "baz"},
+		},
+		"value_grouping": {
+			input:      "a:(foo OR baz OR bar)",
+			wantStr:    "`a` IN (?, ?, ?)",
+			wantParams: []any{"foo", "baz", "bar"},
+		},
+		"basic_must": {
+			input:      "+a:b",
+			wantStr:    "`a` = ?",
+			wantParams: []any{"b"},
+		},
+		"basic_must_not": {
+			input:      "-a:b",
+			wantStr:    "NOT(`a` = ?)",
+			wantParams: []any{"b"},
+		},
+		"basic_nested_must_not": {
+			input:      "d:e AND (-a:b AND +f:e)",
+			wantStr:    "(`d` = ?) AND ((NOT(`a` = ?)) AND (`f` = ?))",
+			wantParams: []any{"e", "b", "e"},
+		},
+		"basic_escaping": {
+			input:      `a:\(1\+1\)\:2`,
+			wantStr:    "`a` = ?",
+			wantParams: []any{"(1+1):2"},
+		},
+		"escaped_column_name": {
+			input:      `foo\ bar:b`,
+			wantStr:    "`foo bar` = ?",
+			wantParams: []any{"b"},
+		},
+		"boost_key_value": {
+			input: "a:b^2 AND foo",
+			err:   "unable to render operator [BOOST]",
+		},
+		"nested_sub_expressions": {
+			input:      "((title:foo OR title:bar) AND (body:foo OR body:bar)) OR k:v",
+			wantStr:    "(((`title` = ?) OR (`title` = ?)) AND ((`body` = ?) OR (`body` = ?))) OR (`k` = ?)",
+			wantParams: []any{"foo", "bar", "foo", "bar", "v"},
+		},
+		"fuzzy_key_value": {
+			input: "a:b~2 AND foo",
+			err:   "unable to render operator [FUZZY]",
+		},
+		"precedence_works": {
+			input:      "a:b AND c:d OR e:f OR h:i AND j:k",
+			wantStr:    "(((`a` = ?) AND (`c` = ?)) OR (`e` = ?)) OR ((`h` = ?) AND (`j` = ?))",
+			wantParams: []any{"b", "d", "f", "i", "k"},
+		},
+		"test_precedence_weaving": {
+			input:      "a OR b AND c OR d",
+			wantStr:    `(? OR (? AND ?)) OR ?`,
+			wantParams: []any{"a", "b", "c", "d"},
+		},
+		"test_precedence_weaving_with_not": {
+			input:      "NOT a OR b AND NOT c OR d",
+			wantStr:    `((NOT(?)) OR (? AND (NOT(?)))) OR ?`,
+			wantParams: []any{"a", "b", "c", "d"},
+		},
+		"test_equals_in_precedence": {
+			input:      "a:az OR b:bz AND NOT c:z OR d",
+			wantStr:    "((`a` = ?) OR ((`b` = ?) AND (NOT(`c` = ?)))) OR ?",
+			wantParams: []any{"az", "bz", "z", "d"},
+		},
+		"test_parens_in_precedence": {
+			input:      "a AND (c OR d)",
+			wantStr:    `? AND (? OR ?)`,
+			wantParams: []any{"a", "c", "d"},
+		},
+		"test_range_precedence_simple": {
+			input:      "c:[* to -1] OR d",
+			wantStr:    "(`c` <= ?) OR ?",
+			wantParams: []any{-1, "d"},
+		},
+		"test_range_precedence": {
+			input:      "a OR b AND c:[* to -1] OR d",
+			wantStr:    "(? OR (? AND (`c` <= ?))) OR ?",
+			wantParams: []any{"a", "b", -1, "d"},
+		},
+		"test_full_precedence": {
+			input:      "a OR b AND c:[* to -1] OR d AND NOT +e:f",
+			wantStr:    "(? OR (? AND (`c` <= ?))) OR (? AND (NOT(`e` = ?)))",
+			wantParams: []any{"a", "b", -1, "d", "f"},
+		},
+		"test_elastic_greater_than_precedence": {
+			input:      "a:>10 AND -b:<=-20",
+			wantStr:    "(`a` > ?) AND (NOT(`b` <= ?))",
+			wantParams: []any{10, -20},
+		},
+		"escape_quotes": {
+			input:      "a:'b'",
+			wantStr:    "`a` = ?",
+			wantParams: []any{"'b'"},
+		},
+		"name_starts_with_number": {
+			input:      "1a:b",
+			wantStr:    "`1a` = ?",
+			wantParams: []any{"b"},
+		},
+		"default_field_and": {
+			input:        `title:"The Right Way" AND go`,
+			wantStr:      "(`title` = ?) AND (`default` = ?)",
+			wantParams:   []any{"The Right Way", "go"},
+			defaultField: "default",
+		},
+		"default_field_or": {
+			input:        `title:"The Right Way" OR go`,
+			wantStr:      "(`title` = ?) OR (`default` = ?)",
+			wantParams:   []any{"The Right Way", "go"},
+			defaultField: "default",
+		},
+		"default_field_not": {
+			input:        `title:"The Right Way" AND NOT(go)`,
+			wantStr:      "(`title` = ?) AND (NOT(`default` = ?))",
+			wantParams:   []any{"The Right Way", "go"},
+			defaultField: "default",
+		},
+		"default_bare_field": {
+			input:        `this is an example`,
+			wantStr:      "(((`default` = ?) AND (`default` = ?)) AND (`default` = ?)) AND (`default` = ?)",
+			wantParams:   []any{"this", "is", "an", "example"},
+			defaultField: "default",
+		},
+		"default_single_literal": {
+			input:        `a`,
+			wantStr:      "`default` = ?",
+			wantParams:   []any{"a"},
+			defaultField: "default",
+		},
+		"question_marks_in_literal_are_regular_expression": {
+			input:      `foo:abc?`,
+			wantStr:    "`foo` LIKE ? ESCAPE '#'",
+			wantParams: []any{"abc_"},
+		},
+		"start asterisk_in_literal_are_regular_expression": {
+			input:      `foo:*`,
+			wantStr:    "`foo` IS NOT NULL",
+			wantParams: []any{},
+		},
+		"implicit_and_with_subexpressions_and_default_field": {
+			input:        `title:"Foo" a b`,
+			wantStr:      "((`title` = ?) AND (`default` = ?)) AND (`default` = ?)",
+			wantParams:   []any{"Foo", "a", "b"},
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field": {
+			input:        `title:"Foo" -a:c b`,
+			wantStr:      "((`title` = ?) AND (NOT(`a` = ?))) AND (`default` = ?)",
+			wantParams:   []any{"Foo", "c", "b"},
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions_and_default_field_reversed": {
+			input:        `title:"Foo" a:c -b`,
+			wantStr:      "((`title` = ?) AND (`a` = ?)) AND (NOT(`default` = ?))",
+			wantParams:   []any{"Foo", "c", "b"},
+			defaultField: "default",
+		},
+		"implicit_and_with_negated_subexpressions": {
+			input:      "-a:b -c:d",
+			wantStr:    "(NOT(`a` = ?)) AND (NOT(`c` = ?))",
+			wantParams: []any{"b", "d"},
+		},
+		"implicit_and_with_explicit_negation": {
+			input:      "a:b NOT c:d",
+			wantStr:    "(`a` = ?) AND (NOT(`c` = ?))",
+			wantParams: []any{"b", "d"},
+		},
+		"implicit_and_with_explicit_subexpression_and_default_field": {
+			input:        `title:"Foo" a:b NOT c`,
+			wantStr:      "((`title` = ?) AND (`a` = ?)) AND (NOT(`default` = ?))",
+			wantParams:   []any{"Foo", "b", "c"},
+			defaultField: "default",
+		},
+		"implicit_and_with_explicit_subexpression_and_keyword_field": {
+			input:      `title:"Foo" a:b NOT k:c`,
+			wantStr:    "((`title` = ?) AND (`a` = ?)) AND (NOT(`k` = ?))",
+			wantParams: []any{"Foo", "b", "c"},
+		},
+		"implicit_and_with_quotes": {
+			input:        `"jakarta apache" -"Apache Lucene"`,
+			wantStr:      "(`default` = ?) AND (NOT(`default` = ?))",
+			wantParams:   []any{"jakarta apache", "Apache Lucene"},
+			defaultField: "default",
+		},
+		"implicit_and_with_multiple_clauses": {
+			input:      `-(k1:v1) k2:v2 -k3:v3`,
+			wantStr:    "((NOT(`k1` = ?)) AND (`k2` = ?)) AND (NOT(`k3` = ?))",
+			wantParams: []any{"v1", "v2", "v3"},
+		},
+		"parenthesized_precedence": {
+			input:      `k1:v1 -(k2:v2 OR k3:v3)`,
+			wantStr:    "(`k1` = ?) AND (NOT((`k2` = ?) OR (`k3` = ?)))",
+			wantParams: []any{"v1", "v2", "v3"},
+		},
+		"comma_separated_terms_with_default_field": {
+			input:        "foo, bar, baz",
+			wantStr:      "((`default` = ?) AND (`default` = ?)) AND (`default` = ?)",
+			wantParams:   []any{"foo", "bar", "baz"},
+			defaultField: "default",
+		},
+		"comma_separated_field_values": {
+			input:      "a:b, c:d",
+			wantStr:    "(`a` = ?) AND (`c` = ?)",
+			wantParams: []any{"b", "d"},
+		},
+		"semicolon_separated_field_values": {
+			input:      "a:b; c:d",
+			wantStr:    "(`a` = ?) AND (`c` = ?)",
+			wantParams: []any{"b", "d"},
+		},
+		"email_field_value": {
+			input:      "email:user@example.com",
+			wantStr:    "`email` = ?",
+			wantParams: []any{"user@example.com"},
+		},
+		"like_literal_percent_param_e2e": {
+			input:      "a:100%*",
+			wantStr:    "`a` LIKE ? ESCAPE '#'",
+			wantParams: []any{"100#%%"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			gotStr, gotParams, err := ToParameterizedMySQL(tc.input, WithDefaultField(tc.defaultField))
+			if err != nil {
+				// if we got an expect error then we are fine
+				if tc.err != "" && strings.Contains(err.Error(), tc.err) {
+					return
+				}
+				t.Fatalf("unexpected error rendering expression: %v", err)
+			}
+
+			if tc.err != "" {
+				t.Fatalf("\nexpected error [%s]\ngot: %s", tc.err, gotStr)
+			}
+
+			if gotStr != tc.wantStr {
+				expr, err := Parse(tc.input)
+				if err != nil {
+					t.Fatalf("unable to parse expression: %v", err)
+				}
+				t.Fatalf("\nwant %s\ngot  %s\nparsed expression: %#v\n", tc.wantStr, gotStr, expr)
+			}
+
+			if len(gotParams) != len(tc.wantParams) {
+				t.Fatalf("expected %d params(%v), got %d (%v)", len(tc.wantParams), tc.wantParams, len(gotParams), gotParams)
+			}
+
+			for i := range gotParams {
+				if gotParams[i] != tc.wantParams[i] {
+					t.Fatalf("expected param %d to be %v, got %v", i, tc.wantParams[i], gotParams[i])
+				}
+			}
+		})
+	}
+}
