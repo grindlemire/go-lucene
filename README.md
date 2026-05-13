@@ -16,6 +16,7 @@ sql, params, err := lucene.ToParameterizedPostgres(query)
 - [Install](#install)
 - [Usage](#usage)
 - [Operator reference](#operator-reference)
+- [Null handling](#null-handling)
 - [SQLite](#sqlite)
 - [MySQL](#mysql)
 - [Custom drivers](#custom-drivers)
@@ -94,8 +95,39 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `field:*` | `"field" SIMILAR TO '%'` | Match anything non-null |
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | Wildcard suffix |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | Single-character wildcard |
+| `field:null` | `"field" IS NULL` | Null check (case-insensitive) |
+| `NOT field:null` | `"field" IS NOT NULL` | Negated null check |
+| `-field:null` | `"field" IS NOT NULL` | Same as `NOT field:null` |
+| `field:(a OR null)` | `("field" = 'a' OR "field" IS NULL)` | OR-chain partitions on null |
+| `field:(a OR b OR null)` | `("field" IN ('a', 'b') OR "field" IS NULL)` | Multi-value with null |
 | `field:/regex/` | `"field" ~ 'regex'` | Regular expression |
 | `(a:1 OR b:2) AND c:3` | `(("a" = 1) OR ("b" = 2)) AND ("c" = 3)` | Grouping |
+
+## Null handling
+
+`field:null` renders as `IS NULL` across every dialect. The keyword is case-insensitive, and the renderer also covers the cases where null appears inside a grouped expression, behind a `NOT`, or alongside other values in an OR-chain.
+
+```
+field:null            ->  "field" IS NULL
+field:NULL            ->  "field" IS NULL
+NOT field:null        ->  "field" IS NOT NULL
+-field:null           ->  "field" IS NOT NULL
+field:(a OR null)     ->  ("field" = 'a' OR "field" IS NULL)
+field:(a OR b OR null)  ->  ("field" IN ('a', 'b') OR "field" IS NULL)
+```
+
+A quoted `"null"` stays a string literal:
+
+```
+field:"null"          ->  "field" = 'null'
+```
+
+Comparison operators against null and range bounds containing null both error rather than produce incorrect SQL:
+
+```
+field:>null         ->  error: comparison operator GREATER cannot be used with null
+field:[null TO 5]   ->  error: null is not allowed as a range bound
+```
 
 ## SQLite
 
