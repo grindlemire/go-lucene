@@ -255,11 +255,21 @@ func TestParseLucene(t *testing.T) {
 			input: `name:"foo\"bar"`,
 			want:  expr.Eq("name", `foo"bar`),
 		},
-		"single_quoted_phrase_escaping_stays_unfixed": {
-			// single-quoted phrases don't strip their delimiters or unescape
-			// today - only double-quoted phrases are fixed by this change.
+		"single_quoted_phrase_plain": {
+			input: `name:'foo bar'`,
+			want:  expr.Eq("name", `foo bar`),
+		},
+		"single_quoted_phrase_with_escaped_quote": {
 			input: `name:'foo\'bar'`,
-			want:  expr.Eq("name", `'foo\'bar'`),
+			want:  expr.Eq("name", `foo'bar`),
+		},
+		"single_quoted_phrase_with_escaped_backslash": {
+			input: `name:'foo\\bar'`,
+			want:  expr.Eq("name", `foo\bar`),
+		},
+		"single_quoted_phrase_preserves_unescaped_backslash": {
+			input: `name:'C:\temp'`,
+			want:  expr.Eq("name", `C:\temp`),
 		},
 		"phrase_with_escaped_backslash": {
 			input: `name:"foo\\bar"`,
@@ -964,14 +974,14 @@ func FuzzParse(f *testing.F) {
 // non-Lucene characters do not cause parse errors (issue #48).
 func TestParseSeparatorCharacters(t *testing.T) {
 	inputs := map[string]string{
-		"comma_from_issue_48":  `\[*\] Actual go routines \[*\], allocated objects in bytes \[*\], allocated objects \[*\]`,
-		"semicolons":           `a; b; c`,
-		"mixed_separators":     `a, b; c`,
-		"email_address":        `user@example.com`,
-		"hash_tag":             `#channel`,
-		"dollar_variable":      `$var`,
-		"field_with_at":        `recipient:user@example.com`,
-		"field_with_hash":      `tag:#important`,
+		"comma_from_issue_48": `\[*\] Actual go routines \[*\], allocated objects in bytes \[*\], allocated objects \[*\]`,
+		"semicolons":          `a; b; c`,
+		"mixed_separators":    `a, b; c`,
+		"email_address":       `user@example.com`,
+		"hash_tag":            `#channel`,
+		"dollar_variable":     `$var`,
+		"field_with_at":       `recipient:user@example.com`,
+		"field_with_hash":     `tag:#important`,
 	}
 
 	for name, input := range inputs {
@@ -988,8 +998,10 @@ func TestParseSeparatorCharacters(t *testing.T) {
 // an escaped quote survives Parse -> String() -> Parse unchanged (issue #59).
 func TestQuotedPhraseRoundTrip(t *testing.T) {
 	tcs := map[string]string{
-		"escaped_quote":            `name:"foo\"bar"`,
-		"escaped_quote_with_space": `name:"foo\"bar baz"`,
+		"escaped_quote":                   `name:"foo\"bar"`,
+		"escaped_quote_with_space":        `name:"foo\"bar baz"`,
+		"escaped_single_quote_no_space":   `name:'it\'s'`,
+		"escaped_single_quote_with_space": `name:'it\'s here'`,
 	}
 
 	for name, input := range tcs {

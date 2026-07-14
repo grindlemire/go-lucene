@@ -144,12 +144,15 @@ func renderLiteral(e *Expression, verbose bool) string {
 	}
 
 	// only a plain Literal can hold a raw quote character today (produced by
-	// unescaping \" inside a double-quoted phrase), so only escape quotes for
-	// those. Wild and Regexp also render through here but keep their prior,
+	// unescaping \" or \' inside a phrase), so only escape/quote-guard those.
+	// Wild and Regexp also render through here but keep their prior,
 	// space-only quoting - their raw text isn't phrase-delimiter-escaped and
 	// wrapping it in quotes here would change what it re-parses as.
 	s, isStr := e.Left.(string)
-	if isStr && e.Op == Literal && strings.ContainsAny(s, ` "`) {
+	if isStr && e.Op == Literal && strings.ContainsAny(s, ` "'`) {
+		// the rendered phrase always uses " as its delimiter, so only " (and
+		// the backslash that would otherwise escape it) need escaping here -
+		// a bare ' just needs the value quoted so it isn't lexed as a word.
 		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
 		return fmt.Sprintf(`"%s"`, escaped)
 	}

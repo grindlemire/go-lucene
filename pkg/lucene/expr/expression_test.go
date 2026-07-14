@@ -407,6 +407,9 @@ func TestRenderLiteralQuoteEscaping(t *testing.T) {
 	if got, want := Lit(`foo"bar`).String(), `"foo\"bar"`; got != want {
 		t.Fatalf("Lit(%q).String() = %q, want %q", `foo"bar`, got, want)
 	}
+	if got, want := Lit(`it's`).String(), `"it's"`; got != want {
+		t.Fatalf("Lit(%q).String() = %q, want %q", `it's`, got, want)
+	}
 	if got, want := WILD(`fo"o*`).String(), `fo"o*`; got != want {
 		t.Fatalf("WILD(%q).String() = %q, want %q", `fo"o*`, got, want)
 	}

@@ -267,16 +267,9 @@ func (p *parser) reduce() (err error) {
 }
 
 func parseLiteral(token lex.Token) (e any, err error) {
+	// strip the delimiters (either " or ') and unescape \<delim> and \\.
 	if token.Typ == lex.TQuoted {
-		// double-quoted phrases: strip the delimiters and unescape \" and \\.
-		if token.Val[0] == '"' {
-			return expr.Lit(unescapePhrase(token.Val)), nil
-		}
-		// single-quoted phrases keep their delimiters in the literal value
-		// today (see the "escape_quotes" driver tests) - that asymmetry with
-		// double-quoted phrases is a separate, pre-existing issue and is left
-		// untouched here.
-		return expr.Lit(strings.ReplaceAll(token.Val, "\"", "")), nil
+		return expr.Lit(unescapePhrase(token.Val)), nil
 	}
 
 	// bare `null` keyword (case-insensitive) -> typed null literal.
