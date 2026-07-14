@@ -273,6 +273,16 @@ func TestParseLucene(t *testing.T) {
 			input: `name:"acme\" OR admin:true OR name:\"x"`,
 			want:  expr.Eq("name", `acme" OR admin:true OR name:"x`),
 		},
+		"phrase_escaped_backslash_at_boundary": {
+			// the escaped-backslash pair sits immediately before the real
+			// closing quote, pinning the off-by-one at the end of the scan.
+			input: `name:"foo\\"`,
+			want:  expr.Eq("name", `foo\`),
+		},
+		"phrase_with_multibyte_utf8_near_escape": {
+			input: `name:"café\"日本語"`,
+			want:  expr.Eq("name", `café"日本語`),
+		},
 		"boost_key_value": {
 			input: "a:b^2 AND foo",
 			want: expr.AND(
@@ -969,6 +979,34 @@ func TestParseSeparatorCharacters(t *testing.T) {
 			_, err := Parse(input)
 			if err != nil {
 				t.Fatalf("expected no error, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestQuotedPhraseRoundTrip verifies that a double-quoted phrase containing
+// an escaped quote survives Parse -> String() -> Parse unchanged (issue #59).
+func TestQuotedPhraseRoundTrip(t *testing.T) {
+	tcs := map[string]string{
+		"escaped_quote":            `name:"foo\"bar"`,
+		"escaped_quote_with_space": `name:"foo\"bar baz"`,
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			first, err := Parse(input)
+			if err != nil {
+				t.Fatalf("expected no error parsing %q, got: %v", input, err)
+			}
+
+			rendered := first.String()
+			second, err := Parse(rendered)
+			if err != nil {
+				t.Fatalf("expected no error re-parsing rendered form %q, got: %v", rendered, err)
+			}
+
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf(errTemplate, "round trip through String() changed the expression", first, second)
 			}
 		})
 	}

@@ -144,8 +144,9 @@ func renderLiteral(e *Expression, verbose bool) string {
 	}
 
 	s, isStr := e.Left.(string)
-	if isStr && strings.ContainsAny(s, " ") {
-		return fmt.Sprintf(`"%s"`, s)
+	if isStr && strings.ContainsAny(s, ` "`) {
+		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
+		return fmt.Sprintf(`"%s"`, escaped)
 	}
 
 	return fmt.Sprintf("%v", e.Left)
