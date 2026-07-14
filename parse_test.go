@@ -251,6 +251,28 @@ func TestParseLucene(t *testing.T) {
 			input: `foo\ bar:b`,
 			want:  expr.Eq(`foo bar`, "b"),
 		},
+		"phrase_with_escaped_double_quote": {
+			input: `name:"foo\"bar"`,
+			want:  expr.Eq("name", `foo"bar`),
+		},
+		"single_quoted_phrase_escaping_stays_unfixed": {
+			// single-quoted phrases don't strip their delimiters or unescape
+			// today - only double-quoted phrases are fixed by this change.
+			input: `name:'foo\'bar'`,
+			want:  expr.Eq("name", `'foo\'bar'`),
+		},
+		"phrase_with_escaped_backslash": {
+			input: `name:"foo\\bar"`,
+			want:  expr.Eq("name", `foo\bar`),
+		},
+		"phrase_preserves_unescaped_backslash": {
+			input: `name:"C:\temp"`,
+			want:  expr.Eq("name", `C:\temp`),
+		},
+		"phrase_escaped_quote_prevents_injection": {
+			input: `name:"acme\" OR admin:true OR name:\"x"`,
+			want:  expr.Eq("name", `acme" OR admin:true OR name:"x`),
+		},
 		"boost_key_value": {
 			input: "a:b^2 AND foo",
 			want: expr.AND(
