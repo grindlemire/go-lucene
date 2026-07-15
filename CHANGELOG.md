@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.1](https://github.com/grindlemire/go-lucene/compare/v0.2.0...v0.2.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* escape embedded quotes when rendering literals back to Lucene syntax ([cc5f8a6](https://github.com/grindlemire/go-lucene/commit/cc5f8a690dc5eb6322b886d6d5de3555b9695139))
+* honor backslash-escaped quotes inside phrases ([56786e1](https://github.com/grindlemire/go-lucene/commit/56786e126899d49553e75ec500f143f13553c193))
+* honor backslash-escaped quotes inside phrases ([d124016](https://github.com/grindlemire/go-lucene/commit/d1240164484566373014b6a2d4c02af394e5fca0)), closes [#59](https://github.com/grindlemire/go-lucene/issues/59)
+* scope quote-escaping in renderLiteral to plain literals only ([bc62f13](https://github.com/grindlemire/go-lucene/commit/bc62f13c019c68b9c8165f7383521d97e03837fc))
+* strip delimiters and unescape single-quoted phrases too ([c2d6ee3](https://github.com/grindlemire/go-lucene/commit/c2d6ee309f15af928a4e221456be73f94d7d80fa))
+
 ## [0.2.0](https://github.com/grindlemire/go-lucene/compare/v0.1.0...v0.2.0) (2026-05-13)
 
 
