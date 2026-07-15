@@ -994,14 +994,16 @@ func TestParseSeparatorCharacters(t *testing.T) {
 	}
 }
 
-// TestQuotedPhraseRoundTrip verifies that a double-quoted phrase containing
-// an escaped quote survives Parse -> String() -> Parse unchanged (issue #59).
+// TestQuotedPhraseRoundTrip verifies that a phrase containing an escaped
+// quote (double- or single-delimited) survives Parse -> String() -> Parse
+// unchanged (issue #59).
 func TestQuotedPhraseRoundTrip(t *testing.T) {
 	tcs := map[string]string{
 		"escaped_quote":                   `name:"foo\"bar"`,
 		"escaped_quote_with_space":        `name:"foo\"bar baz"`,
 		"escaped_single_quote_no_space":   `name:'it\'s'`,
 		"escaped_single_quote_with_space": `name:'it\'s here'`,
+		"escaped_backslash_with_space":    `name:"foo bar\\"`,
 	}
 
 	for name, input := range tcs {

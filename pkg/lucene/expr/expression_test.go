@@ -410,6 +410,13 @@ func TestRenderLiteralQuoteEscaping(t *testing.T) {
 	if got, want := Lit(`it's`).String(), `"it's"`; got != want {
 		t.Fatalf("Lit(%q).String() = %q, want %q", `it's`, got, want)
 	}
+	// a space alone triggers the same quote+escape branch as an embedded
+	// quote, so a literal with both a space and a trailing backslash must
+	// still have the backslash escaped - otherwise it renders as `"foo bar\"`,
+	// which the lexer reads as an escaped closing quote and fails to re-parse.
+	if got, want := Lit(`foo bar\`).String(), `"foo bar\\"`; got != want {
+		t.Fatalf("Lit(%q).String() = %q, want %q", `foo bar\`, got, want)
+	}
 	if got, want := WILD(`fo"o*`).String(), `fo"o*`; got != want {
 		t.Fatalf("WILD(%q).String() = %q, want %q", `fo"o*`, got, want)
 	}
