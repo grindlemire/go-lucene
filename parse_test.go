@@ -251,6 +251,48 @@ func TestParseLucene(t *testing.T) {
 			input: `foo\ bar:b`,
 			want:  expr.Eq(`foo bar`, "b"),
 		},
+		"phrase_with_escaped_double_quote": {
+			input: `name:"foo\"bar"`,
+			want:  expr.Eq("name", `foo"bar`),
+		},
+		"single_quoted_phrase_plain": {
+			input: `name:'foo bar'`,
+			want:  expr.Eq("name", `foo bar`),
+		},
+		"single_quoted_phrase_with_escaped_quote": {
+			input: `name:'foo\'bar'`,
+			want:  expr.Eq("name", `foo'bar`),
+		},
+		"single_quoted_phrase_with_escaped_backslash": {
+			input: `name:'foo\\bar'`,
+			want:  expr.Eq("name", `foo\bar`),
+		},
+		"single_quoted_phrase_preserves_unescaped_backslash": {
+			input: `name:'C:\temp'`,
+			want:  expr.Eq("name", `C:\temp`),
+		},
+		"phrase_with_escaped_backslash": {
+			input: `name:"foo\\bar"`,
+			want:  expr.Eq("name", `foo\bar`),
+		},
+		"phrase_preserves_unescaped_backslash": {
+			input: `name:"C:\temp"`,
+			want:  expr.Eq("name", `C:\temp`),
+		},
+		"phrase_escaped_quote_prevents_injection": {
+			input: `name:"acme\" OR admin:true OR name:\"x"`,
+			want:  expr.Eq("name", `acme" OR admin:true OR name:"x`),
+		},
+		"phrase_escaped_backslash_at_boundary": {
+			// the escaped-backslash pair sits immediately before the real
+			// closing quote, pinning the off-by-one at the end of the scan.
+			input: `name:"foo\\"`,
+			want:  expr.Eq("name", `foo\`),
+		},
+		"phrase_with_multibyte_utf8_near_escape": {
+			input: `name:"café\"日本語"`,
+			want:  expr.Eq("name", `café"日本語`),
+		},
 		"boost_key_value": {
 			input: "a:b^2 AND foo",
 			want: expr.AND(
@@ -932,14 +974,14 @@ func FuzzParse(f *testing.F) {
 // non-Lucene characters do not cause parse errors (issue #48).
 func TestParseSeparatorCharacters(t *testing.T) {
 	inputs := map[string]string{
-		"comma_from_issue_48":  `\[*\] Actual go routines \[*\], allocated objects in bytes \[*\], allocated objects \[*\]`,
-		"semicolons":           `a; b; c`,
-		"mixed_separators":     `a, b; c`,
-		"email_address":        `user@example.com`,
-		"hash_tag":             `#channel`,
-		"dollar_variable":      `$var`,
-		"field_with_at":        `recipient:user@example.com`,
-		"field_with_hash":      `tag:#important`,
+		"comma_from_issue_48": `\[*\] Actual go routines \[*\], allocated objects in bytes \[*\], allocated objects \[*\]`,
+		"semicolons":          `a; b; c`,
+		"mixed_separators":    `a, b; c`,
+		"email_address":       `user@example.com`,
+		"hash_tag":            `#channel`,
+		"dollar_variable":     `$var`,
+		"field_with_at":       `recipient:user@example.com`,
+		"field_with_hash":     `tag:#important`,
 	}
 
 	for name, input := range inputs {
@@ -947,6 +989,38 @@ func TestParseSeparatorCharacters(t *testing.T) {
 			_, err := Parse(input)
 			if err != nil {
 				t.Fatalf("expected no error, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestQuotedPhraseRoundTrip verifies that a phrase containing an escaped
+// quote (double- or single-delimited) survives Parse -> String() -> Parse
+// unchanged (issue #59).
+func TestQuotedPhraseRoundTrip(t *testing.T) {
+	tcs := map[string]string{
+		"escaped_quote":                   `name:"foo\"bar"`,
+		"escaped_quote_with_space":        `name:"foo\"bar baz"`,
+		"escaped_single_quote_no_space":   `name:'it\'s'`,
+		"escaped_single_quote_with_space": `name:'it\'s here'`,
+		"escaped_backslash_with_space":    `name:"foo bar\\"`,
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			first, err := Parse(input)
+			if err != nil {
+				t.Fatalf("expected no error parsing %q, got: %v", input, err)
+			}
+
+			rendered := first.String()
+			second, err := Parse(rendered)
+			if err != nil {
+				t.Fatalf("expected no error re-parsing rendered form %q, got: %v", rendered, err)
+			}
+
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf(errTemplate, "round trip through String() changed the expression", first, second)
 			}
 		})
 	}

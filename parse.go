@@ -267,9 +267,9 @@ func (p *parser) reduce() (err error) {
 }
 
 func parseLiteral(token lex.Token) (e any, err error) {
-	// if it is a quote then remove escape
+	// strip the delimiters (either " or ') and unescape \<delim> and \\.
 	if token.Typ == lex.TQuoted {
-		return expr.Lit(strings.ReplaceAll(token.Val, "\"", "")), nil
+		return expr.Lit(unescapePhrase(token.Val)), nil
 	}
 
 	// bare `null` keyword (case-insensitive) -> typed null literal.
@@ -307,4 +307,23 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	}
 
 	return expr.Lit(token.Val), nil
+}
+
+// unescapePhrase strips the surrounding quote delimiters off a TQuoted token's
+// raw value and unescapes only the delimiter itself and a literal backslash,
+// e.g. \" -> " and \\ -> \. Any other backslash sequence is left untouched so
+// that phrase content like a Windows path (C:\temp) round-trips unchanged.
+func unescapePhrase(val string) string {
+	delim := val[0]
+	inner := val[1 : len(val)-1]
+
+	var b strings.Builder
+	b.Grow(len(inner))
+	for i := 0; i < len(inner); i++ {
+		if inner[i] == '\\' && i+1 < len(inner) && (inner[i+1] == delim || inner[i+1] == '\\') {
+			i++
+		}
+		b.WriteByte(inner[i])
+	}
+	return b.String()
 }

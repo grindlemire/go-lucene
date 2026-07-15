@@ -399,6 +399,32 @@ func TestNullOperatorPlumbing(t *testing.T) {
 	}
 }
 
+// TestRenderLiteralQuoteEscaping pins that only a plain Literal escapes an
+// embedded quote when rendered back to Lucene syntax (issue #59); Wild and
+// Regexp keep their pre-existing, unescaped, space-only quoting since their
+// raw text isn't phrase-delimiter-escaped.
+func TestRenderLiteralQuoteEscaping(t *testing.T) {
+	if got, want := Lit(`foo"bar`).String(), `"foo\"bar"`; got != want {
+		t.Fatalf("Lit(%q).String() = %q, want %q", `foo"bar`, got, want)
+	}
+	if got, want := Lit(`it's`).String(), `"it's"`; got != want {
+		t.Fatalf("Lit(%q).String() = %q, want %q", `it's`, got, want)
+	}
+	// a space alone triggers the same quote+escape branch as an embedded
+	// quote, so a literal with both a space and a trailing backslash must
+	// still have the backslash escaped - otherwise it renders as `"foo bar\"`,
+	// which the lexer reads as an escaped closing quote and fails to re-parse.
+	if got, want := Lit(`foo bar\`).String(), `"foo bar\\"`; got != want {
+		t.Fatalf("Lit(%q).String() = %q, want %q", `foo bar\`, got, want)
+	}
+	if got, want := WILD(`fo"o*`).String(), `fo"o*`; got != want {
+		t.Fatalf("WILD(%q).String() = %q, want %q", `fo"o*`, got, want)
+	}
+	if got, want := REGEXP(`/fo"o/`).String(), `/fo"o/`; got != want {
+		t.Fatalf("REGEXP(%q).String() = %q, want %q", `/fo"o/`, got, want)
+	}
+}
+
 func TestNullValidation(t *testing.T) {
 	if err := Validate(NULL()); err != nil {
 		t.Fatalf("Validate(NULL()) returned err: %v", err)

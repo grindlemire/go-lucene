@@ -267,8 +267,8 @@ func TestPostgresSQLEndToEnd(t *testing.T) {
 			want:  `("a" > 10) AND (NOT("b" <= -20))`,
 		},
 		"escape_quotes": {
-			input: "a:'b'",
-			want:  `"a" = '''b'''`,
+			input: `a:'it\'s here'`,
+			want:  `"a" = 'it''s here'`,
 		},
 		"name_starts_with_number": {
 			input: "1a:b",
@@ -792,10 +792,10 @@ func TestPostgresParameterizedSQLEndToEnd(t *testing.T) {
 			wantStr:    `("a" > $1) AND (NOT("b" <= $2))`,
 			wantParams: []any{10, -20},
 		},
-		"escape_quotes": {
-			input:      "a:'b'",
+		"phrase_quote_unescaping": {
+			input:      `a:'it\'s here'`,
 			wantStr:    `"a" = $1`,
-			wantParams: []any{"'b'"},
+			wantParams: []any{"it's here"},
 		},
 		"name_starts_with_number": {
 			input:      "1a:b",

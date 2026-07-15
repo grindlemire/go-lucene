@@ -263,8 +263,8 @@ func TestMySQLSQLEndToEnd(t *testing.T) {
 			want:  "(`a` > 10) AND (NOT(`b` <= -20))",
 		},
 		"escape_quotes": {
-			input: "a:'b'",
-			want:  "`a` = '''b'''",
+			input: `a:'it\'s here'`,
+			want:  "`a` = 'it''s here'",
 		},
 		"name_starts_with_number": {
 			input: "1a:b",
@@ -749,10 +749,10 @@ func TestMySQLParameterizedSQLEndToEnd(t *testing.T) {
 			wantStr:    "(`a` > ?) AND (NOT(`b` <= ?))",
 			wantParams: []any{10, -20},
 		},
-		"escape_quotes": {
-			input:      "a:'b'",
+		"phrase_quote_unescaping": {
+			input:      `a:'it\'s here'`,
 			wantStr:    "`a` = ?",
-			wantParams: []any{"'b'"},
+			wantParams: []any{"it's here"},
 		},
 		"name_starts_with_number": {
 			input:      "1a:b",

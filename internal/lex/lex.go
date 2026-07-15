@@ -251,8 +251,10 @@ func lexPhrase(l *Lexer) tokenStateFn {
 
 	for {
 		switch r := l.next(); {
-		case isAlphaNumeric(r) || isWildcard(r) || isEscape(r):
+		case isAlphaNumeric(r) || isWildcard(r):
 			// do nothing
+		case isEscape(r):
+			l.next() // consume the escaped char so \" stays inside the phrase
 		case r == ' ' || r == '\t' || r == '\r' || r == '\n':
 			// do nothing
 		case r == open:

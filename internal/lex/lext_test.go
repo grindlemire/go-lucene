@@ -238,6 +238,30 @@ func TestLex(t *testing.T) {
 				tok(TQuoted, "\"works well\""),
 			},
 		},
+		"escaped_double_quote_stays_in_phrase": {
+			in: `"foo\"bar"`,
+			expected: []Token{
+				tok(TQuoted, `"foo\"bar"`),
+			},
+		},
+		"escaped_single_quote_stays_in_phrase": {
+			in: `'foo\'bar'`,
+			expected: []Token{
+				tok(TQuoted, `'foo\'bar'`),
+			},
+		},
+		"escaped_backslash_before_closing_quote": {
+			in: `"foo\\"`,
+			expected: []Token{
+				tok(TQuoted, `"foo\\"`),
+			},
+		},
+		"unterminated_quote_with_trailing_backslash": {
+			in: `"foo\`,
+			expected: []Token{
+				tok(TErr, "unterminated quote"),
+			},
+		},
 		"percent_sign_standalone": {
 			in: "100%",
 			expected: []Token{
