@@ -92,7 +92,14 @@ func (sqliteDialect) QuoteColumn(name string) (string, error) {
 }
 
 // RenderJSONPath uses json_extract, which returns JSON strings as text and JSON
-// numbers as numbers, so no cast is needed.
-func (d sqliteDialect) RenderJSONPath(column string, path []string, _ bool) (string, error) {
-	return fmt.Sprintf("json_extract(%s, %s)", column, d.EscapeStringLiteral(dollarJSONPath(path))), nil
+// numbers as numbers. The type check matters for numbers, because SQLite orders
+// every text value above every number.
+func (d sqliteDialect) RenderJSONPath(column string, path []string) (JSONPathSQL, error) {
+	jsonPath := d.EscapeStringLiteral(dollarJSONPath(path))
+	value := fmt.Sprintf("json_extract(%s, %s)", column, jsonPath)
+	return JSONPathSQL{
+		Text:     value,
+		IsNumber: fmt.Sprintf("json_type(%s, %s) IN ('integer', 'real')", column, jsonPath),
+		Number:   value,
+	}, nil
 }

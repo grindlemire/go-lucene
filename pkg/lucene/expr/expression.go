@@ -218,11 +218,26 @@ func (c Column) GoString() string {
 // Column "labels" with Path ["category"]. The parser produces it in column
 // position for columns registered with lucene.WithJSONFields.
 type JSONPath struct {
-	Column Column
-	Path   []string
+	Column Column   `json:"column"`
+	Path   []string `json:"path"`
 }
 
-// String renders the path in lucene dot syntax so the expression round-trips.
+// jsonPathLeaf is the JSON form of a JSONPath leaf. The "json_path" key tells
+// it apart from a nested expression object.
+type jsonPathLeaf struct {
+	JSONPath *jsonPathFields `json:"json_path"`
+}
+
+// jsonPathFields has JSONPath's fields without its MarshalJSON method.
+type jsonPathFields JSONPath
+
+// MarshalJSON wraps the path in a "json_path" object so UnmarshalJSON can tell
+// it apart from a nested expression.
+func (p JSONPath) MarshalJSON() ([]byte, error) {
+	return json.Marshal(jsonPathLeaf{JSONPath: (*jsonPathFields)(&p)})
+}
+
+// String renders the path in lucene dot syntax, e.g. labels.category.
 func (p JSONPath) String() string {
 	return string(p.Column) + "." + strings.Join(p.Path, ".")
 }
@@ -383,6 +398,19 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		return err
 	}
 
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
+	if raw, ok := keys["json_path"]; ok {
+		p, err := unmarshalJSONPath(raw, len(keys))
+		if err != nil {
+			return err
+		}
+		*e = *Lit(p)
+		return nil
+	}
+
 	// unmarshal the current layer in the json first, then worry about
 	// the left and right hand subobjects
 	var c jsonExpression
@@ -460,6 +488,20 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	}
 
 	return nil
+}
+
+func unmarshalJSONPath(raw json.RawMessage, keys int) (JSONPath, error) {
+	if keys != 1 {
+		return JSONPath{}, fmt.Errorf("json_path must be the only key of its object")
+	}
+	var p jsonPathFields
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return JSONPath{}, fmt.Errorf("invalid json_path: %w", err)
+	}
+	if p.Column == "" || len(p.Path) == 0 {
+		return JSONPath{}, fmt.Errorf("json_path needs a column and a non-empty path")
+	}
+	return JSONPath(p), nil
 }
 
 func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {

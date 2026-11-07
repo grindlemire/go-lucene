@@ -135,23 +135,26 @@ field:[null TO 5]   ->  error: null is not allowed as a range bound
 Register the columns that hold JSON with `WithJSONFields`. A dotted field on one of them reads a key inside the JSON value:
 
 ```go
-sql, err := lucene.ToPostgres(`metadata.address.city:Boston AND labels.count:>5`,
+sql, err := lucene.ToPostgres(`metadata.address.city:Boston AND labels.category:fruit`,
     lucene.WithJSONFields("labels", "metadata"))
-// ("metadata"->'address'->>'city' = 'Boston') AND (("labels"->>'count')::numeric > 5)
+// ("metadata"->'address'->>'city' = 'Boston') AND ("labels"->>'category' = 'fruit')
 ```
 
 | Lucene | Postgres | MySQL / MariaDB | SQLite |
 |---|---|---|---|
-| `labels.category:fruit` | `"labels"->>'category' = 'fruit'` | ``JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) = 'fruit'`` | `json_extract("labels", '$.category') = 'fruit'` |
-| `labels.count:>5` | `("labels"->>'count')::numeric > 5` | ``JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.count')) > 5`` | `json_extract("labels", '$.count') > 5` |
-| `labels.category:null` | `"labels"->>'category' IS NULL` | ``JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) IS NULL`` | `json_extract("labels", '$.category') IS NULL` |
+| `labels.category:fruit` | `"labels"->>'category' = 'fruit'` | `JSON_UNQUOTE(...)` of the value, NULL for a JSON null | `json_extract("labels", '$.category') = 'fruit'` |
+| `labels.category:null` | `"labels"->>'category' IS NULL` | same accessor `IS NULL` | `json_extract(...) IS NULL` |
+| `labels.count:>5` | the value cast to `numeric` when it is a JSON number | `JSON_EXTRACT(...)` when `JSON_TYPE` is a number | `json_extract(...)` when `json_type` is `integer` or `real` |
 
 Every operator works on a JSON path: comparisons, ranges, IN lists, wildcards, regex and null.
 
 - Without the option, or for a column that is not registered, a dotted field is still one column name: `other.category` renders as `"other.category"`.
 - A registered column without a dot (`labels:x`) is compared as a whole column, as before.
-- Postgres compares the extracted text. When the value is a number, it casts to `numeric`, so a key that holds non-numeric text makes that query fail.
-- Keys that are not identifier-shaped are quoted in the MySQL and SQLite path (`$."a[0]"`). A key that contains `"`, `\` or a null byte is rejected with an error.
+- A comparison with a number (`labels.count:>5`, `labels.count:[1 TO 10]`, `labels.count:(1 OR 2)`) matches only values that are JSON numbers. Any other value, such as `"abc"`, `"5"` or `true`, does not match, and it does not make the query fail. Negation keeps those values: `-labels.count:>5` matches `"abc"`.
+- A missing key and a JSON `null` are both `null`: `labels.category:null` matches both.
+- A range or IN list that mixes numbers and text compares as text. Postgres rejects that comparison, the same as for a text column.
+- Text comparisons follow the database: MySQL compares the extracted text case-sensitively, and SQLite returns `true`/`false` as `1`/`0`, so `labels.flag:true` does not match there.
+- Keys that are not identifier-shaped are quoted in the MySQL and SQLite path (`$."a[0]"`). A key that contains `"`, `\` or a control character is rejected with an error. A dot always separates keys, so a key that contains a dot cannot be addressed.
 - Array containment (`labels.tags:foo` meaning "the array contains foo") is not supported.
 
 ## SQLite

@@ -230,10 +230,10 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 
 	const labels = `
         ALTER TABLE items ADD COLUMN labels TEXT;
-        UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes"}' WHERE id = 1;
-        UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}}' WHERE id = 2;
-        UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}}' WHERE id = 3;
-        UPDATE items SET labels = '{"color": "green"}' WHERE id = 4;
+        UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes", "n": 10}' WHERE id = 1;
+        UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}, "n": "abc"}' WHERE id = 2;
+        UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}, "n": null}' WHERE id = 3;
+        UPDATE items SET labels = '{"color": "green", "n": true}' WHERE id = 4;
     `
 	if _, err := db.Exec(labels); err != nil {
 		t.Fatalf("seed labels: %v", err)
@@ -258,6 +258,16 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 		{"quote_in_key", `labels.it\'s:yes`, []int{1}},
 		{"injection_in_key", `labels.x\'\ OR\ \'a\'\ \=\ \'a:z`, nil},
 		{"with_plain_column", `category:fruit AND labels.color:yellow`, []int{2}},
+		// n is 10, "abc", JSON null and true in rows 1-4.
+		{"numeric_skips_text", `labels.n:>5`, []int{1}},
+		{"numeric_zero_skips_text", `labels.n:0`, nil},
+		{"numeric_less_skips_text", `labels.n:<100`, []int{1}},
+		{"json_null", `labels.n:null`, []int{3, 5}},
+		{"not_json_null", `NOT labels.n:null`, []int{1, 2, 4}},
+		{"numeric_in_with_null", `labels.n:(10 OR null)`, []int{1, 3, 5}},
+		{"text_value", `labels.n:abc`, []int{2}},
+		{"not_numeric_keeps_non_numbers", `-labels.n:>5`, []int{2, 4}},
+		{"not_equal_number", `-labels.n:7`, []int{1, 2, 4}},
 	}
 
 	opt := lucene.WithJSONFields("labels")
