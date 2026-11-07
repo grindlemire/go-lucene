@@ -724,6 +724,13 @@ func TestParseLucene(t *testing.T) {
 				expr.IN(expr.Lit("k2"), expr.LIST(expr.Lit("v2"), expr.Lit("v3"))),
 			),
 		},
+		"implicit_and_after_boost_before_group": {
+			input: `k1:v1^2 (k2:v2)`,
+			want: expr.AND(
+				expr.BOOST(expr.Eq("k1", "v1"), 2),
+				expr.Eq("k2", "v2"),
+			),
+		},
 		"parenthesized_precedence": {
 			input: `k1:v1 -(k2:v2 OR k3:v3)`,
 			want: expr.AND(
