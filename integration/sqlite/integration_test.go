@@ -223,3 +223,63 @@ func TestSQLiteIntegrationParameterized(t *testing.T) {
 		})
 	}
 }
+
+func TestSQLiteIntegrationJSONPath(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const labels = `
+        ALTER TABLE items ADD COLUMN labels TEXT;
+        UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes"}' WHERE id = 1;
+        UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}}' WHERE id = 2;
+        UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}}' WHERE id = 3;
+        UPDATE items SET labels = '{"color": "green"}' WHERE id = 4;
+    `
+	if _, err := db.Exec(labels); err != nil {
+		t.Fatalf("seed labels: %v", err)
+	}
+
+	// Row 5 has labels = NULL; row 4 has no stock key.
+	cases := []struct {
+		name    string
+		lucene  string
+		wantIDs []int
+	}{
+		{"equality", `labels.color:red`, []int{1}},
+		{"nested_greater", `labels.stock.count:>5`, []int{1, 3}},
+		{"nested_range", `labels.stock.count:[3 TO 10]`, []int{1, 2}},
+		{"nested_in_numbers", `labels.stock.count:(3 OR 25)`, []int{2, 3}},
+		{"in_list", `labels.color:(red OR yellow)`, []int{1, 2}},
+		{"glob", `labels.color:ye*`, []int{2}},
+		{"null", `labels.stock.count:null`, []int{4, 5}},
+		{"not_null", `NOT labels.stock.count:null`, []int{1, 2, 3}},
+		{"in_list_with_null", `labels.color:(red OR null)`, []int{1, 5}},
+		{"standalone_star", `labels.color:*`, []int{1, 2, 3, 4}},
+		{"quote_in_key", `labels.it\'s:yes`, []int{1}},
+		{"injection_in_key", `labels.x\'\ OR\ \'a\'\ \=\ \'a:z`, nil},
+		{"with_plain_column", `category:fruit AND labels.color:yellow`, []int{2}},
+	}
+
+	opt := lucene.WithJSONFields("labels")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToSQLite(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedSQLite(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToParameterizedSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}

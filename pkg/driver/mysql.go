@@ -154,3 +154,9 @@ func (mysqlDialect) QuoteColumn(name string) (string, error) {
 	}
 	return "`" + name + "`", nil
 }
+
+// RenderJSONPath unquotes the extracted value so it compares as text, the same
+// as a plain column. MySQL converts that text for numeric comparisons itself.
+func (d mysqlDialect) RenderJSONPath(column string, path []string, _ bool) (string, error) {
+	return fmt.Sprintf("JSON_UNQUOTE(JSON_EXTRACT(%s, %s))", column, d.EscapeStringLiteral(dollarJSONPath(path))), nil
+}

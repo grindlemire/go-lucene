@@ -135,9 +135,16 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 
 	d := b.dialect()
 
-	left, lparams, err := b.serializeParams(e.Left)
+	left, isPath, err := b.renderLeft(e)
 	if err != nil {
 		return s, params, err
+	}
+	var lparams []any
+	if !isPath {
+		left, lparams, err = b.serializeParams(e.Left)
+		if err != nil {
+			return s, params, err
+		}
 	}
 
 	// Range: access typed boundary directly, skip serializing right side
@@ -287,9 +294,15 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 
 	d := b.dialect()
 
-	left, err := b.serialize(e.Left)
+	left, isPath, err := b.renderLeft(e)
 	if err != nil {
 		return s, err
+	}
+	if !isPath {
+		left, err = b.serialize(e.Left)
+		if err != nil {
+			return s, err
+		}
 	}
 
 	// Range: access typed boundary directly, skip serializing right side
@@ -400,7 +413,7 @@ func (b Base) isSimple(in any) bool {
 	switch v := in.(type) {
 	case *expr.Expression:
 		return v.Op == expr.Undefined || v.Op == expr.Literal || v.Op == expr.Regexp || v.Op == expr.Wild
-	case expr.Column:
+	case expr.Column, expr.JSONPath:
 		return true
 	case nil:
 		return true
@@ -442,6 +455,8 @@ func (b Base) serialize(in any) (s string, err error) {
 			return "", fmt.Errorf("column name is empty")
 		}
 		return b.dialect().QuoteColumn(string(v))
+	case expr.JSONPath:
+		return b.renderJSONPath(v, false)
 	case string:
 		return b.dialect().EscapeStringLiteral(v), nil
 	case bool:
@@ -487,6 +502,9 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 			return "", params, err
 		}
 		return quoted, params, nil
+	case expr.JSONPath:
+		s, err := b.renderJSONPath(v, false)
+		return s, params, err
 	case bool:
 		return "?", []any{b.dialect().BoolParam(v)}, nil
 	case string:

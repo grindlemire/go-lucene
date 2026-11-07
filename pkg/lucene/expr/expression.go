@@ -214,6 +214,24 @@ func (c Column) GoString() string {
 	return fmt.Sprintf("COLUMN(%s)", c)
 }
 
+// JSONPath addresses a key inside a JSON column, e.g. labels.category is
+// Column "labels" with Path ["category"]. The parser produces it in column
+// position for columns registered with lucene.WithJSONFields.
+type JSONPath struct {
+	Column Column
+	Path   []string
+}
+
+// String renders the path in lucene dot syntax so the expression round-trips.
+func (p JSONPath) String() string {
+	return string(p.Column) + "." + strings.Join(p.Path, ".")
+}
+
+// GoString is a debug print for the json path type
+func (p JSONPath) GoString() string {
+	return fmt.Sprintf("JSON_PATH(%s)", p)
+}
+
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {

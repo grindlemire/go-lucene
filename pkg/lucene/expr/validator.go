@@ -392,8 +392,12 @@ func isLiteral(in any) bool {
 }
 
 func isColumn(in any) bool {
-	_, is := in.(Column)
-	return is
+	switch in.(type) {
+	case Column, JSONPath:
+		return true
+	default:
+		return false
+	}
 }
 
 func isString(in any) bool {

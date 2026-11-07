@@ -17,6 +17,7 @@ sql, params, err := lucene.ToParameterizedPostgres(query)
 - [Usage](#usage)
 - [Operator reference](#operator-reference)
 - [Null handling](#null-handling)
+- [JSON fields](#json-fields)
 - [SQLite](#sqlite)
 - [MySQL](#mysql)
 - [Custom drivers](#custom-drivers)
@@ -128,6 +129,30 @@ Comparison operators against null and range bounds containing null both error ra
 field:>null         ->  error: comparison operator GREATER cannot be used with null
 field:[null TO 5]   ->  error: null is not allowed as a range bound
 ```
+
+## JSON fields
+
+Register the columns that hold JSON with `WithJSONFields`. A dotted field on one of them reads a key inside the JSON value:
+
+```go
+sql, err := lucene.ToPostgres(`metadata.address.city:Boston AND labels.count:>5`,
+    lucene.WithJSONFields("labels", "metadata"))
+// ("metadata"->'address'->>'city' = 'Boston') AND (("labels"->>'count')::numeric > 5)
+```
+
+| Lucene | Postgres | MySQL / MariaDB | SQLite |
+|---|---|---|---|
+| `labels.category:fruit` | `"labels"->>'category' = 'fruit'` | ``JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) = 'fruit'`` | `json_extract("labels", '$.category') = 'fruit'` |
+| `labels.count:>5` | `("labels"->>'count')::numeric > 5` | ``JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.count')) > 5`` | `json_extract("labels", '$.count') > 5` |
+| `labels.category:null` | `"labels"->>'category' IS NULL` | ``JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) IS NULL`` | `json_extract("labels", '$.category') IS NULL` |
+
+Every operator works on a JSON path: comparisons, ranges, IN lists, wildcards, regex and null.
+
+- Without the option, or for a column that is not registered, a dotted field is still one column name: `other.category` renders as `"other.category"`.
+- A registered column without a dot (`labels:x`) is compared as a whole column, as before.
+- Postgres compares the extracted text. When the value is a number, it casts to `numeric`, so a key that holds non-numeric text makes that query fail.
+- Keys that are not identifier-shaped are quoted in the MySQL and SQLite path (`$."a[0]"`). A key that contains `"`, `\` or a null byte is rejected with an error.
+- Array containment (`labels.tags:foo` meaning "the array contains foo") is not supported.
 
 ## SQLite
 
@@ -330,6 +355,8 @@ The three built-in drivers are the best reference implementations: [`pkg/driver/
 ### Dialect defaults
 
 A driver that leaves `driver.Base.Dialect` unset inherits Postgres-flavored rendering: `SIMILAR TO` for wildcards, `~` for regex, and `true`/`false` for bool literals. Set a `Dialect` on the embedded `Base` whenever your target database diverges from that.
+
+To render [JSON fields](#json-fields), a dialect also implements `driver.JSONPathDialect`. A dialect without it returns an error for a JSON path and renders everything else as before.
 
 ### Migrating from pre-Dialect drivers
 

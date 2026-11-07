@@ -90,3 +90,9 @@ func (sqliteDialect) QuoteColumn(name string) (string, error) {
 	}
 	return `"` + name + `"`, nil
 }
+
+// RenderJSONPath uses json_extract, which returns JSON strings as text and JSON
+// numbers as numbers, so no cast is needed.
+func (d sqliteDialect) RenderJSONPath(column string, path []string, _ bool) (string, error) {
+	return fmt.Sprintf("json_extract(%s, %s)", column, d.EscapeStringLiteral(dollarJSONPath(path))), nil
+}

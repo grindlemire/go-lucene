@@ -97,3 +97,23 @@ func (postgresDialect) QuoteColumn(name string) (string, error) {
 	}
 	return `"` + name + `"`, nil
 }
+
+// RenderJSONPath chains -> through intermediate objects and ends with ->> for
+// the text leaf: "metadata"->'address'->>'city'. ->> already yields text, so a
+// cast is added only for numeric comparisons.
+func (d postgresDialect) RenderJSONPath(column string, path []string, numeric bool) (string, error) {
+	var b strings.Builder
+	b.WriteString(column)
+	for i, seg := range path {
+		if i == len(path)-1 {
+			b.WriteString("->>")
+		} else {
+			b.WriteString("->")
+		}
+		b.WriteString(d.EscapeStringLiteral(seg))
+	}
+	if numeric {
+		return "(" + b.String() + ")::numeric", nil
+	}
+	return b.String(), nil
+}

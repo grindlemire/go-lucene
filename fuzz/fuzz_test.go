@@ -23,6 +23,9 @@ func FuzzPostgresDriver(f *testing.F) {
 		`-bbq:"woo"`,
 		`(a:b)^10`,
 		`a:foo~`,
+		`a.b:c AND a.b.c:>5`,
+		`a.b:[1 TO 10] OR a.b:(x OR y)`,
+		`a.it\'s:x AND NOT a.b:null`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
@@ -45,6 +48,15 @@ func FuzzPostgresDriver(f *testing.F) {
 		}
 
 		validateRender(t, e)
+
+		// Test JSON paths on a registered column.
+		e, err = lucene.Parse(in, lucene.WithJSONFields("a", "A"))
+		if err != nil {
+			// Ignore invalid expressions.
+			return
+		}
+
+		validateRender(t, e)
 	})
 }
 
@@ -57,6 +69,9 @@ func validateRender(t *testing.T, e *expr.Expression) {
 			strings.Contains(err.Error(), "literal contains null byte") ||
 			strings.Contains(err.Error(), "column name contains a double quote") ||
 			strings.Contains(err.Error(), "column name is empty") ||
+			strings.Contains(err.Error(), "json path segment contains") ||
+			strings.Contains(err.Error(), "json path segment is not valid UTF-8") ||
+			strings.Contains(err.Error(), "json path has an empty segment") ||
 			strings.Contains(err.Error(), "the BETWEEN operator needs a two item list in the right hand side") {
 			return
 		}

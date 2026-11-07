@@ -21,6 +21,21 @@ func WithDefaultField(field string) Opt {
 	}
 }
 
+// WithJSONFields marks columns that hold JSON. A dotted field on one of these
+// columns, such as labels.category, parses to an expr.JSONPath and the SQL drivers
+// render it with the dialect's JSON accessor. Dotted fields on other columns
+// keep their current meaning: a column whose name contains a dot.
+func WithJSONFields(columns ...string) Opt {
+	return func(p *parser) {
+		if p.jsonFields == nil {
+			p.jsonFields = map[string]bool{}
+		}
+		for _, c := range columns {
+			p.jsonFields[c] = true
+		}
+	}
+}
+
 // Parse will parse a lucene expression string using a buffer and the shift reduce algorithm. The returned expression
 // is an AST that can be rendered to a variety of different formats.
 func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
@@ -39,6 +54,10 @@ func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
 		return e, err
 	}
 
+	if len(p.jsonFields) > 0 {
+		toJSONPaths(ex, p.jsonFields)
+	}
+
 	err = expr.Validate(ex)
 	if err != nil {
 		return e, err
@@ -53,6 +72,31 @@ type parser struct {
 	nonTerminals []lex.Token
 
 	defaultField string
+	jsonFields   map[string]bool
+}
+
+// toJSONPaths replaces each column named "<json column>.<path>" with an expr.JSONPath.
+func toJSONPaths(e *expr.Expression, jsonFields map[string]bool) {
+	if e == nil {
+		return
+	}
+	if col, ok := e.Left.(expr.Column); ok {
+		base, path, dotted := strings.Cut(string(col), ".")
+		if dotted && jsonFields[base] {
+			e.Left = expr.JSONPath{Column: expr.Column(base), Path: strings.Split(path, ".")}
+		}
+		return
+	}
+	for _, side := range []any{e.Left, e.Right} {
+		switch v := side.(type) {
+		case *expr.Expression:
+			toJSONPaths(v, jsonFields)
+		case []*expr.Expression:
+			for _, child := range v {
+				toJSONPaths(child, jsonFields)
+			}
+		}
+	}
 }
 
 func (p *parser) parse() (e *expr.Expression, err error) {

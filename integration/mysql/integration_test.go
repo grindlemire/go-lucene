@@ -530,3 +530,59 @@ func TestMySQLParameterPlaceholderIsQuestionMark(t *testing.T) {
 		t.Fatalf("want params [\"b\"], got %v", params)
 	}
 }
+
+func TestMySQLIntegrationJSONPath(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const labels = `
+		ALTER TABLE items ADD COLUMN labels JSON;
+		UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes"}' WHERE id = 1;
+		UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}}' WHERE id = 2;
+		UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}}' WHERE id = 3;
+		UPDATE items SET labels = '{"color": "green"}' WHERE id = 4;
+	`
+	if _, err := db.Exec(labels); err != nil {
+		t.Fatalf("seed labels: %v", err)
+	}
+
+	// Rows 5-7 have labels = NULL; row 4 has no stock key.
+	cases := []integrationCase{
+		{name: "equality", lucene: `labels.color:red`, wantIDs: []int{1}},
+		{name: "nested_greater", lucene: `labels.stock.count:>5`, wantIDs: []int{1, 3}},
+		{name: "nested_range", lucene: `labels.stock.count:[3 TO 10]`, wantIDs: []int{1, 2}},
+		{name: "nested_in_numbers", lucene: `labels.stock.count:(3 OR 25)`, wantIDs: []int{2, 3}},
+		{name: "in_list", lucene: `labels.color:(red OR yellow)`, wantIDs: []int{1, 2}},
+		{name: "like_prefix", lucene: `labels.color:ye*`, wantIDs: []int{2}},
+		{name: "null", lucene: `labels.stock.count:null`, wantIDs: []int{4, 5, 6, 7}},
+		{name: "not_null", lucene: `NOT labels.stock.count:null`, wantIDs: []int{1, 2, 3}},
+		{name: "in_list_with_null", lucene: `labels.color:(red OR null)`, wantIDs: []int{1, 5, 6, 7}},
+		{name: "standalone_star", lucene: `labels.color:*`, wantIDs: []int{1, 2, 3, 4}},
+		{name: "quote_in_key", lucene: `labels.it\'s:yes`, wantIDs: []int{1}},
+		{name: "injection_in_key", lucene: `labels.x\'\ OR\ \'a\'\ \=\ \'a:z`, wantIDs: nil},
+		{name: "with_plain_column", lucene: `category:fruit AND labels.color:yellow`, wantIDs: []int{2}},
+	}
+
+	opt := lucene.WithJSONFields("labels")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToMySQL(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedMySQL(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToParameterizedMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}
