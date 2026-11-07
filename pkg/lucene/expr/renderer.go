@@ -41,7 +41,16 @@ func renderBasic(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("(%#v) %s (%#v)", e.Left, toString[e.Op], e.Right)
 	}
-	return fmt.Sprintf("%s %s %s", e.Left, toString[e.Op], e.Right)
+	return fmt.Sprintf("%s %s %s", group(e.Left), toString[e.Op], group(e.Right))
+}
+
+// group renders an AND or OR operand in parentheses so that String() output
+// re-parses to the same expression.
+func group(in any) string {
+	if e, ok := in.(*Expression); ok && (e.Op == And || e.Op == Or) {
+		return fmt.Sprintf("(%s)", e)
+	}
+	return fmt.Sprintf("%s", in)
 }
 
 func renderWrapper(e *Expression, verbose bool) string {
@@ -55,14 +64,14 @@ func renderMustNot(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
-	return fmt.Sprintf("-%s", e.Left)
+	return fmt.Sprintf("-%s", group(e.Left))
 }
 
 func renderMust(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
-	return fmt.Sprintf("+%s", e.Left)
+	return fmt.Sprintf("+%s", group(e.Left))
 }
 
 func renderBoost(e *Expression, verbose bool) string {
@@ -75,10 +84,10 @@ func renderBoost(e *Expression, verbose bool) string {
 	}
 
 	if e.boostPower > 1 {
-		return fmt.Sprintf("%s^%.1f", e.Left, e.boostPower)
+		return fmt.Sprintf("%s^%.1f", group(e.Left), e.boostPower)
 	}
 
-	return fmt.Sprintf("%s^", e.Left)
+	return fmt.Sprintf("%s^", group(e.Left))
 }
 
 func renderFuzzy(e *Expression, verbose bool) string {
@@ -91,10 +100,10 @@ func renderFuzzy(e *Expression, verbose bool) string {
 	}
 
 	if e.fuzzyDistance > 1 {
-		return fmt.Sprintf("%s~%d", e.Left, e.fuzzyDistance)
+		return fmt.Sprintf("%s~%d", group(e.Left), e.fuzzyDistance)
 	}
 
-	return fmt.Sprintf("%s~", e.Left)
+	return fmt.Sprintf("%s~", group(e.Left))
 }
 
 func renderRange(e *Expression, verbose bool) string {
