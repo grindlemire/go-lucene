@@ -1026,9 +1026,9 @@ func TestQuotedPhraseRoundTrip(t *testing.T) {
 	}
 }
 
-// TestGroupingRoundTrip verifies that String() keeps the parentheses around a
-// grouped sub-expression, so Parse -> String() -> Parse gives the same
-// expression (issue #64).
+// TestGroupingRoundTrip verifies that String() keeps the parentheses around an
+// AND/OR sub-expression, so Parse -> String() -> Parse gives the same
+// expression for boolean grouping (issue #64).
 func TestGroupingRoundTrip(t *testing.T) {
 	tcs := map[string]struct {
 		input string
@@ -1042,9 +1042,17 @@ func TestGroupingRoundTrip(t *testing.T) {
 		"must_not_group":       {`-(a:1 OR b:2)`, `-(a:1 OR b:2)`},
 		"must_group":           {`+(a:1 OR b:2)`, `+(a:1 OR b:2)`},
 		"boost_group":          {`(a:1 OR b:2)^2`, `(a:1 OR b:2)^2.0`},
+		"boost_group_default":  {`(a:1 OR b:2)^`, `(a:1 OR b:2)^`},
+		"fuzzy_group":          {`(a:1 OR b:2)~2`, `(a:1 OR b:2)~2`},
 		"not_group":            {`NOT (a:1 OR b:2)`, `NOT(a:1 OR b:2)`},
 		"nested":               {`a:1 AND (b:2 OR (c:3 AND -(d:4 OR e:5)))`, `a:1 AND (b:2 OR (c:3 AND -(d:4 OR e:5)))`},
 		"flat_and":             {`a:1 AND b:2`, `a:1 AND b:2`},
+		"must_not_must_not":    {`-(-a:1)`, `-(-a:1)`},
+		"must_must_not":        {`+(-a:1)`, `+(-a:1)`},
+		"must_must":            {`+(+a:1)`, `+(+a:1)`},
+		"must_not_not":         {`-(NOT a:1)`, `-(NOT(a:1))`},
+		"fuzzy_of_boost":       {`(a:1^2)~2`, `(a:1^2.0)~2`},
+		"and_of_must_not":      {`a:1 AND -b:2`, `a:1 AND -b:2`},
 		"must_term":            {`-a:1`, `-a:1`},
 	}
 
