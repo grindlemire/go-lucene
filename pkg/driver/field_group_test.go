@@ -90,6 +90,13 @@ func TestRenderSpreadsFieldGroup(t *testing.T) {
 			param:  `("labels"->>'k' = $1) AND ("labels"->>'k' = $2)`,
 			params: []any{"x", "y"},
 		},
+		// The JSON of a range with no field has "left":null.
+		"range_from_json": {
+			input:  mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":{"left":{"left":null,"operator":"RANGE","right":{"min":1,"max":5,"inclusive":true}},"operator":"OR","right":"x"}}`),
+			render: `("a" >= 1 AND "a" <= 5) OR ("a" = 'x')`,
+			param:  `("a" >= $1 AND "a" <= $2) OR ("a" = $3)`,
+			params: []any{1, 5, "x"},
+		},
 		"from_json": {
 			input:  mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":{"left":"x","operator":"AND","right":{"left":"y","operator":"NOT"}}}`),
 			render: `("a" = 'x') AND (NOT("a" = 'y'))`,

@@ -575,6 +575,14 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 
 	e.Op = fromString[c.Operator]
 
+	// The left side of a field operator is its field. MarshalJSON writes a
+	// missing field, as on a range inside a field group, as null, so null
+	// here means no field rather than a NULL expression. A column named null
+	// marshals as the string "null".
+	if operatesOnColumn(e.Op) && isJSONNull(c.Left) {
+		e.Left = nil
+	}
+
 	// if the left hand side is a string then it must be a column
 	if isStringlike(e.Left) && operatesOnColumn(e.Op) {
 		e.Left = wrapInColumn(e.Left)
@@ -787,6 +795,11 @@ func literalToExpr(in any) *Expression {
 	}
 
 	return Lit(s)
+}
+
+// isJSONNull reports whether in is the JSON literal null.
+func isJSONNull(in json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(in), []byte("null"))
 }
 
 func isJSONObject(in json.RawMessage) bool {
