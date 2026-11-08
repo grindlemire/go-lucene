@@ -1494,12 +1494,37 @@ func TestParseNumericFieldIsColumn(t *testing.T) {
 		"greater":        {input: `0:>1`, want: expr.GREATER("0", 1)},
 		"less_eq":        {input: `0:<=1`, want: expr.LESSEQ("0", 1)},
 		"in_group":       {input: `0:(1 OR 2)`, want: expr.IN("0", expr.LIST(expr.Lit(1), expr.Lit(2)))},
+		// = works like :, and a field in parentheses is still a field. Both
+		// used to leave the number a number, so 1=1 rendered 1 = 1.
+		"equals_sign":         {input: `1=1`, want: expr.Eq("1", 1)},
+		"equals_spaced":       {input: `1 = 1`, want: expr.Eq("1", 1)},
+		"equals_leading_zero": {input: `007=x`, want: expr.Eq("007", "x")},
+		"equals_float":        {input: `1.50=x`, want: expr.Eq("1.50", "x")},
+		"equals_negative":     {input: `-1=x`, want: expr.Eq("-1", "x")},
+		"equals_group":        {input: `1=(x OR y)`, want: expr.IN("1", expr.LIST(expr.Lit("x"), expr.Lit("y")))},
+		"equals_range":        {input: `1=[1 TO 2]`, want: expr.Rang("1", 1, 2, true)},
+		"paren_wildcard":      {input: `(0):*`, want: expr.LIKE("0", expr.WILD("*"))},
+		"paren_value":         {input: `(0):1`, want: expr.Eq("0", 1)},
+		"paren_leading_zero":  {input: `(007):x`, want: expr.Eq("007", "x")},
+		"paren_exponent":      {input: `(1e3):x`, want: expr.Eq("1e3", "x")},
+		"double_paren":        {input: `((0)):1`, want: expr.Eq("0", 1)},
+		"paren_range":         {input: `(0):[1 TO 2]`, want: expr.Rang("0", 1, 2, true)},
+		"paren_greater":       {input: `(0):>1`, want: expr.GREATER("0", 1)},
+		"paren_equals":        {input: `(1)=1`, want: expr.Eq("1", 1)},
+		"in_and": {
+			input: `a:x AND 1=1`,
+			want:  expr.AND(expr.Eq("a", "x"), expr.Eq("1", 1)),
+		},
 		"wildcard_value": {input: `0:1*`, want: expr.LIKE("0", expr.WILD("1*"))},
 		"null_value":     {input: `0:null`, want: expr.Eq("0", expr.NULL())},
 		"negated":        {input: `NOT 0:1`, want: expr.NOT(expr.Eq("0", 1))},
-		// Numbers that are not followed by a colon stay numbers.
+		// Numbers that are not used as a field stay numbers.
 		"value_stays_number": {input: `a:0`, want: expr.Eq("a", 0)},
+		"equals_value":       {input: `a=0`, want: expr.Eq("a", 0)},
+		"paren_number_value": {input: `a:(0)`, want: expr.Eq("a", 0)},
+		"compare_value":      {input: `a:>=0`, want: expr.GREATEREQ("a", 0)},
 		"bare_number":        {input: `1`, want: expr.Lit(1)},
+		"paren_number":       {input: `(1)`, want: expr.Lit(1)},
 		"bare_number_and_field": {
 			input: `1 AND 0:1`,
 			want:  expr.AND(expr.Lit(1), expr.Eq("0", 1)),
