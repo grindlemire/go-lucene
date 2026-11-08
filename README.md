@@ -92,6 +92,7 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `a:1 OR b:2` | `("a" = 1) OR ("b" = 2)` | Boolean OR |
 | `NOT field:value` | `NOT("field" = 'value')` | Negation |
 | `+field:value` | `"field" = 'value'` | Required term (same as no prefix) |
+| `field:c++` | `"field" = 'c++'` | A `+` or `-` after the first character of a term is part of the term, as in Lucene, so `a+b` and `1+2` are single terms. Only a `+` or `-` at the start of a term is an operator |
 | `-field:value` | `NOT("field" = 'value')` | Prohibited term |
 | `field:[min TO max]` | `"field" >= min AND "field" <= max` | Inclusive range |
 | `field:{min TO max}` | `"field" > min AND "field" < max` | Exclusive range |
