@@ -183,10 +183,12 @@ func TestStringQuotesFields(t *testing.T) {
 
 		// A field that looks like a number or null is still a column, so it
 		// needs no quotes.
-		"number": {`5:x`, `5:x`},
-		"float":  {`1.50:x`, `1.50:x`},
-		"null":   {`null:x`, `null:x`},
-		"quoted": {`"5":x`, `5:x`},
+		"number":     {`5:x`, `5:x`},
+		"float":      {`1.50:x`, `1.50:x`},
+		"null":       {`null:x`, `null:x`},
+		"null_upper": {`"NULL":x`, `"NULL":x`},
+		"null_mixed": {`"Null":x`, `"Null":x`},
+		"quoted":     {`"5":x`, `5:x`},
 	})
 }
 
