@@ -1,7 +1,6 @@
 package reduce
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/grindlemire/go-lucene/internal/lex"
@@ -415,7 +414,7 @@ func boost(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 
 	// We have 3+ elements. Check if elems[2] is a valid numeric power
 	if power, ok := elems[2].(*expr.Expression); ok {
-		if fpower, err := toPositiveFloat(power.String()); err == nil {
+		if fpower, ok := positiveNumber(power); ok {
 			// Valid power - reduce all 3 elements
 			return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
 		}
@@ -478,18 +477,21 @@ func drop[T any](stack []T, i int) []T {
 	return stack[:len(stack)-i]
 }
 
-func toPositiveFloat(in string) (f float64, err error) {
-	i, err := strconv.Atoi(in)
-	if err == nil && i > 0 {
-		return float64(i), nil
+// positiveNumber returns the value of a number literal greater than zero. The
+// parser has already decided which terms are numbers, so a term it kept as
+// text, such as 0x1p3 or inf, is not a boost power.
+func positiveNumber(e *expr.Expression) (float64, bool) {
+	if e.Op != expr.Literal {
+		return 0, false
 	}
-
-	pf, err := strconv.ParseFloat(in, 64)
-	if err == nil && pf > 0 {
-		return float64(pf), nil
+	switch n := e.Left.(type) {
+	case int:
+		return float64(n), n > 0
+	case float64:
+		return n, n > 0
+	default:
+		return 0, false
 	}
-
-	return f, fmt.Errorf("[%v] is not a positive float", in)
 }
 
 // wrapLiteral will wrap a literal expression in an equals expression for a defaultField.
