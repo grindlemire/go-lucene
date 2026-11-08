@@ -90,6 +90,13 @@ type Base struct {
 	// a Postgres-compatible default to preserve backwards compatibility for
 	// custom drivers built against the pre-dialect API.
 	Dialect Dialect
+	// CaseInsensitiveFields lists the columns whose string matches ignore
+	// case. On these columns, equality, IN lists and wildcards with a string
+	// value wrap both sides in LOWER() and keep the dialect's operator.
+	// Numbers, regexes, ranges, comparisons, field:* and null checks are not
+	// changed. Names match exactly. The lucene.WithCaseInsensitiveFields
+	// option sets this for the lucene.ToX functions.
+	CaseInsensitiveFields []string
 }
 
 // dialect returns the configured dialect, falling back to defaultDialect if
@@ -162,6 +169,16 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 				"comparison operator %s cannot be used with null; use field:null for IS NULL",
 				e.Op,
 			)
+		}
+	}
+
+	if e.Op == expr.In && b.foldsCase(e.Left) {
+		str, inParams, ok, err := b.renderFoldedIn(left, e.Right, b.serializeParams)
+		if err != nil {
+			return "", nil, err
+		}
+		if ok {
+			return str, append(lparams, inParams...), nil
 		}
 	}
 
@@ -249,6 +266,10 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		}
 	}
 
+	if b.foldsCaseCompare(e, hasPattern) {
+		left, right = lower(left), lower(right)
+	}
+
 	if e.Op == expr.Like {
 		str, err := d.RenderLike(left, right, isRegex)
 		return str, params, err
@@ -322,6 +343,20 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 				"comparison operator %s cannot be used with null; use field:null for IS NULL",
 				e.Op,
 			)
+		}
+	}
+
+	if e.Op == expr.In && b.foldsCase(e.Left) {
+		ser := func(v any) (string, []any, error) {
+			s, err := b.serialize(v)
+			return s, nil, err
+		}
+		str, _, ok, err := b.renderFoldedIn(left, e.Right, ser)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return str, nil
 		}
 	}
 
@@ -403,6 +438,10 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		if !b.isSimple(e.Right) {
 			right = "(" + right + ")"
 		}
+	}
+
+	if b.foldsCaseCompare(e, hasPattern) {
+		left, right = lower(left), lower(right)
 	}
 
 	if e.Op == expr.Like {
