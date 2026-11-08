@@ -155,6 +155,13 @@ func TestRenderRejectsMisplacedGroup(t *testing.T) {
 		"field_is_and":    {&expr.Expression{Op: expr.Equals, Left: expr.AND("x", "y"), Right: expr.Lit("z")}, "the field of an EQUALS must be a single term, not an AND expression"},
 		"field_is_or":     {expr.GREATER(expr.OR("x", "y"), 1), "the field of a GREATER must be a single term, not an OR expression"},
 		"from_json":       {mustUnmarshal(t, `{"left":"a","operator":"GREATER","right":{"left":"x","operator":"OR","right":"y"}}`), "must be a single term, not an OR expression"},
+		// A field operator with no field used to render ( = 'x') AND ( = 'y').
+		"equals_no_field":      {&expr.Expression{Op: expr.Equals, Right: expr.AND("x", "y")}, "an EQUALS needs a field, as in field:value"},
+		"equals_term_no_field": {&expr.Expression{Op: expr.Equals, Right: expr.Lit("x")}, "an EQUALS needs a field, as in field:value"},
+		"like_no_field":        {&expr.Expression{Op: expr.Like, Right: expr.WILD("x*")}, "a LIKE needs a field, as in field:value*"},
+		"in_no_field":          {&expr.Expression{Op: expr.In, Right: expr.LIST(expr.Lit("x"), expr.Lit("y"))}, "an IN needs a field, as in field:(a OR b)"},
+		"greater_no_field":     {&expr.Expression{Op: expr.Greater, Right: expr.Lit(1)}, "a GREATER needs a field, as in field:>value"},
+		"less_eq_no_field":     {&expr.Expression{Op: expr.LessEq, Right: expr.Lit(1)}, "a LESS_EQ needs a field, as in field:<=value"},
 	}
 
 	for name, tc := range tcs {

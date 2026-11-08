@@ -527,8 +527,11 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 		return e, nil
 	}
 
-	if e.Op == expr.Range && e.Left == nil {
-		return nil, fmt.Errorf("a range needs a field, as in field:[a TO b]")
+	if e.Left == nil {
+		if e.Op == expr.Range {
+			return nil, fmt.Errorf("a range needs a field, as in field:[a TO b]")
+		}
+		return nil, fmt.Errorf("%s %s needs a field, as in %s", article(e.Op), e.Op, fieldExamples[e.Op])
 	}
 	if field, ok := e.Left.(*expr.Expression); ok && isGroup(field) {
 		return nil, fmt.Errorf("the field of %s %s must be a single term, not %s %s expression", article(e.Op), e.Op, article(field.Op), field.Op)
@@ -567,6 +570,18 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 		}
 	}
 	return e, nil
+}
+
+// fieldExamples shows each field operator with its field, for the error when
+// the field is missing.
+var fieldExamples = map[expr.Operator]string{
+	expr.Equals:    "field:value",
+	expr.Like:      "field:value*",
+	expr.In:        "field:(a OR b)",
+	expr.Greater:   "field:>value",
+	expr.Less:      "field:<value",
+	expr.GreaterEq: "field:>=value",
+	expr.LessEq:    "field:<=value",
 }
 
 // isGroup reports whether e holds terms that still need a field: an AND, OR,
