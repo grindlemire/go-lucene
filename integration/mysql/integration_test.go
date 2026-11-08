@@ -16,6 +16,7 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -477,6 +478,55 @@ func TestMySQLIntegrationParameterized(t *testing.T) {
 			if !equalInts(got, tc.wantIDs) {
 				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
 					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}
+
+// TestMySQLIntegrationHandBuiltFieldGroup runs EQUALS on a group, built in
+// code or read from JSON, which the driver spreads over every term the way
+// the parser reads a field group. `name` = ('apple' OR 'banana') used to
+// match no rows.
+func TestMySQLIntegrationHandBuiltFieldGroup(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	var fromJSON expr.Expression
+	if err := json.Unmarshal([]byte(`{"left":"name","operator":"EQUALS","right":{"left":"apple","operator":"OR","right":"banana"}}`), &fromJSON); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	priceRange := func(min, max any) *expr.Expression {
+		return &expr.Expression{Op: expr.Range, Right: &expr.RangeBoundary{Min: min, Max: max, Inclusive: true}}
+	}
+
+	cases := []struct {
+		name    string
+		input   *expr.Expression
+		wantIDs []int
+	}{
+		{"must_not", expr.Eq("name", expr.AND(expr.WILD("*an*"), expr.MUSTNOT(expr.Lit("banana")))), []int{4, 5}},
+		{"or_null", expr.Eq("status", expr.OR("active", expr.NULL())), []int{1, 2, 4, 5, 6, 7}},
+		{"ranges", expr.Eq("price", expr.OR(priceRange(expr.Lit(1), expr.Lit(2)), priceRange(expr.Lit(5), expr.WILD("*")))), []int{1, 4, 5}},
+		{"from_json", &fromJSON, []int{1, 2}},
+	}
+
+	d := driver.NewMySQLDriver()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := d.Render(tc.input)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q\n  want ids %v\n  got  ids %v", where, tc.wantIDs, got)
+			}
+
+			where, params, err := d.RenderParam(tc.input)
+			if err != nil {
+				t.Fatalf("RenderParam: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, tc.wantIDs, got)
 			}
 		})
 	}
