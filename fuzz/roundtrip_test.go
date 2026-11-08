@@ -46,6 +46,12 @@ func FuzzStringRoundTrip(f *testing.F) {
 		`a:(x AND -y) OR a:(x OR [1 TO 5]) OR a:(b:c OR d*)`,
 		`x OR null OR foo* OR /re/ OR [1 TO 5]`,
 		`a:1E+3 OR a:[-.5 TO .5] OR a:.5e+1`,
+		// JSON paths on the columns a and labels, which the fuzzer registers
+		// with WithJSONFields (issue #56)
+		`a.b:c AND labels.x.y:>5 AND a.b:[1 TO 10] AND a.b:(x OR y)`,
+		`a.b\ c:x OR "labels.a b":fo* OR labels.a\:b:null`,
+		`labels.it\'s:(x AND -y) OR "labels.a[0]":1.0 OR "a.k*":/re/`,
+		`labels.AND:x OR labels.5:x OR a.null:x OR "a.é":x`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
@@ -54,6 +60,7 @@ func FuzzStringRoundTrip(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in string) {
 		requireRoundTrip(t, in)
 		requireRoundTrip(t, in, lucene.WithDefaultField("default"))
+		requireRoundTrip(t, in, lucene.WithJSONFields("a", "labels"))
 	})
 }
 
