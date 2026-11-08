@@ -848,6 +848,139 @@ func TestPlusInsideTermRenders(t *testing.T) {
 	}
 }
 
+// TestPlusInsideWildcardIsLiteral checks that a + inside a wildcard term
+// matches a +. The lexer keeps it in the term, and the parser escapes it, so
+// Postgres SIMILAR TO and MySQL don't read it as "one or more". Before the
+// parser escaped it, a:c++* rendered "a" SIMILAR TO 'c++%', which Postgres
+// rejects, and MySQL sent the pattern to REGEXP.
+func TestPlusInsideWildcardIsLiteral(t *testing.T) {
+	tcs := map[string]struct {
+		input  string
+		want   map[string]string
+		params map[string][]any
+	}{
+		"star_after_plus": {
+			input: `a:c++*`,
+			want: map[string]string{
+				"postgres":       `"a" SIMILAR TO 'c\+\+%'`,
+				"mysql":          "`a` LIKE 'c++%' ESCAPE '#'",
+				"mariadb":        "`a` LIKE 'c++%' ESCAPE '#'",
+				"sqlite":         `"a" GLOB 'c++*'`,
+				"param_postgres": `"a" SIMILAR TO $1`,
+				"param_mysql":    "`a` LIKE ? ESCAPE '#'",
+				"param_mariadb":  "`a` LIKE ? ESCAPE '#'",
+				"param_sqlite":   `"a" GLOB ?`,
+			},
+			params: map[string][]any{
+				"param_postgres": {`c\+\+%`},
+				"param_mysql":    {"c++%"},
+				"param_mariadb":  {"c++%"},
+				"param_sqlite":   {"c++*"},
+			},
+		},
+		"question_after_plus": {
+			input: `a:a+b?`,
+			want: map[string]string{
+				"postgres":       `"a" SIMILAR TO 'a\+b_'`,
+				"mysql":          "`a` LIKE 'a+b_' ESCAPE '#'",
+				"mariadb":        "`a` LIKE 'a+b_' ESCAPE '#'",
+				"sqlite":         `"a" GLOB 'a+b?'`,
+				"param_postgres": `"a" SIMILAR TO $1`,
+				"param_mysql":    "`a` LIKE ? ESCAPE '#'",
+				"param_mariadb":  "`a` LIKE ? ESCAPE '#'",
+				"param_sqlite":   `"a" GLOB ?`,
+			},
+			params: map[string][]any{
+				"param_postgres": {`a\+b_`},
+				"param_mysql":    {"a+b_"},
+				"param_mariadb":  {"a+b_"},
+				"param_sqlite":   {"a+b?"},
+			},
+		},
+		"plus_between_stars": {
+			input: `a:*+*`,
+			want: map[string]string{
+				"postgres":       `"a" SIMILAR TO '%\+%'`,
+				"mysql":          "`a` LIKE '%+%' ESCAPE '#'",
+				"mariadb":        "`a` LIKE '%+%' ESCAPE '#'",
+				"sqlite":         `"a" GLOB '*+*'`,
+				"param_postgres": `"a" SIMILAR TO $1`,
+				"param_mysql":    "`a` LIKE ? ESCAPE '#'",
+				"param_mariadb":  "`a` LIKE ? ESCAPE '#'",
+				"param_sqlite":   `"a" GLOB ?`,
+			},
+			params: map[string][]any{
+				"param_postgres": {`%\+%`},
+				"param_mysql":    {"%+%"},
+				"param_mariadb":  {"%+%"},
+				"param_sqlite":   {"*+*"},
+			},
+		},
+	}
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+		for rname, render := range paramRenderers {
+			t.Run(name+"/"+rname+"_params", func(t *testing.T) {
+				_, params, err := render(tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !reflect.DeepEqual(params, tc.params[rname]) {
+					t.Fatalf("want params %#v, got %#v", tc.params[rname], params)
+				}
+			})
+		}
+	}
+
+	// JSON paths and case-insensitive fields render the same pattern.
+	for name, tc := range map[string]struct {
+		input string
+		opt   Opt
+		want  map[string]string
+	}{
+		"json_path": {
+			input: `labels.v:c++*`,
+			opt:   WithJSONFields("labels"),
+			want: map[string]string{
+				"postgres": `"labels"->>'v' SIMILAR TO 'c\+\+%'`,
+				"mysql":    "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END LIKE 'c++%' ESCAPE '#'",
+				"sqlite":   `CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END GLOB 'c++*'`,
+			},
+		},
+		"case_insensitive": {
+			input: `a:C++*`,
+			opt:   WithCaseInsensitiveFields("a"),
+			want: map[string]string{
+				"postgres": `LOWER("a") SIMILAR TO LOWER('C\+\+%')`,
+				"mysql":    "LOWER(`a`) LIKE LOWER('C++%') ESCAPE '#'",
+				"sqlite":   `LOWER("a") GLOB LOWER('C++*')`,
+			},
+		},
+	} {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input, tc.opt)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+	}
+}
+
 // TestDecimalNumberFormsRender pins the SQL for each spelling of a plain
 // decimal number, in both render modes. Leading zeros are dropped, an exponent
 // is folded into the value.
