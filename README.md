@@ -168,7 +168,7 @@ Every operator works on a JSON path: comparisons, ranges, IN lists, wildcards, r
 - On SQLite every value in a registered column must be valid JSON or NULL. One row with invalid JSON, even `''`, makes every JSON-path query on that table fail with `malformed JSON`.
 - Equality and IN with plain text, a term that is not a number, `true`, `false` or `null`, compare the plain accessor. An expression index on it applies: `CREATE INDEX ON items ((labels->>'category'))` in Postgres, `CREATE INDEX idx ON items (json_extract(labels, '$.category'))` in SQLite. MySQL compares through a `CASE`, because `JSON_UNQUOTE` alone turns a JSON `null` into the text `'null'`.
 - A numeric comparison, and a text comparison with a term such as `"5"` or `true`, cannot use an index, because they read the value through a type check.
-- To fold case on a JSON path, list it by its dotted name: `WithCaseInsensitiveFields("labels.category")`.
+- To fold case on a JSON path, list it by its dotted name: `WithCaseInsensitiveFields("labels.category")`. A key with a space or colon is listed the same way, with no quotes or escapes: `WithCaseInsensitiveFields("labels.a b")` matches the field `"labels.a b"`.
 - Array containment (`labels.tags:foo` meaning "the array contains foo") is not supported.
 
 ## Case-insensitive fields
