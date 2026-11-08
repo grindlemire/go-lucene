@@ -84,6 +84,38 @@ func TestRenderSpreadsFieldGroup(t *testing.T) {
 			param:  `("b" = $1) OR ("a" = $2)`,
 			params: []any{"c", "d"},
 		},
+		// A value with a field of its own keeps it, as a:(b:1) does, and the
+		// outer field is dropped. These used to render as "a" = ("b" = 1).
+		"own_field_value": {
+			input:  expr.Eq("a", expr.Eq("b", 1)),
+			render: `"b" = 1`,
+			param:  `"b" = $1`,
+			params: []any{1},
+		},
+		"own_field_range": {
+			input:  expr.Eq("a", expr.Rang("b", 1, 5, true)),
+			render: `"b" >= 1 AND "b" <= 5`,
+			param:  `"b" >= $1 AND "b" <= $2`,
+			params: []any{1, 5},
+		},
+		"own_field_compare": {
+			input:  expr.Eq("a", expr.GREATER("b", 1)),
+			render: `"b" > 1`,
+			param:  `"b" > $1`,
+			params: []any{1},
+		},
+		"own_field_in": {
+			input:  expr.Eq("a", expr.IN("b", expr.LIST(expr.Lit("x"), expr.Lit("y")))),
+			render: `"b" IN ('x', 'y')`,
+			param:  `"b" IN ($1, $2)`,
+			params: []any{"x", "y"},
+		},
+		"own_field_like": {
+			input:  expr.Eq("a", expr.LIKE("b", expr.WILD("x*"))),
+			render: `"b" SIMILAR TO 'x%'`,
+			param:  `"b" SIMILAR TO $1`,
+			params: []any{"x%"},
+		},
 		"json_path": {
 			input:  &expr.Expression{Op: expr.Equals, Left: labels, Right: expr.AND("x", "y")},
 			render: `("labels"->>'k' = 'x') AND ("labels"->>'k' = 'y')`,

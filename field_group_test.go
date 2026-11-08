@@ -53,6 +53,19 @@ func TestHandBuiltFieldGroupRendersLikeParsed(t *testing.T) {
 			query: `a:(b:c OR d)`,
 			built: expr.Eq("a", expr.OR(expr.Eq("b", "c"), "d")),
 		},
+		"own_field_value": {
+			query: `a:(b:1)`,
+			built: expr.Eq("a", expr.Eq("b", 1)),
+			json:  `{"left":"a","operator":"EQUALS","right":{"left":"b","operator":"EQUALS","right":1}}`,
+		},
+		"own_field_range": {
+			query: `a:(b:[1 TO 5])`,
+			built: expr.Eq("a", expr.Rang("b", 1, 5, true)),
+		},
+		"own_field_compare": {
+			query: `a:(b:>1)`,
+			built: expr.Eq("a", expr.GREATER("b", 1)),
+		},
 		"json_path": {
 			query: `labels.k:(x AND 5)`,
 			built: &expr.Expression{Op: expr.Equals, Left: labels, Right: expr.AND("x", 5)},

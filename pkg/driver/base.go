@@ -513,13 +513,14 @@ func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string
 // expr.Validate, so a tree built in code or read from JSON can hold a group
 // where the parser only puts a single term.
 //
-// An EQUALS on a group gets its field on every term in the group, the way
-// the parser reads a:(x AND y), so it renders as the parsed query does. A
-// comparison, an IN list item and a field compare one value, so a group there
-// is an error, as a:>(x OR y) is for the parser. The right side of an IN must
-// be a LIST. A LIKE pattern is checked by likeOperand. A comparison with a
-// field of its own, as in expr.Eq("a", expr.Eq("b", 1)), is not a group and
-// renders as before.
+// An EQUALS whose value is not a single term goes through reduce.FieldGroup,
+// as the parser's a:(...) does, so it renders as the parsed query does. A
+// group gets the field on every term in it, as in a:(x AND y), and a value
+// with a field of its own keeps it, so expr.Eq("a", expr.Eq("b", 1)) is
+// b = 1, as a:(b:1) is. A comparison, an IN list item and a field compare
+// one value, so a group there is an error, as a:>(x OR y) is for the parser.
+// The right side of an IN must be a LIST. A LIKE pattern is checked by
+// likeOperand.
 func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 	switch e.Op {
 	case expr.Equals, expr.Like, expr.In, expr.Range, expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
@@ -543,7 +544,7 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 	}
 	switch e.Op {
 	case expr.Equals:
-		if !isGroup(value) {
+		if isSingleTerm(value) {
 			return e, nil
 		}
 		if value.Op == expr.List {
@@ -582,6 +583,17 @@ var fieldExamples = map[expr.Operator]string{
 	expr.Less:      "field:<value",
 	expr.GreaterEq: "field:>=value",
 	expr.LessEq:    "field:<=value",
+}
+
+// isSingleTerm reports whether e is a word, phrase, number, wildcard, regex or
+// null. An empty expression also counts, so it renders as it did before.
+func isSingleTerm(e *expr.Expression) bool {
+	switch e.Op {
+	case expr.Undefined, expr.Literal, expr.Wild, expr.Regexp, expr.Null:
+		return true
+	default:
+		return false
+	}
 }
 
 // isGroup reports whether e holds terms that still need a field: an AND, OR,
