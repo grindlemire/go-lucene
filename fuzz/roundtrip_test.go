@@ -74,22 +74,27 @@ func FuzzBuiltWildcardString(f *testing.F) {
 		if !hasWildcard(pattern) || strings.ContainsAny(pattern, "|()[]{}+") {
 			return
 		}
-		built := expr.LIKE("a", expr.WILD(pattern))
-		rendered := built.String()
-		parsed, err := lucene.Parse(rendered)
-		if err != nil {
-			t.Fatalf("String() of the wildcard %q is %q, which does not parse: %v", pattern, rendered, err)
-		}
-		_, want, err := d.RenderParam(built)
-		if err != nil {
-			return
-		}
-		_, got, err := d.RenderParam(parsed)
-		if err != nil {
-			t.Fatalf("String() of the wildcard %q is %q, which does not render: %v", pattern, rendered, err)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("String() of the wildcard %q is %q, which renders %#v instead of %#v", pattern, rendered, got, want)
+		// A LIKE reads a literal on its right as a pattern too.
+		for _, built := range []*expr.Expression{
+			expr.LIKE("a", expr.WILD(pattern)),
+			expr.LIKE("a", expr.Lit(pattern)),
+		} {
+			rendered := built.String()
+			parsed, err := lucene.Parse(rendered)
+			if err != nil {
+				t.Fatalf("String() of %#v is %q, which does not parse: %v", built, rendered, err)
+			}
+			_, want, err := d.RenderParam(built)
+			if err != nil {
+				return
+			}
+			_, got, err := d.RenderParam(parsed)
+			if err != nil {
+				t.Fatalf("String() of %#v is %q, which does not render: %v", built, rendered, err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("String() of %#v is %q, which renders %#v instead of %#v", built, rendered, got, want)
+			}
 		}
 	})
 }

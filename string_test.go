@@ -1,6 +1,7 @@
 package lucene
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -353,6 +354,12 @@ func TestStringBuiltWildcard(t *testing.T) {
 		"unicode_symbol":     {expr.LIKE("a", "€*"), `a:\€*`},
 		"range_bound":        {expr.Rang("a", expr.WILD("f o*"), "z", true), `a:[f\ o* TO z]`},
 		"in_must_not":        {expr.MUSTNOT(expr.LIKE("a", "x y*")), `-a:x\ y*`},
+		// A LIKE renders a literal on its right as a pattern, so String()
+		// prints it as one. It used to print a:"fo*", an exact match.
+		"like_literal":        {expr.LIKE("a", expr.Lit("fo*")), `a:fo*`},
+		"like_literal_space":  {expr.LIKE("a", expr.Lit("x y?")), `a:x\ y?`},
+		"like_literal_escape": {expr.LIKE("a", expr.Lit(`fo\*bar*`)), `a:fo\*bar*`},
+		"like_literal_json":   {mustDecode(t, `{"left":"a","operator":"LIKE","right":{"literal":"fo*"}}`), `a:fo*`},
 	}
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
@@ -380,6 +387,8 @@ func TestStringBuiltWildcardWithoutWildcard(t *testing.T) {
 		"number":       {expr.LIKE("a", expr.WILD("5")), `a:"5"`, expr.Eq("a", "5")},
 		"only_escaped": {expr.LIKE("a", expr.WILD(`fo\*`)), `a:"fo*"`, expr.Eq("a", expr.Lit("fo*"))},
 		"empty":        {expr.LIKE("a", expr.WILD("")), `a:""`, expr.Eq("a", "")},
+		// A LIKE reads the backslash in a literal on its right as an escape.
+		"like_literal": {expr.LIKE("a", expr.Lit(`a\b`)), `a:ab`, expr.Eq("a", "ab")},
 	})
 }
 
@@ -417,6 +426,15 @@ func TestStringBuiltRegexp(t *testing.T) {
 		"no_field":          {expr.REGEXP("x/y"), `/x\/y/`, expr.REGEXP(`/x\/y/`)},
 		"escaped_backslash": {expr.LIKE("a", expr.REGEXP(`/x\\/`)), `a:/x\\/`, expr.LIKE("a", expr.REGEXP(`/x\\/`))},
 	})
+}
+
+func mustDecode(t *testing.T, raw string) *expr.Expression {
+	t.Helper()
+	var e expr.Expression
+	if err := json.Unmarshal([]byte(raw), &e); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	return &e
 }
 
 type builtCase struct {
