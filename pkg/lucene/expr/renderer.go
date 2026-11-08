@@ -243,11 +243,14 @@ func renderLiteral(e *Expression, verbose bool) string {
 		return v
 	case Column:
 		// A field that looks like a number or null is still read as a
-		// column, so only the lexer decides whether it needs quotes.
-		if !isPlainTerm(string(v)) || isKeyword(string(v)) {
-			return quotePhrase(string(v))
+		// column, so mostly the lexer decides whether it needs quotes. The
+		// exception is null in another case: the parser reads a bare NULL
+		// field as the column null, so NULL keeps its quotes.
+		s := string(v)
+		if !isPlainTerm(s) || isKeyword(s) || (strings.EqualFold(s, "null") && s != "null") {
+			return quotePhrase(s)
 		}
-		return string(v)
+		return s
 	case float64:
 		return formatFloat(v)
 	}
