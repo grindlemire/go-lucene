@@ -151,6 +151,16 @@ func TestCaseInsensitiveFields(t *testing.T) {
 				"sqlite":   {`(LOWER("name") = LOWER('Foo') OR "name" IS NULL)`, `(LOWER("name") = LOWER(?) OR "name" IS NULL)`, []any{"Foo"}},
 			},
 		},
+		// A field group applies the field to each term, so each one folds.
+		"field_group_and": {
+			input: "name:(Foo AND Bar*)",
+			opts:  listed,
+			want: map[string]ciWant{
+				"postgres": {`(LOWER("name") = LOWER('Foo')) AND (LOWER("name") SIMILAR TO LOWER('Bar%'))`, `(LOWER("name") = LOWER($1)) AND (LOWER("name") SIMILAR TO LOWER($2))`, []any{"Foo", "Bar%"}},
+				"mysql":    {"(LOWER(`name`) = LOWER('Foo')) AND (LOWER(`name`) LIKE LOWER('Bar%') ESCAPE '#')", "(LOWER(`name`) = LOWER(?)) AND (LOWER(`name`) LIKE LOWER(?) ESCAPE '#')", []any{"Foo", "Bar%"}},
+				"sqlite":   {`(LOWER("name") = LOWER('Foo')) AND (LOWER("name") GLOB LOWER('Bar*'))`, `(LOWER("name") = LOWER(?)) AND (LOWER("name") GLOB LOWER(?))`, []any{"Foo", "Bar*"}},
+			},
+		},
 		// A mixed list splits: strings compare folded, numbers compare as
 		// before, so LOWER() never sees a number.
 		"mixed_in_list": {
