@@ -599,6 +599,67 @@ func TestNumericFieldRendersAsColumn(t *testing.T) {
 	}
 }
 
+// TestNumberSpellingsRender is the end-to-end check for the lexer part of
+// issue #77. a:1E+3 used to render ("a" = '1E') AND (3), and a:.5 failed to
+// parse.
+func TestNumberSpellingsRender(t *testing.T) {
+	tcs := map[string]struct {
+		input  string
+		want   map[string]string
+		params []any
+	}{
+		"exponent_plus": {
+			input: `a:1E+3`,
+			want: map[string]string{
+				"postgres":       `"a" = 1000`,
+				"mysql":          "`a` = 1000",
+				"mariadb":        "`a` = 1000",
+				"sqlite":         `"a" = 1000`,
+				"param_postgres": `"a" = $1`,
+				"param_mysql":    "`a` = ?",
+				"param_mariadb":  "`a` = ?",
+				"param_sqlite":   `"a" = ?`,
+			},
+			params: []any{1000.0},
+		},
+		"leading_dot_range": {
+			input: `a:[-.5 TO .5]`,
+			want: map[string]string{
+				"postgres":       `"a" >= -0.5 AND "a" <= 0.5`,
+				"mysql":          "`a` >= -0.5 AND `a` <= 0.5",
+				"sqlite":         `"a" >= -0.5 AND "a" <= 0.5`,
+				"param_postgres": `"a" >= $1 AND "a" <= $2`,
+				"param_mysql":    "`a` >= ? AND `a` <= ?",
+				"param_sqlite":   `"a" >= ? AND "a" <= ?`,
+			},
+			params: []any{-0.5, 0.5},
+		},
+	}
+
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+		t.Run(name+"/params", func(t *testing.T) {
+			_, params, err := ToParameterizedPostgres(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(params, tc.params) {
+				t.Fatalf("want params %#v, got %#v", tc.params, params)
+			}
+		})
+	}
+}
+
 // TestNonFiniteWordsRenderAsStrings checks that inf and NaN reach the SQL as
 // quoted strings. They used to parse as floats and render as a bare +Inf or
 // NaN, which SQL reads as a column reference.

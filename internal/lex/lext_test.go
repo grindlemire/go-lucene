@@ -335,6 +335,61 @@ func TestLex(t *testing.T) {
 				tok(TLiteral, "#channel"),
 			},
 		},
+		// The + in a number's exponent is part of the number. It used to
+		// start a new token, so 1E+3 lexed as 1E, + and 3.
+		"exponent_plus": {
+			in:       `a:1E+3`,
+			expected: []Token{tok(TLiteral, "a"), tok(TColon, ":"), tok(TLiteral, "1E+3")},
+		},
+		"exponent_plus_fraction": {
+			in:       `-1.5e+10`,
+			expected: []Token{tok(TLiteral, "-1.5e+10")},
+		},
+		"exponent_plus_in_range": {
+			in: `[1e+2 TO .5e+3]`,
+			expected: []Token{
+				tok(TLSquare, "["),
+				tok(TLiteral, "1e+2"),
+				tok(TTO, "TO"),
+				tok(TLiteral, ".5e+3"),
+				tok(TRSquare, "]"),
+			},
+		},
+		// Anywhere else + still starts a new token.
+		"plus_after_word": {
+			in:       `be+3`,
+			expected: []Token{tok(TLiteral, "be"), tok(TPlus, "+"), tok(TLiteral, "3")},
+		},
+		"plus_after_hex": {
+			in:       `0x1e+3`,
+			expected: []Token{tok(TLiteral, "0x1e"), tok(TPlus, "+"), tok(TLiteral, "3")},
+		},
+		"plus_without_exponent_digits": {
+			in:       `1e+x`,
+			expected: []Token{tok(TLiteral, "1e"), tok(TPlus, "+"), tok(TLiteral, "x")},
+		},
+		"plus_after_number": {
+			in:       `1+2`,
+			expected: []Token{tok(TLiteral, "1"), tok(TPlus, "+"), tok(TLiteral, "2")},
+		},
+		// A term can start with a dot, as in Lucene, so .5 is one term. It
+		// used to be a lexer error.
+		"leading_dot": {
+			in:       `a:.5`,
+			expected: []Token{tok(TLiteral, "a"), tok(TColon, ":"), tok(TLiteral, ".5")},
+		},
+		"leading_dot_word": {
+			in:       `.foo`,
+			expected: []Token{tok(TLiteral, ".foo")},
+		},
+		"negative_leading_dot": {
+			in:       `a:-.5`,
+			expected: []Token{tok(TLiteral, "a"), tok(TColon, ":"), tok(TLiteral, "-.5")},
+		},
+		"minus_before_dot_word": {
+			in:       `-.foo`,
+			expected: []Token{tok(TMinus, "-"), tok(TLiteral, ".foo")},
+		},
 		// A backslash escapes the next character, so one at the end of the
 		// input has nothing to escape. Lucene rejects it the same way.
 		"trailing_backslash": {
