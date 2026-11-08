@@ -1069,3 +1069,65 @@ func TestQuotedPhraseRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestGroupingRoundTrip verifies that String() writes the parentheses that
+// grouping needs, and only those, so Parse -> String() -> Parse gives the same
+// expression and flat chains print without extra nesting (issue #64).
+func TestGroupingRoundTrip(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"or_inside_and":        {`a:1 AND (b:2 OR c:3)`, `a:1 AND (b:2 OR c:3)`},
+		"or_inside_and_left":   {`(a:1 OR b:2) AND c:3`, `(a:1 OR b:2) AND c:3`},
+		"and_inside_or":        {`a:1 OR (b:2 AND c:3)`, `a:1 OR b:2 AND c:3`},
+		"and_inside_and_right": {`a:1 AND (b:2 AND c:3)`, `a:1 AND (b:2 AND c:3)`},
+		"implicit_precedence":  {`a:1 AND b:2 OR c:3`, `a:1 AND b:2 OR c:3`},
+		"or_inside_or_right":   {`a:1 OR (b:2 OR c:3)`, `a:1 OR (b:2 OR c:3)`},
+		"flat_and_chain":       {`a:1 AND b:2 AND c:3`, `a:1 AND b:2 AND c:3`},
+		"flat_or_chain":        {`a:1 OR b:2 OR c:3`, `a:1 OR b:2 OR c:3`},
+		"field_group_and":      {`a:(b AND c)`, `a:(b AND c)`},
+		"field_group_must_not": {`a:(-b)`, `a:(-b)`},
+		"field_group_boost":    {`a:(b^2)`, `a:(b^2.0)`},
+		"boost_of_must_not":    {`-a:1^2`, `-a:1^2.0`},
+		"must_not_of_boost":    {`-(a:1^2)`, `-(a:1^2.0)`},
+		"must_not_group":       {`-(a:1 OR b:2)`, `-(a:1 OR b:2)`},
+		"must_group":           {`+(a:1 OR b:2)`, `+(a:1 OR b:2)`},
+		"boost_group":          {`(a:1 OR b:2)^2`, `(a:1 OR b:2)^2.0`},
+		"boost_group_default":  {`(a:1 OR b:2)^`, `(a:1 OR b:2)^`},
+		"fuzzy_group":          {`(a:1 OR b:2)~2`, `(a:1 OR b:2)~2`},
+		"not_group":            {`NOT (a:1 OR b:2)`, `NOT(a:1 OR b:2)`},
+		"nested":               {`a:1 AND (b:2 OR (c:3 AND -(d:4 OR e:5)))`, `a:1 AND (b:2 OR c:3 AND -(d:4 OR e:5))`},
+		"flat_and":             {`a:1 AND b:2`, `a:1 AND b:2`},
+		"must_not_must_not":    {`-(-a:1)`, `-(-a:1)`},
+		"must_must_not":        {`+(-a:1)`, `+(-a:1)`},
+		"must_must":            {`+(+a:1)`, `+(+a:1)`},
+		"must_not_not":         {`-(NOT a:1)`, `-(NOT(a:1))`},
+		"fuzzy_of_boost":       {`(a:1^2)~2`, `(a:1^2.0)~2`},
+		"and_of_must_not":      {`a:1 AND -b:2`, `a:1 AND -b:2`},
+		"must_term":            {`-a:1`, `-a:1`},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			first, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("expected no error parsing %q, got: %v", tc.input, err)
+			}
+
+			rendered := first.String()
+			if rendered != tc.want {
+				t.Errorf("String():\n got: %s\nwant: %s", rendered, tc.want)
+			}
+
+			second, err := Parse(rendered)
+			if err != nil {
+				t.Fatalf("expected no error re-parsing rendered form %q, got: %v", rendered, err)
+			}
+
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf(errTemplate, "round trip through String() changed the expression", first, second)
+			}
+		})
+	}
+}
