@@ -28,6 +28,12 @@ type JSONPathSQL struct {
 	// and a boolean as true or false. It is NULL for a missing key or a JSON
 	// null.
 	Text string
+	// Value reads the value for equality and IN with plain text: a term that
+	// is not a number, true, false or null. It can be a plainer accessor than
+	// Text, so that an index on it applies, but for those terms it must give
+	// the same result as Text, also for a JSON null. Text itself is a valid
+	// Value.
+	Value string
 	// IsNumber is true when the value is a JSON number.
 	IsNumber string
 	// Number reads the value as a number. Base evaluates it only where IsNumber
@@ -63,7 +69,7 @@ func (b Base) renderJSONPath(p expr.JSONPath) (JSONPathSQL, error) {
 	if err := p.Validate(); err != nil {
 		return JSONPathSQL{}, err
 	}
-	col, err := b.dialect().QuoteColumn(string(p.Column))
+	col, err := b.quoteColumn(p.Column)
 	if err != nil {
 		return JSONPathSQL{}, err
 	}
@@ -71,7 +77,7 @@ func (b Base) renderJSONPath(p expr.JSONPath) (JSONPathSQL, error) {
 	if err != nil {
 		return JSONPathSQL{}, err
 	}
-	for _, f := range []struct{ name, sql string }{{"Text", sql.Text}, {"IsNumber", sql.IsNumber}, {"Number", sql.Number}} {
+	for _, f := range []struct{ name, sql string }{{"Text", sql.Text}, {"Value", sql.Value}, {"IsNumber", sql.IsNumber}, {"Number", sql.Number}} {
 		if strings.TrimSpace(f.sql) == "" {
 			return JSONPathSQL{}, fmt.Errorf("dialect %T returned an empty %s for json path %s", b.dialect(), f.name, p)
 		}
@@ -93,8 +99,10 @@ type compareFunc func(e *expr.Expression, left, nullLeft string) (string, []any,
 
 // renderJSONPathCompare renders e, whose left side is the JSON path p.
 //
-// A comparison with text, or a range or IN list that mixes numbers and text,
-// compares the value as text, with any number written as text.
+// Equality and IN with plain text compare sql.Value, so that an index on the
+// accessor applies. Any other comparison with text, or a range or IN list that
+// mixes numbers and text, compares the value as text, with any number written
+// as text.
 //
 // Equality and IN with numbers match a JSON number by value and any other
 // value by its text, so labels.version:2 matches both 2 and "2".
@@ -106,6 +114,9 @@ func (b Base) renderJSONPathCompare(e *expr.Expression, p expr.JSONPath, compare
 	sql, err := b.renderJSONPath(p)
 	if err != nil {
 		return "", nil, err
+	}
+	if comparesPlainText(e) {
+		return compare(e, sql.Value, sql.Value)
 	}
 	asText := numbersAsText(e)
 	if !comparesNumber(e) {
@@ -150,21 +161,82 @@ func numbersAsText(e *expr.Expression) *expr.Expression {
 	return &c
 }
 
+// numberAsText turns a number, or a literal that holds one, into text. A
+// literal keeps the text it was written as, so 1.0 stays 1.0 and does not
+// become 1.
 func numberAsText(in any) any {
-	lit, ok := in.(*expr.Expression)
-	if !ok || lit.Op != expr.Literal {
+	v := in
+	lit, isLit := in.(*expr.Expression)
+	if isLit {
+		if lit.Op != expr.Literal {
+			return in
+		}
+		v = lit.Left
+	}
+	if !isNumber(v) {
 		return in
+	}
+	text := ""
+	if isLit {
+		text = lit.NumberText()
+	}
+	if text == "" {
+		s, _, err := formatNumber(v, 'f')
+		if err != nil {
+			return in
+		}
+		text = s
+	}
+	if !isLit {
+		return text
 	}
 	c := *lit
-	switch v := lit.Left.(type) {
-	case int:
-		c.Left = strconv.Itoa(v)
-	case float64:
-		c.Left = strconv.FormatFloat(v, 'f', -1, 64)
-	default:
-		return in
-	}
+	c.Left = text
 	return &c
+}
+
+// comparesPlainText reports whether e is an equality or IN test whose terms
+// are all plain text.
+func comparesPlainText(e *expr.Expression) bool {
+	switch e.Op {
+	case expr.Equals:
+		return isPlainText(e.Right)
+	case expr.In:
+		items, _, ok := partitionNullsFromList(e.Right)
+		if !ok || len(items) == 0 {
+			return false
+		}
+		for _, item := range items {
+			if !isPlainText(item) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+// isPlainText reports whether in is a string literal that cannot equal the
+// text of a JSON number, true, false or null.
+func isPlainText(in any) bool {
+	lit, ok := in.(*expr.Expression)
+	if !ok || lit.Op != expr.Literal {
+		return false
+	}
+	s, ok := lit.Left.(string)
+	if !ok {
+		return false
+	}
+	if _, err := strconv.ParseFloat(s, 64); err == nil {
+		return false
+	}
+	for _, word := range []string{"true", "false", "null"} {
+		if strings.EqualFold(s, word) {
+			return false
+		}
+	}
+	return true
 }
 
 // comparesNumber reports whether e compares its left side with a number.
@@ -182,7 +254,7 @@ func comparesNumber(e *expr.Expression) bool {
 		if minOpen && maxOpen {
 			return false
 		}
-		return (minOpen || isNumericBound(minVal)) && (maxOpen || isNumericBound(maxVal))
+		return (minOpen || isNumber(minVal)) && (maxOpen || isNumber(maxVal))
 	case expr.In:
 		items, _, ok := partitionNullsFromList(e.Right)
 		if !ok || len(items) == 0 {
@@ -206,5 +278,11 @@ func isNumberLiteral(in any) bool {
 		}
 		in = e.Left
 	}
-	return isNumericBound(in)
+	return isNumber(in)
+}
+
+// isNumber reports whether v is a Go integer or float of any size.
+func isNumber(v any) bool {
+	_, ok, _ := formatNumber(v, 'f')
+	return ok
 }

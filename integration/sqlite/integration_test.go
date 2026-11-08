@@ -12,6 +12,7 @@ import (
 	"database/sql/driver"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	lucene "github.com/grindlemire/go-lucene"
@@ -354,6 +355,10 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 		{"mixed_range_compares_text", `labels.v:{2 TO abc}`, []int{3}},
 		{"quoted_number_matches_number", `labels.stock.count:"10"`, []int{1}},
 		{"bool_text", `labels.n:true`, []int{4}},
+		{"written_decimal_keeps_text", `labels.v:2.0`, []int{2, 3}},
+		{"leading_zero_keeps_text", `labels.v:02`, []int{2, 3}},
+		{"not_plain_text_skips_json_null", `-labels.n:abc`, []int{1, 4}},
+		{"plain_text_in_list", `labels.color:(red OR green)`, []int{1, 4}},
 	}
 
 	opt := lucene.WithJSONFields("labels")
@@ -380,3 +385,42 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 	}
 }
 
+// TestSQLiteIntegrationJSONPathUsesIndex checks that equality with plain text
+// compares the bare json_extract, so an index on that expression applies.
+func TestSQLiteIntegrationJSONPathUsesIndex(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const schema = `
+        ALTER TABLE items ADD COLUMN labels TEXT;
+        CREATE INDEX items_labels_color ON items (json_extract(labels, '$.color'));
+    `
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+
+	opt := lucene.WithJSONFields("labels")
+	for _, q := range []string{`labels.color:red`, `labels.color:(red OR green)`} {
+		where, err := lucene.ToSQLite(q, opt)
+		if err != nil {
+			t.Fatalf("ToSQLite(%q): %v", q, err)
+		}
+		rows, err := db.Query("EXPLAIN QUERY PLAN SELECT id FROM items WHERE " + where)
+		if err != nil {
+			t.Fatalf("explain %q: %v", where, err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		if joined := strings.Join(plan, "; "); !strings.HasPrefix(joined, "SEARCH") || !strings.Contains(joined, "INDEX items_labels_color") {
+			t.Errorf("lucene=%q where=%q: want a search on the index, got plan %q", q, where, joined)
+		}
+	}
+}

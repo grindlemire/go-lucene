@@ -26,7 +26,7 @@ func TestJSONPathEndToEnd(t *testing.T) {
 			input:     `labels.category:fruit`,
 			postgres:  `"labels"->>'category' = 'fruit'`,
 			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.category')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) END = 'fruit'",
-			sqlite:    `CASE json_type("labels", '$.category') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.category') AS TEXT) END = 'fruit'`,
+			sqlite:    `json_extract("labels", '$.category') = 'fruit'`,
 			pgParams:  []any{"fruit"},
 			sqlParams: []any{"fruit"},
 		},
@@ -34,7 +34,7 @@ func TestJSONPathEndToEnd(t *testing.T) {
 			input:     `metadata.address.city:Boston`,
 			postgres:  `"metadata"->'address'->>'city' = 'Boston'`,
 			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`metadata`, '$.address.city')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`metadata`, '$.address.city')) END = 'Boston'",
-			sqlite:    `CASE json_type("metadata", '$.address.city') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("metadata", '$.address.city') AS TEXT) END = 'Boston'`,
+			sqlite:    `json_extract("metadata", '$.address.city') = 'Boston'`,
 			pgParams:  []any{"Boston"},
 			sqlParams: []any{"Boston"},
 		},
@@ -110,7 +110,7 @@ func TestJSONPathEndToEnd(t *testing.T) {
 			input:     `labels.category:(fruit OR veg)`,
 			postgres:  `"labels"->>'category' IN ('fruit', 'veg')`,
 			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.category')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) END IN ('fruit', 'veg')",
-			sqlite:    `CASE json_type("labels", '$.category') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.category') AS TEXT) END IN ('fruit', 'veg')`,
+			sqlite:    `json_extract("labels", '$.category') IN ('fruit', 'veg')`,
 			pgParams:  []any{"fruit", "veg"},
 			sqlParams: []any{"fruit", "veg"},
 		},
@@ -150,7 +150,7 @@ func TestJSONPathEndToEnd(t *testing.T) {
 			input:     `labels.category:(fruit OR null)`,
 			postgres:  `("labels"->>'category' = 'fruit' OR "labels"->>'category' IS NULL)`,
 			mysql:     "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.category')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) END = 'fruit' OR CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.category')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) END IS NULL)",
-			sqlite:    `(CASE json_type("labels", '$.category') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.category') AS TEXT) END = 'fruit' OR CASE json_type("labels", '$.category') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.category') AS TEXT) END IS NULL)`,
+			sqlite:    `(json_extract("labels", '$.category') = 'fruit' OR json_extract("labels", '$.category') IS NULL)`,
 			pgParams:  []any{"fruit"},
 			sqlParams: []any{"fruit"},
 		},
@@ -183,7 +183,7 @@ func TestJSONPathEndToEnd(t *testing.T) {
 			input:     `name:apple AND labels.category:fruit`,
 			postgres:  `("name" = 'apple') AND ("labels"->>'category' = 'fruit')`,
 			mysql:     "(`name` = 'apple') AND (CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.category')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.category')) END = 'fruit')",
-			sqlite:    `("name" = 'apple') AND (CASE json_type("labels", '$.category') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.category') AS TEXT) END = 'fruit')`,
+			sqlite:    `("name" = 'apple') AND (json_extract("labels", '$.category') = 'fruit')`,
 			pgParams:  []any{"apple", "fruit"},
 			sqlParams: []any{"apple", "fruit"},
 		},
@@ -194,6 +194,78 @@ func TestJSONPathEndToEnd(t *testing.T) {
 			sqlite:    `"labels" = 'fruit'`,
 			pgParams:  []any{"fruit"},
 			sqlParams: []any{"fruit"},
+		},
+		"number_keeps_written_text": {
+			input:     `labels.v:1.0`,
+			postgres:  `CASE WHEN json_typeof(("labels"->'v')::json) = 'number' AND length("labels"->>'v') <= 1000 AND "labels"->>'v' ~ '^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]{1,4})?$' THEN ("labels"->>'v')::numeric = 1 ELSE "labels"->>'v' = '1.0' END`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN JSON_EXTRACT(`labels`, '$.v') = 1 ELSE CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END = '1.0' END",
+			sqlite:    `CASE WHEN json_type("labels", '$.v') IN ('integer', 'real') THEN json_extract("labels", '$.v') = 1 ELSE CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END = '1.0' END`,
+			pgParams:  []any{1.0, "1.0"},
+			sqlParams: []any{1.0, "1.0"},
+		},
+		"leading_zero_keeps_written_text": {
+			input:     `labels.v:02134`,
+			postgres:  `CASE WHEN json_typeof(("labels"->'v')::json) = 'number' AND length("labels"->>'v') <= 1000 AND "labels"->>'v' ~ '^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]{1,4})?$' THEN ("labels"->>'v')::numeric = 2134 ELSE "labels"->>'v' = '02134' END`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN JSON_EXTRACT(`labels`, '$.v') = 2134 ELSE CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END = '02134' END",
+			sqlite:    `CASE WHEN json_type("labels", '$.v') IN ('integer', 'real') THEN json_extract("labels", '$.v') = 2134 ELSE CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END = '02134' END`,
+			pgParams:  []any{2134, "02134"},
+			sqlParams: []any{2134, "02134"},
+		},
+		"exponent_keeps_written_text": {
+			input:     `labels.v:1e3`,
+			postgres:  `CASE WHEN json_typeof(("labels"->'v')::json) = 'number' AND length("labels"->>'v') <= 1000 AND "labels"->>'v' ~ '^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]{1,4})?$' THEN ("labels"->>'v')::numeric = 1000 ELSE "labels"->>'v' = '1e3' END`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN JSON_EXTRACT(`labels`, '$.v') = 1000 ELSE CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END = '1e3' END",
+			sqlite:    `CASE WHEN json_type("labels", '$.v') IN ('integer', 'real') THEN json_extract("labels", '$.v') = 1000 ELSE CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END = '1e3' END`,
+			pgParams:  []any{1000.0, "1e3"},
+			sqlParams: []any{1000.0, "1e3"},
+		},
+		"mixed_range_keeps_written_text": {
+			input:     `labels.v:[2.10 TO abc]`,
+			postgres:  `"labels"->>'v' BETWEEN '2.10' AND 'abc'`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END BETWEEN '2.10' AND 'abc'",
+			sqlite:    `CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END BETWEEN '2.10' AND 'abc'`,
+			pgParams:  []any{"2.10", "abc"},
+			sqlParams: []any{"2.10", "abc"},
+		},
+		"mixed_in_keeps_written_text": {
+			input:     `labels.v:(1.50 OR abc)`,
+			postgres:  `"labels"->>'v' IN ('1.50', 'abc')`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END IN ('1.50', 'abc')",
+			sqlite:    `CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END IN ('1.50', 'abc')`,
+			pgParams:  []any{"1.50", "abc"},
+			sqlParams: []any{"1.50", "abc"},
+		},
+		"quoted_number_reads_text_form": {
+			input:     `labels.v:"5"`,
+			postgres:  `"labels"->>'v' = '5'`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END = '5'",
+			sqlite:    `CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END = '5'`,
+			pgParams:  []any{"5"},
+			sqlParams: []any{"5"},
+		},
+		"quoted_null_reads_text_form": {
+			input:     `labels.v:"null"`,
+			postgres:  `"labels"->>'v' = 'null'`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END = 'null'",
+			sqlite:    `CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END = 'null'`,
+			pgParams:  []any{"null"},
+			sqlParams: []any{"null"},
+		},
+		"bool_word_reads_text_form": {
+			input:     `labels.v:TRUE`,
+			postgres:  `"labels"->>'v' = 'TRUE'`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END = 'TRUE'",
+			sqlite:    `CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END = 'TRUE'`,
+			pgParams:  []any{"TRUE"},
+			sqlParams: []any{"TRUE"},
+		},
+		"in_list_plain_text": {
+			input:     `labels.color:(red OR blue)`,
+			postgres:  `"labels"->>'color' IN ('red', 'blue')`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.color')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.color')) END IN ('red', 'blue')",
+			sqlite:    `json_extract("labels", '$.color') IN ('red', 'blue')`,
+			pgParams:  []any{"red", "blue"},
+			sqlParams: []any{"red", "blue"},
 		},
 		"unregistered_dotted_column": {
 			input:     `other.category:fruit`,
@@ -299,7 +371,7 @@ func TestJSONPathEscapedQuoteInQuery(t *testing.T) {
 	}{
 		{"postgres", ToPostgres, `"labels"->>'it''s' = 'x'`},
 		{"mysql", ToMySQL, "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.\"it''s\"')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.\"it''s\"')) END = 'x'"},
-		{"sqlite", ToSQLite, `CASE json_type("labels", '$."it''s"') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$."it''s"') AS TEXT) END = 'x'`},
+		{"sqlite", ToSQLite, `json_extract("labels", '$."it''s"') = 'x'`},
 	}
 	for _, tc := range tcs {
 		got, err := tc.fn(`labels.it\'s:x`, opt)
@@ -322,6 +394,58 @@ func TestJSONPathRejectsBadSegmentsInQuery(t *testing.T) {
 		if _, err := Parse(input, opt); err == nil {
 			t.Errorf("Parse(%q): expected an error", input)
 		}
+	}
+}
+
+func TestJSONPathRejectsEscapedDotInKey(t *testing.T) {
+	opt := WithJSONFields("labels")
+	for _, input := range []string{`labels.a\.b:x`, `labels\.a:x`, `name:y AND labels.a.b\.c:>1`} {
+		_, err := Parse(input, opt)
+		if err == nil || !strings.Contains(err.Error(), "cannot contain a dot") {
+			t.Errorf("Parse(%q): expected an escaped dot error, got %v", input, err)
+		}
+	}
+
+	// An escaped dot in a value, in a quoted field, or on a column that is not
+	// registered keeps its meaning.
+	for _, input := range []string{`labels.a:x\.y`, `"labels.a":x`, `other.a\.b:x`} {
+		if _, err := Parse(input, opt); err != nil {
+			t.Errorf("Parse(%q): unexpected error %v", input, err)
+		}
+	}
+}
+
+func TestNumberKeepsWrittenTextOnlyWhenItDiffers(t *testing.T) {
+	got, err := Parse(`a:5 AND b:2.5`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := expr.AND(expr.Eq("a", 5), expr.Eq("b", 2.5))
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("a number written as it prints must equal expr.Lit:\n got: %#v\nwant: %#v", got, want)
+	}
+
+	for input, text := range map[string]string{`a:1.0`: "1.0", `a:02134`: "02134", `a:1e3`: "1e3"} {
+		e, err := Parse(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lit, _ := e.Right.(*expr.Expression)
+		if lit == nil || lit.NumberText() != text {
+			t.Errorf("Parse(%q): want number text %q, got %#v", input, text, e.Right)
+		}
+	}
+}
+
+func TestJSONPathFoldsCaseByDottedName(t *testing.T) {
+	got, err := ToPostgres(`labels.category:Fruit AND labels.other:Fruit`,
+		WithJSONFields("labels"), WithCaseInsensitiveFields("labels.category"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `(LOWER("labels"->>'category') = LOWER('Fruit')) AND ("labels"->>'other' = 'Fruit')`
+	if got != want {
+		t.Errorf("\n got: %s\nwant: %s", got, want)
 	}
 }
 

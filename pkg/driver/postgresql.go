@@ -134,7 +134,8 @@ func (d postgresDialect) RenderJSONPath(column string, path []string) (JSONPathS
 	text := parent.String() + "->>" + leaf
 	value := parent.String() + "->" + leaf
 	return JSONPathSQL{
-		Text: text,
+		Text:  text,
+		Value: text,
 		IsNumber: fmt.Sprintf("json_typeof((%s)::json) = 'number' AND length(%s) <= %d AND %s ~ '%s'",
 			value, text, maxJSONNumberLength, text, jsonNumberPattern),
 		Number: fmt.Sprintf("(%s)::numeric", text),

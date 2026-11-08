@@ -41,6 +41,7 @@ type Expression struct {
 	// these are operator specific states we have to track
 	boostPower    float64
 	fuzzyDistance int
+	numberText    string
 }
 
 // RangeBoundary represents the boundary conditions for a range operator
@@ -77,6 +78,36 @@ func (e Expression) GoString() string {
 // Lit represents a literal expression
 func Lit(in any) *Expression {
 	return Expr(in, Literal)
+}
+
+// NumberLit returns a literal for the number v, written as text in the query,
+// such as 1.0 or 02134. A driver that compares the number as text uses text.
+// text is kept only when it differs from how v prints, so NumberLit(5, "5")
+// equals Lit(5).
+func NumberLit(v any, text string) *Expression {
+	e := Lit(v)
+	if text != numberString(v) {
+		e.numberText = text
+	}
+	return e
+}
+
+// numberString prints v the way the SQL drivers print a number as text.
+func numberString(v any) string {
+	switch n := v.(type) {
+	case float64:
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(n), 'f', -1, 32)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// NumberText returns the text that a NumberLit was written as. It is empty
+// when the number prints as written.
+func (e *Expression) NumberText() string {
+	return e.numberText
 }
 
 // WILD represents a literal wildcard expression

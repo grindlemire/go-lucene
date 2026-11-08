@@ -102,6 +102,7 @@ func (d sqliteDialect) RenderJSONPath(column string, path []string) (JSONPathSQL
 	jsonType := fmt.Sprintf("json_type(%s, %s)", column, jsonPath)
 	return JSONPathSQL{
 		Text:     fmt.Sprintf("CASE %s WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(%s AS TEXT) END", jsonType, value),
+		Value:    value,
 		IsNumber: fmt.Sprintf("%s IN ('integer', 'real')", jsonType),
 		Number:   value,
 	}, nil

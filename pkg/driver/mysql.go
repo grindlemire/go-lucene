@@ -161,8 +161,12 @@ func (mysqlDialect) QuoteColumn(name string) (string, error) {
 // 'abc' to 0 and match it.
 func (d mysqlDialect) RenderJSONPath(column string, path []string) (JSONPathSQL, error) {
 	value := fmt.Sprintf("JSON_EXTRACT(%s, %s)", column, d.EscapeStringLiteral(dollarJSONPath(path)))
+	// Value is Text: JSON_UNQUOTE alone turns a JSON null into the string
+	// 'null', so NOT labels.a:x would match it.
+	text := fmt.Sprintf("CASE WHEN JSON_TYPE(%s) <> 'NULL' THEN JSON_UNQUOTE(%s) END", value, value)
 	return JSONPathSQL{
-		Text:     fmt.Sprintf("CASE WHEN JSON_TYPE(%s) <> 'NULL' THEN JSON_UNQUOTE(%s) END", value, value),
+		Text:     text,
+		Value:    text,
 		IsNumber: fmt.Sprintf("JSON_TYPE(%s) IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL')", value),
 		Number:   value,
 	}, nil

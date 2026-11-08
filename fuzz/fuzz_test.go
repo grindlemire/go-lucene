@@ -26,6 +26,8 @@ func FuzzPostgresDriver(f *testing.F) {
 		`a.b:c AND a.b.c:>5`,
 		`a.b:[1 TO 10] OR a.b:(x OR y)`,
 		`a.it\'s:x AND NOT a.b:null`,
+		`a.b:1.0 AND a.b:(02 OR x) AND a.b:[1e3 TO z]`,
+		`a.b\.c:x OR a.b:"5"`,
 		// issue #68: compound range bounds
 		`0:[0 0 TO 0]`,
 		`a:["\" AND 1) OR 1=1 --" z TO q]`,

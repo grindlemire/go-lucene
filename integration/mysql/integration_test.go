@@ -724,6 +724,10 @@ func TestMySQLIntegrationJSONPath(t *testing.T) {
 		{name: "mixed_range_compares_text", lucene: `labels.v:{2 TO abc}`, wantIDs: []int{3}},
 		{name: "quoted_number_matches_number", lucene: `labels.stock.count:"10"`, wantIDs: []int{1}},
 		{name: "bool_text", lucene: `labels.n:true`, wantIDs: []int{4}},
+		{name: "written_decimal_keeps_text", lucene: `labels.v:2.0`, wantIDs: []int{2, 3}},
+		{name: "leading_zero_keeps_text", lucene: `labels.v:02`, wantIDs: []int{2, 3}},
+		{name: "not_plain_text_skips_json_null", lucene: `-labels.n:abc`, wantIDs: []int{1, 4}},
+		{name: "plain_text_in_list", lucene: `labels.color:(red OR green)`, wantIDs: []int{1, 4}},
 	}
 
 	opt := lucene.WithJSONFields("labels")

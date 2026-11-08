@@ -136,6 +136,20 @@ func toJSONPaths(e *expr.Expression, jsonFields map[string]bool) {
 	}
 }
 
+// checkJSONField rejects a field on a JSON column with an escaped dot, such
+// as labels.a\.b. Every dot separates keys, so the key a.b cannot be
+// addressed, and reading the path as a, b would match the wrong key.
+func (p *parser) checkJSONField(tok lex.Token) error {
+	if tok.Typ == lex.TQuoted || !strings.Contains(tok.Val, `\.`) {
+		return nil
+	}
+	base, _, _ := strings.Cut(strings.ReplaceAll(tok.Val, `\`, ""), ".")
+	if p.jsonFields[base] {
+		return fmt.Errorf("json path key cannot contain a dot: %s", tok.Val)
+	}
+	return nil
+}
+
 func (p *parser) parse() (e *expr.Expression, err error) {
 	for {
 		next := p.lex.Peek()
@@ -178,6 +192,11 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				// "007" rather than becoming the number 7.
 				if isNumberLiteral(lit) && p.lex.Peek().Typ == lex.TColon {
 					lit = expr.Lit(tok.Val)
+				}
+				if p.lex.Peek().Typ == lex.TColon {
+					if err := p.checkJSONField(tok); err != nil {
+						return e, err
+					}
 				}
 
 				// we should always check if the current top of the stack is another token
@@ -375,14 +394,14 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	// attempt to parse it as an integer
 	ival, err := strconv.Atoi(token.Val)
 	if err == nil {
-		return expr.Lit(ival), nil
+		return expr.NumberLit(ival, token.Val), nil
 	}
 
 	// attempt to parse it as a float. ParseFloat also accepts words like inf
 	// and NaN; those stay terms because SQL has no literal for them.
 	fval, err := strconv.ParseFloat(token.Val, 64)
 	if err == nil && !math.IsInf(fval, 0) && !math.IsNaN(fval) {
-		return expr.Lit(fval), nil
+		return expr.NumberLit(fval, token.Val), nil
 	}
 
 	// if it contains unescaped wildcards then it is a wildcard string
