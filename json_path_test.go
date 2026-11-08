@@ -566,6 +566,33 @@ func TestJSONPathFoldsCaseByDottedName(t *testing.T) {
 	}
 }
 
+// TestJSONPathFoldsCaseByDottedNameWithSpecialKey checks that a key with a
+// space or a colon is listed by its plain dotted name, with no quotes, even
+// though String() quotes the field.
+func TestJSONPathFoldsCaseByDottedNameWithSpecialKey(t *testing.T) {
+	tcs := map[string]struct {
+		query string
+		field string
+		want  string
+	}{
+		"space":         {`"labels.a b":X`, "labels.a b", `LOWER("labels"->>'a b') = LOWER('X')`},
+		"escaped_space": {`labels.a\ b:X`, "labels.a b", `LOWER("labels"->>'a b') = LOWER('X')`},
+		"colon":         {`labels.a\:b:X`, "labels.a:b", `LOWER("labels"->>'a:b') = LOWER('X')`},
+		"nested":        {`"labels.a b.c:d":X*`, "labels.a b.c:d", `LOWER("labels"->'a b'->>'c:d') SIMILAR TO LOWER('X%')`},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := ToPostgres(tc.query, WithJSONFields("labels"), WithCaseInsensitiveFields(tc.field))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("\n got: %s\nwant: %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWithJSONFieldsRejectsBadColumnNames(t *testing.T) {
 	for _, name := range []string{"t.labels", ".labels", ""} {
 		_, err := Parse(`labels.a:x`, WithJSONFields("ok", name))

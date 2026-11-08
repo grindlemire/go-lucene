@@ -23,7 +23,9 @@ func (b Base) foldsCase(in any) bool {
 	case expr.Column:
 		name = string(v)
 	case expr.JSONPath:
-		name = v.String()
+		// The plain dotted name, as WithCaseInsensitiveFields lists it.
+		// String() quotes a name that is not one word, so it is not used.
+		name = string(v.Column) + "." + strings.Join(v.Path, ".")
 	default:
 		return false
 	}
