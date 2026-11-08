@@ -268,3 +268,18 @@ func TestStringNegatedNumber(t *testing.T) {
 		"must_not_and": {`a AND -(5)`, `a AND -(5)`},
 	})
 }
+
+// TestStringBoostAndFuzzyParams checks that String() keeps the boost power and
+// fuzzy distance exactly.
+func TestStringBoostAndFuzzyParams(t *testing.T) {
+	runStringCases(t, map[string]stringCase{
+		"boost_default":    {`a:b^`, `a:b^`},
+		"boost_whole":      {`a:b^2`, `a:b^2.0`},
+		"boost_fraction":   {`a:b^1.25`, `a:b^1.25`},
+		"boost_below_one":  {`a:b^0.5`, `a:b^0.5`},
+		"fuzzy_default":    {`a:b~`, `a:b~`},
+		"fuzzy_two":        {`a:b~2`, `a:b~2`},
+		"fuzzy_zero":       {`a:b~0`, `a:b~0`},
+		"fuzzy_wild_boost": {`(a:b*~0)^0.5`, `(a:b*~0)^0.5`},
+	})
+}

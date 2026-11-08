@@ -158,8 +158,9 @@ func renderBoost(e *Expression, verbose bool) string {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
-	if e.boostPower > 1 {
-		return fmt.Sprintf("%s^%.1f", wrap(e.Left, postfixOps), e.boostPower)
+	// A bare ^ parses as a power of 1, so any other power is written out.
+	if e.boostPower != 1 {
+		return fmt.Sprintf("%s^%s", wrap(e.Left, postfixOps), formatFloat(e.boostPower))
 	}
 
 	return fmt.Sprintf("%s^", wrap(e.Left, postfixOps))
@@ -174,7 +175,8 @@ func renderFuzzy(e *Expression, verbose bool) string {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
-	if e.fuzzyDistance > 1 {
+	// A bare ~ parses as a distance of 1, so any other distance is written out.
+	if e.fuzzyDistance != 1 {
 		return fmt.Sprintf("%s~%d", wrap(e.Left, postfixOps), e.fuzzyDistance)
 	}
 
