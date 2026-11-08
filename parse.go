@@ -78,6 +78,10 @@ type parser struct {
 
 	defaultField string
 
+	// fieldOps counts the ':' and '=' tokens on nonTerminals, so reduce can
+	// tell whether it is inside a field's value without scanning the stack.
+	fieldOps int
+
 	// caseInsensitiveFields is read by the render functions, not the parser.
 	caseInsensitiveFields []string
 }
@@ -144,7 +148,7 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 						// if we have a literal as the previous parsed thing then
 						// we must be in an implicit AND and should reduce
 						p.stack = append(p.stack, implAnd)
-						p.nonTerminals = append(p.nonTerminals, implAnd)
+						p.pushNonTerminal(implAnd)
 					}
 				}
 
@@ -165,13 +169,13 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 						}
 					}
 					p.stack = append(p.stack, implAnd)
-					p.nonTerminals = append(p.nonTerminals, implAnd)
+					p.pushNonTerminal(implAnd)
 				}
 			}
 
 			// push the token on the stack
 			p.stack = append(p.stack, tok)
-			p.nonTerminals = append(p.nonTerminals, tok)
+			p.pushNonTerminal(tok)
 			continue
 		}
 
@@ -263,7 +267,7 @@ func (p *parser) reduce() (err error) {
 	// until the group is reduced into a:(...), so while it is there we are
 	// reducing a field's value.
 	defaultField := p.defaultField
-	if p.inFieldValue() {
+	if p.fieldOps > 0 {
 		defaultField = ""
 	}
 
@@ -282,10 +286,19 @@ func (p *parser) reduce() (err error) {
 
 		// try to reduce with all our reducers
 		var reduced bool
+		before := p.nonTerminals
 		top, p.nonTerminals, reduced = reduce.Reduce(top, p.nonTerminals, defaultField)
 
 		// if we consumed some non terminals during the reduce it means we successfully reduced
 		if reduced {
+			// Reducers only pop from the end of nonTerminals, so the tokens they
+			// consumed are the tail of the old stack.
+			for _, tok := range before[len(p.nonTerminals):] {
+				if isFieldOp(tok) {
+					p.fieldOps--
+				}
+			}
+
 			// If the reducer returned multiple elements and the first two are both expressions,
 			// we need to inject an implicit AND between them (this happens when fuzzy/boost
 			// does a partial reduction like [FUZZY(...), other-expr])
@@ -298,7 +311,7 @@ func (p *parser) reduce() (err error) {
 					newTop := append([]any{top[0]}, implAnd)
 					newTop = append(newTop, top[1:]...)
 					top = newTop
-					p.nonTerminals = append(p.nonTerminals, implAnd)
+					p.pushNonTerminal(implAnd)
 				}
 			}
 
@@ -309,15 +322,18 @@ func (p *parser) reduce() (err error) {
 	}
 }
 
-// inFieldValue reports whether a field operator (the ':' of field:value or
-// the '=' of field=value) is still waiting for its value to be reduced.
-func (p *parser) inFieldValue() bool {
-	for _, tok := range p.nonTerminals {
-		if tok.Typ == lex.TColon || tok.Typ == lex.TEqual {
-			return true
-		}
+func (p *parser) pushNonTerminal(tok lex.Token) {
+	p.nonTerminals = append(p.nonTerminals, tok)
+	if isFieldOp(tok) {
+		p.fieldOps++
 	}
-	return false
+}
+
+// isFieldOp reports whether tok is a field operator: the ':' of field:value
+// or the '=' of field=value. While one is on nonTerminals, its value is still
+// being reduced.
+func isFieldOp(tok lex.Token) bool {
+	return tok.Typ == lex.TColon || tok.Typ == lex.TEqual
 }
 
 func parseLiteral(token lex.Token) (e any, err error) {
