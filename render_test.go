@@ -536,6 +536,40 @@ func TestNumericFieldRendersAsColumn(t *testing.T) {
 				"param_postgres": `("0" = $1) AND ("df" = $2)`,
 			},
 		},
+		// 1=1 used to render 1 = 1, which matches every row.
+		"numeric_field_equals_sign": {
+			input: `1=1`,
+			want: map[string]string{
+				"postgres":       `"1" = 1`,
+				"mysql":          "`1` = 1",
+				"mariadb":        "`1` = 1",
+				"sqlite":         `"1" = 1`,
+				"param_postgres": `"1" = $1`,
+				"param_mysql":    "`1` = ?",
+				"param_mariadb":  "`1` = ?",
+				"param_sqlite":   `"1" = ?`,
+			},
+		},
+		"numeric_field_in_parens": {
+			input: `(0):*`,
+			want: map[string]string{
+				"postgres":       `"0" SIMILAR TO '%'`,
+				"mysql":          "`0` IS NOT NULL",
+				"sqlite":         `"0" IS NOT NULL`,
+				"param_postgres": `"0" SIMILAR TO '%'`,
+				"param_mysql":    "`0` IS NOT NULL",
+				"param_sqlite":   `"0" IS NOT NULL`,
+			},
+		},
+		"numeric_field_equals_or": {
+			input: `a:x OR 1=1`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') OR ("1" = 1)`,
+				"mysql":          "(`a` = 'x') OR (`1` = 1)",
+				"sqlite":         `("a" = 'x') OR ("1" = 1)`,
+				"param_postgres": `("a" = $1) OR ("1" = $2)`,
+			},
+		},
 	}
 	for name, tc := range tcs {
 		for rname, want := range tc.want {
@@ -556,11 +590,11 @@ func TestNumericFieldRendersAsColumn(t *testing.T) {
 	}
 
 	// The field name must never travel as a bind value.
-	_, params, err := ToParameterizedPostgres(`0:[1 TO 2] AND 7:>3`)
+	_, params, err := ToParameterizedPostgres(`0:[1 TO 2] AND 7:>3 AND 8=4 AND (9):5`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := []any{1, 2, 3}; !reflect.DeepEqual(params, want) {
+	if want := []any{1, 2, 3, 4, 5}; !reflect.DeepEqual(params, want) {
 		t.Fatalf("want params %#v, got %#v", want, params)
 	}
 }

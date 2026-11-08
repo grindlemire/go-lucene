@@ -52,6 +52,7 @@ func parseWithOptions(input string, opts ...Opt) (e *expr.Expression, p *parser,
 		lex:          lex.Lex(input),
 		stack:        []any{},
 		nonTerminals: []lex.Token{{Typ: lex.TStart}},
+		numberText:   map[*expr.Expression]string{},
 	}
 
 	for _, opt := range opts {
@@ -75,6 +76,10 @@ type parser struct {
 	lex          *lex.Lexer
 	stack        []any
 	nonTerminals []lex.Token
+
+	// numberText holds the text of each number literal as written, for
+	// numberFieldToColumn.
+	numberText map[*expr.Expression]string
 
 	defaultField string
 
@@ -116,11 +121,9 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 					return e, err
 				}
 
-				// The left side of field:value is always a column, even when it
-				// looks like a number. Keep the text as written so 007:x stays
-				// "007" rather than becoming the number 7.
-				if isNumberLiteral(lit) && p.lex.Peek().Typ == lex.TColon {
-					lit = expr.Lit(tok.Val)
+				// Keep a number's text in case it turns out to be a field.
+				if isNumberLiteral(lit) {
+					p.numberText[lit.(*expr.Expression)] = tok.Val
 				}
 
 				// we should always check if the current top of the stack is another token
@@ -165,6 +168,10 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 					p.stack = append(p.stack, implAnd)
 					p.pushNonTerminal(implAnd)
 				}
+			}
+
+			if tok.Typ == lex.TColon || tok.Typ == lex.TEqual {
+				p.numberFieldToColumn()
 			}
 
 			// push the token on the stack
@@ -248,6 +255,24 @@ func endingRangeSubExpr(next lex.Token) bool {
 // These need implicit AND injection when they follow an expression.
 func isPrefixOperator(tok lex.Token) bool {
 	return tok.Typ == lex.TMinus || tok.Typ == lex.TPlus || tok.Typ == lex.TNot
+}
+
+// numberFieldToColumn is called before a ':' or '=' is shifted. The left side
+// of field:value is always a column, even when it looks like a number, as in
+// 0:1, 1=1 or (0):*. So a number on top of the stack becomes a column, with
+// its text as written: 007:x is "007", not 7.
+func (p *parser) numberFieldToColumn() {
+	top := len(p.stack) - 1
+	if top < 0 {
+		return
+	}
+	lit, ok := p.stack[top].(*expr.Expression)
+	if !ok {
+		return
+	}
+	if text, ok := p.numberText[lit]; ok {
+		p.stack[top] = expr.Lit(text)
+	}
 }
 
 // isRangeStart returns true for the brackets that open a range.
