@@ -59,18 +59,23 @@ func equal(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 		return elems, nonTerminals, false
 	}
 
-	if literals, ok := isChainedOrLiterals(value); ok && len(literals) > 1 {
-		elems = []any{
-			expr.IN(
-				term,
-				expr.LIST(literals),
-			),
-		}
-	} else {
-		elems = []any{applyField(term, value)}
-	}
 	// we consumed one terminal, the =
-	return elems, drop(nonTerminals, 1), true
+	return []any{FieldGroup(term, value)}, drop(nonTerminals, 1), true
+}
+
+// FieldGroup returns field:value the way the parser reads it. A plain OR of
+// terms, as in a:(x OR y), becomes a:x OR a:y written as an IN list. Any
+// other value gets field on every term that has no field of its own, so
+// a:(x AND -y) is a:x AND -a:y and a:(b:c OR d) is b:c OR a:d. A single
+// term is a plain field:term.
+//
+// The SQL drivers call it too, so an EQUALS on a group that was built in
+// code or read from JSON renders the same as the parsed query.
+func FieldGroup(field, value *expr.Expression) *expr.Expression {
+	if literals, ok := isChainedOrLiterals(value); ok && len(literals) > 1 {
+		return expr.IN(field, expr.LIST(literals))
+	}
+	return applyField(field, value)
 }
 
 func isChainedOrLiterals(in *expr.Expression) (out []*expr.Expression, ok bool) {

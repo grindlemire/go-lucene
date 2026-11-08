@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
+	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
 
 // stripRegexpDelimiters removes surrounding /.../ delimiters from a Lucene
@@ -117,6 +118,11 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 
 	if e.Op == expr.Null {
 		return "", nil, fmt.Errorf("null cannot be rendered as a standalone value")
+	}
+
+	e, err = fieldShape(e)
+	if err != nil {
+		return "", nil, err
 	}
 
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
@@ -310,6 +316,11 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return "", fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
+	e, err = fieldShape(e)
+	if err != nil {
+		return "", err
+	}
+
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
 	// single-quoted literal. This mirrors what serialize does for nested
 	// Regexp sub-expressions.
@@ -495,6 +506,40 @@ func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string
 		return "", err
 	}
 	return str, nil
+}
+
+// fieldShape spreads a field over a group of terms. Render does not run
+// expr.Validate, so a tree built in code or read from JSON can hold an EQUALS
+// on a group, which the parser never builds. It gets its field on every term
+// in the group, the way the parser reads a:(x AND y), so it renders as the
+// parsed query does. A comparison with a field of its own, as in
+// expr.Eq("a", expr.Eq("b", 1)), is not a group and renders as before.
+func fieldShape(e *expr.Expression) (*expr.Expression, error) {
+	if e.Op != expr.Equals {
+		return e, nil
+	}
+	value, ok := e.Right.(*expr.Expression)
+	if !ok || !isGroup(value) || value.Op == expr.List {
+		return e, nil
+	}
+	field, ok := e.Left.(*expr.Expression)
+	if !ok {
+		field = &expr.Expression{Op: expr.Literal, Left: e.Left}
+	}
+	return reduce.FieldGroup(field, value), nil
+}
+
+// isGroup reports whether e holds terms that still need a field: an AND, OR,
+// NOT, MUST, MUST_NOT, BOOST or FUZZY, a range with no field, or a LIST.
+func isGroup(e *expr.Expression) bool {
+	switch e.Op {
+	case expr.And, expr.Or, expr.Not, expr.Must, expr.MustNot, expr.Boost, expr.Fuzzy, expr.List:
+		return true
+	case expr.Range:
+		return e.Left == nil
+	default:
+		return false
+	}
 }
 
 func (b Base) isSimple(in any) bool {
