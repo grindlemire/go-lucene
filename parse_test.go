@@ -1240,9 +1240,20 @@ func TestParseNumberSpellings(t *testing.T) {
 		"dot_word":            {`a:.foo`, expr.Eq("a", ".foo")},
 		"dot_field":           {`.5:x`, expr.Eq(".5", "x")},
 		"minus_dot_word":      {`-.foo`, expr.MUSTNOT(expr.Lit(".foo"))},
-		// Unchanged: + outside an exponent still means MUST.
-		"plus_after_word": {`a:be+3`, expr.AND(expr.Eq("a", "be"), expr.MUST(expr.Lit(3)))},
-		"exponent_minus":  {`a:1e-3`, expr.Eq("a", expr.NumberLit(0.001, "1e-3"))},
+		"exponent_minus":      {`a:1e-3`, expr.Eq("a", expr.NumberLit(0.001, "1e-3"))},
+
+		// A + inside a term is part of it, as in Lucene and like -. These
+		// used to split at the +, so a:be+3 parsed as a:be AND +3.
+		"plus_after_word":   {`a:be+3`, expr.Eq("a", "be+3")},
+		"plus_after_number": {`a:1+2`, expr.Eq("a", "1+2")},
+		"plus_at_end":       {`a:c++`, expr.Eq("a", "c++")},
+		"plus_no_exponent":  {`a:1e+`, expr.Eq("a", "1e+")},
+		"plus_in_field":     {`a+b:c`, expr.Eq("a+b", "c")},
+		"plus_in_range":     {`a:[a+b TO c+d]`, expr.Rang("a", "a+b", "c+d", true)},
+		"plus_in_group":     {`a:(c++ OR b)`, expr.IN("a", expr.LIST(expr.Lit("c++"), expr.Lit("b")))},
+		// A + that starts a term still means MUST.
+		"plus_after_space": {`a:b +c:d`, expr.AND(expr.Eq("a", "b"), expr.MUST(expr.Eq("c", "d")))},
+		"plus_after_paren": {`(a:b)+c:d`, expr.AND(expr.Eq("a", "b"), expr.MUST(expr.Eq("c", "d")))},
 	}
 
 	for name, tc := range tcs {
@@ -1259,9 +1270,7 @@ func TestParseNumberSpellings(t *testing.T) {
 
 	// A term can't start with +, so a:+5 stays an error, as in Lucene and
 	// like a:-x. Escape it to search for the text: a:\+5.
-	// A + with no digit after it is not an exponent sign, even at the end
-	// of the query, so a:1e+ fails like a:1e+ with a trailing space.
-	for _, input := range []string{`a:+5`, `a:+.5`, `a:1e+`, `a:1e+ `, `1e+`} {
+	for _, input := range []string{`a:+5`, `a:+.5`, `a: +b`} {
 		t.Run("error/"+input, func(t *testing.T) {
 			if got, err := Parse(input); err == nil {
 				t.Fatalf("expected an error, got %#v", got)
@@ -1833,6 +1842,47 @@ func TestGroupingRoundTrip(t *testing.T) {
 
 			if !reflect.DeepEqual(first, second) {
 				t.Fatalf(errTemplate, "round trip through String() changed the expression", first, second)
+			}
+		})
+	}
+}
+
+// TestParseEscapedWildcardChars checks that an escaped * or ? is a literal
+// character, as in Lucene. A term whose only * and ? are escaped is a plain
+// term. A wildcard keeps its text as written, escapes included, so the
+// drivers can tell a literal * from a wildcard.
+func TestParseEscapedWildcardChars(t *testing.T) {
+	tcs := map[string]*expr.Expression{
+		`a:fo\*`:          expr.Eq("a", expr.Lit("fo*")),
+		`a:fo\?`:          expr.Eq("a", expr.Lit("fo?")),
+		`a:\*`:            expr.Eq("a", expr.Lit("*")),
+		`a:\*x\?`:         expr.Eq("a", expr.Lit("*x?")),
+		`a:\*x*`:          expr.LIKE("a", expr.WILD(`\*x*`)),
+		`a:fo\*bar*`:      expr.LIKE("a", expr.WILD(`fo\*bar*`)),
+		`a:fo\\*`:         expr.LIKE("a", expr.WILD(`fo\\*`)),
+		`a:fo\ b?r`:       expr.LIKE("a", expr.WILD(`fo\ b?r`)),
+		`a:(fo\* OR b)`:   expr.IN("a", expr.LIST(expr.Lit("fo*"), expr.Lit("b"))),
+		`fo\*:x`:          expr.Eq("fo*", "x"),
+		`a:[fo\* TO z]`:   expr.Rang("a", expr.Lit("fo*"), "z", true),
+		`a:fo\* AND b:c*`: expr.AND(expr.Eq("a", expr.Lit("fo*")), expr.LIKE("b", expr.WILD("c*"))),
+		// An escaped backslash is one literal backslash. Both used to be
+		// dropped, so foo\\bar read as foobar.
+		`a:foo\\bar`: expr.Eq("a", expr.Lit(`foo\bar`)),
+		`a:\\`:       expr.Eq("a", expr.Lit(`\`)),
+		`a:\\\*`:     expr.Eq("a", expr.Lit(`\*`)),
+		// The lexer keeps the + of an exponent in a word. In a wildcard it
+		// is a literal +, so it is escaped: SIMILAR TO reads a bare + as
+		// "one or more".
+		`a:1e+5*`: expr.LIKE("a", expr.WILD(`1e\+5*`)),
+	}
+	for in, want := range tcs {
+		t.Run(in, func(t *testing.T) {
+			got, err := Parse(in)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", want, got)
 			}
 		})
 	}

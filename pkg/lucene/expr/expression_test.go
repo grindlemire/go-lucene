@@ -419,7 +419,9 @@ func TestRenderLiteralQuoteEscaping(t *testing.T) {
 	if got, want := Lit(`foo bar\`).String(), `"foo bar\\"`; got != want {
 		t.Fatalf("Lit(%q).String() = %q, want %q", `foo bar\`, got, want)
 	}
-	if got, want := WILD(`fo"o*`).String(), `fo"o*`; got != want {
+	// A wildcard is not quoted, since a phrase cannot hold a wildcard. The
+	// quote is escaped instead, so the lexer keeps it in the word.
+	if got, want := WILD(`fo"o*`).String(), `fo\"o*`; got != want {
 		t.Fatalf("WILD(%q).String() = %q, want %q", `fo"o*`, got, want)
 	}
 	if got, want := REGEXP(`/fo"o/`).String(), `/fo"o/`; got != want {
@@ -618,6 +620,116 @@ func TestRangeBoundErrorMessage(t *testing.T) {
 			}
 			if err.Error() != tc.want {
 				t.Fatalf("\nwant %s\ngot  %s", tc.want, err.Error())
+			}
+		})
+	}
+}
+
+// TestEscapeWildcard checks that EscapeWildcard puts a backslash before each
+// character a pattern built in code gives a meaning to.
+func TestEscapeWildcard(t *testing.T) {
+	tcs := map[string]string{
+		"plain":     "plain",
+		`C:\Users*`: `C:\\Users\*`,
+		"f?o":       `f\?o`,
+		"(a|b)":     `\(a\|b\)`,
+		"[x]{2}+":   `\[x\]\{2\}\+`,
+		"50%_ok":    "50%_ok",
+		"é ü":       "é ü",
+		"":          "",
+	}
+	for in, want := range tcs {
+		if got := EscapeWildcard(in); got != want {
+			t.Errorf("EscapeWildcard(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestLiteralJSONForm checks the JSON form of a string literal. A literal
+// that a plain JSON string would decode as a wildcard or a regex is written
+// as {"literal": ...}, so it decodes back as a literal.
+func TestLiteralJSONForm(t *testing.T) {
+	tcs := map[string]struct {
+		input *Expression
+		json  string
+	}{
+		"plain":       {Lit("foo"), `"foo"`},
+		"star":        {Lit("fo*"), `{"literal":"fo*"}`},
+		"question":    {Lit("f?o"), `{"literal":"f?o"}`},
+		"slashes":     {Lit("/re/"), `{"literal":"/re/"}`},
+		"wildcard":    {WILD("fo*"), `"fo*"`},
+		"in_equals":   {Eq("a", Lit("fo*")), `{"left":"a","operator":"EQUALS","right":{"literal":"fo*"}}`},
+		"in_list":     {IN("a", LIST(Lit("fo*"), Lit("b"))), `{"left":"a","operator":"IN","right":{"left":[{"literal":"fo*"},"b"],"operator":"LIST"}}`},
+		"range_bound": {Rang("a", Lit("fo*"), Lit("z"), true), `{"left":"a","operator":"RANGE","right":{"min":{"literal":"fo*"},"max":"z","inclusive":true}}`},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.input)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(raw) != tc.json {
+				t.Fatalf(jsonErrTemplate, "json does not match", tc.json, raw)
+			}
+			var got Expression
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("unmarshal %s: %v", raw, err)
+			}
+			if !reflect.DeepEqual(tc.input, &got) {
+				t.Fatalf(errTemplate, "round trip changed the expression", tc.input, &got)
+			}
+		})
+	}
+
+	invalid := map[string]string{
+		"extra_key":  `{"literal":"fo*","left":"a"}`,
+		"not_string": `{"literal":5}`,
+		"in_list":    `{"left":"a","operator":"IN","right":{"left":[{"literal":5}],"operator":"LIST"}}`,
+	}
+	for name, raw := range invalid {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			var got Expression
+			if err := json.Unmarshal([]byte(raw), &got); err == nil {
+				t.Fatalf("expected an error decoding %s, got %#v", raw, &got)
+			}
+		})
+	}
+}
+
+// TestBuiltTermJSONForm checks the JSON form of wildcards and regexes built
+// in code. One that a plain JSON string would decode as another kind of term
+// is written as {"wildcard": ...} or {"regexp": ...}.
+func TestBuiltTermJSONForm(t *testing.T) {
+	tcs := map[string]struct {
+		input *Expression
+		json  string
+	}{
+		"wildcard":             {WILD("foo bar*"), `"foo bar*"`},
+		"wildcard_escaped":     {WILD(`fo\*bar*`), `"fo\\*bar*"`},
+		"wildcard_no_star":     {WILD("foo"), `{"wildcard":"foo"}`},
+		"wildcard_slashes":     {WILD("/x*/"), `{"wildcard":"/x*/"}`},
+		"regexp":               {REGEXP("/fo+/"), `"/fo+/"`},
+		"regexp_no_slashes":    {REGEXP("fo+"), `{"regexp":"fo+"}`},
+		"regexp_star":          {REGEXP("fo*"), `{"regexp":"fo*"}`},
+		"like_wildcard":        {LIKE("a", WILD("foo")), `{"left":"a","operator":"LIKE","right":{"wildcard":"foo"}}`},
+		"like_regexp":          {LIKE("a", REGEXP("fo+")), `{"left":"a","operator":"LIKE","right":{"regexp":"fo+"}}`},
+		"range_wildcard_bound": {Rang("a", WILD("f"), Lit("z"), true), `{"left":"a","operator":"RANGE","right":{"min":{"wildcard":"f"},"max":"z","inclusive":true}}`},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.input)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(raw) != tc.json {
+				t.Fatalf(jsonErrTemplate, "json does not match", tc.json, raw)
+			}
+			var got Expression
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("unmarshal %s: %v", raw, err)
+			}
+			if !reflect.DeepEqual(tc.input, &got) {
+				t.Fatalf(errTemplate, "round trip changed the expression", tc.input, &got)
 			}
 		})
 	}

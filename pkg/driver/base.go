@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
@@ -788,11 +789,16 @@ func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 			return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
 		case expr.Wild:
 			// Only a bare * leaves this side open. Any other wildcard bound,
-			// such as ab*, is literal text, as in Lucene.
-			if s, ok := e.Left.(string); ok && s == "*" {
+			// such as ab*, is literal text, as in Lucene, so its escapes are
+			// dropped: f\o* is fo*.
+			s, ok := e.Left.(string)
+			if ok && s == "*" {
 				return nil, true, nil
 			}
 			val = e.Left
+			if ok {
+				val = wildcard.Unescape(s)
+			}
 		case expr.Literal, expr.Regexp:
 			val = e.Left
 			if text, ok := lostDigits(e); ok {

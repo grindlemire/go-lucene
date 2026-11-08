@@ -2,7 +2,6 @@ package lex
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -291,10 +290,11 @@ func lexWord(l *Lexer) tokenStateFn {
 loop:
 	for {
 		switch r := l.next(); {
-		case isAlphaNumeric(r) || isWildcard(r) || isLiteralChar(r) || r == '.' || r == '-':
+		// After the first character a term can hold - and +, as in Lucene,
+		// so c++, a-b and the exponent of 1E+3 stay in the term. Only a + or
+		// - that starts a term is an operator.
+		case isAlphaNumeric(r) || isWildcard(r) || isLiteralChar(r) || r == '.' || r == '-' || r == '+':
 			// do nothing
-		case r == '+' && exponentStart.MatchString(l.input[l.start:l.pos-1]) && isDigit(l.peek()):
-			// the sign of a number's exponent, as in 1E+3
 		case isEscape(r):
 			// skip the escaped character. A backslash at the end of the
 			// input has nothing to escape, which Lucene rejects too.
@@ -354,17 +354,6 @@ func (l *Lexer) next() rune {
 	return r
 }
 
-// peek returns but does not consume the next rune in the input. It reads the
-// input directly rather than calling next and backup: at the end of the input,
-// next sets atEOF, which would stop a later backup from stepping back.
-func (l *Lexer) peek() rune {
-	if int(l.pos) >= len(l.input) {
-		return eof
-	}
-	r, _ := utf8.DecodeRuneInString(l.input[l.pos:])
-	return r
-}
-
 // backup steps back one rune.
 func (l *Lexer) backup() {
 	if !l.atEOF && l.pos > 0 {
@@ -387,21 +376,12 @@ func (l *Lexer) errorf(format string, args ...any) tokenStateFn {
 	return nil
 }
 
-// exponentStart matches a number up to the e of its exponent, such as 1E,
-// -2.5e or .5e. A + after it belongs to the number.
-var exponentStart = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)[eE]$`)
-
 // startsNumber reports whether s starts with a digit, or a dot and a digit.
 // A minus in front of one is a negative number rather than the - operator.
 func startsNumber(s string) bool {
 	s = strings.TrimPrefix(s, ".")
 	r, _ := utf8.DecodeRuneInString(s)
 	return unicode.IsDigit(r)
-}
-
-// isDigit reports whether r is an ASCII digit.
-func isDigit(r rune) bool {
-	return r >= '0' && r <= '9'
 }
 
 // isAlphaNumeric reports whether r is an alphabetic, digit, or underscore.
