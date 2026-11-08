@@ -623,6 +623,57 @@ func TestRangeBoundErrorMessage(t *testing.T) {
 	}
 }
 
+// TestLiteralJSONForm checks the JSON form of a string literal. A literal
+// that a plain JSON string would decode as a wildcard or a regex is written
+// as {"literal": ...}, so it decodes back as a literal.
+func TestLiteralJSONForm(t *testing.T) {
+	tcs := map[string]struct {
+		input *Expression
+		json  string
+	}{
+		"plain":       {Lit("foo"), `"foo"`},
+		"star":        {Lit("fo*"), `{"literal":"fo*"}`},
+		"question":    {Lit("f?o"), `{"literal":"f?o"}`},
+		"slashes":     {Lit("/re/"), `{"literal":"/re/"}`},
+		"wildcard":    {WILD("fo*"), `"fo*"`},
+		"in_equals":   {Eq("a", Lit("fo*")), `{"left":"a","operator":"EQUALS","right":{"literal":"fo*"}}`},
+		"in_list":     {IN("a", LIST(Lit("fo*"), Lit("b"))), `{"left":"a","operator":"IN","right":{"left":[{"literal":"fo*"},"b"],"operator":"LIST"}}`},
+		"range_bound": {Rang("a", Lit("fo*"), Lit("z"), true), `{"left":"a","operator":"RANGE","right":{"min":{"literal":"fo*"},"max":"z","inclusive":true}}`},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.input)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(raw) != tc.json {
+				t.Fatalf(jsonErrTemplate, "json does not match", tc.json, raw)
+			}
+			var got Expression
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("unmarshal %s: %v", raw, err)
+			}
+			if !reflect.DeepEqual(tc.input, &got) {
+				t.Fatalf(errTemplate, "round trip changed the expression", tc.input, &got)
+			}
+		})
+	}
+
+	invalid := map[string]string{
+		"extra_key":  `{"literal":"fo*","left":"a"}`,
+		"not_string": `{"literal":5}`,
+		"in_list":    `{"left":"a","operator":"IN","right":{"left":[{"literal":5}],"operator":"LIST"}}`,
+	}
+	for name, raw := range invalid {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			var got Expression
+			if err := json.Unmarshal([]byte(raw), &got); err == nil {
+				t.Fatalf("expected an error decoding %s, got %#v", raw, &got)
+			}
+		})
+	}
+}
+
 func jsonEqual(got string, want string) bool {
 	return stripWhitespace(got) == stripWhitespace(want)
 }
