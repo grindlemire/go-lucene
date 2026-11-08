@@ -8,7 +8,7 @@ import (
 type renderer func(e *Expression, verbose bool) string
 
 var renderers = map[Operator]renderer{
-	Equals:    renderEquals,
+	Equals:    renderField,
 	And:       renderBasic,
 	Or:        renderBasic,
 	Not:       renderWrapper,
@@ -20,21 +20,34 @@ var renderers = map[Operator]renderer{
 	Literal:   renderLiteral,
 	Wild:      renderLiteral,
 	Regexp:    renderLiteral,
-	Greater:   renderBasic,
-	Less:      renderBasic,
-	GreaterEq: renderBasic,
-	LessEq:    renderBasic,
-	Like:      renderBasic,
-	In:        renderBasic,
+	Greater:   renderField,
+	Less:      renderField,
+	GreaterEq: renderField,
+	LessEq:    renderField,
+	Like:      renderField,
+	In:        renderField,
 	List:      renderList,
 	Null:      renderNullLiteral,
 }
 
-func renderEquals(e *Expression, verbose bool) string {
+// compareSymbols are written between the colon and the value, as in a:>5.
+var compareSymbols = map[Operator]string{
+	Greater:   ">",
+	Less:      "<",
+	GreaterEq: ">=",
+	LessEq:    "<=",
+}
+
+// renderField prints the operators that the parser builds from field:value.
+// LIKE is a:fo* or a:/re/, IN is a:(b OR c) and a comparison is a:>5.
+func renderField(e *Expression, verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("%#v:%#v", e.Left, e.Right)
+		if e.Op == Equals {
+			return fmt.Sprintf("%#v:%#v", e.Left, e.Right)
+		}
+		return renderBasic(e, true)
 	}
-	return fmt.Sprintf("%s:%s", e.Left, wrap(e.Right, prefixOps))
+	return fmt.Sprintf("%s:%s%s", e.Left, compareSymbols[e.Op], wrap(e.Right, prefixOps))
 }
 
 func renderBasic(e *Expression, verbose bool) string {
@@ -169,14 +182,15 @@ func renderList(e *Expression, verbose bool) string {
 			strs = append(strs, fmt.Sprintf("%#v", v.Left))
 			continue
 		}
-		strs = append(strs, fmt.Sprintf("%s", v.Left))
+		strs = append(strs, fmt.Sprint(v))
 	}
 
 	if verbose {
 		return fmt.Sprintf("LIST(%s)", strings.Join(strs, ", "))
 	}
 
-	return fmt.Sprintf("(%s)", strings.Join(strs, ", "))
+	// The parser builds an IN list from a group of terms joined by OR.
+	return fmt.Sprintf("(%s)", strings.Join(strs, " OR "))
 }
 
 func renderNullLiteral(e *Expression, verbose bool) string {
