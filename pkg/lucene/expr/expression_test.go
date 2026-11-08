@@ -518,9 +518,18 @@ func TestValidateRangeBounds(t *testing.T) {
 		"nil_literal":    rangeOf(&Expression{Op: Literal}, Lit(3)),
 		"raw_map":        rangeOf(map[string]any{"x": "1"}, 3),
 		"raw_slice":      rangeOf([]any{"x"}, 3),
+		"ast_slice":      rangeOf(Lit([]*Expression{Lit("x")}), 5),
+		"ast_value_list": rangeOf(Lit([]Expression{*Lit("x")}), 5),
+		"typed_nil_min":  rangeOf((*Expression)(nil), Lit(3)),
+		"typed_nil_max":  rangeOf(Lit(1), (*Expression)(nil)),
 	}
 	for name, e := range invalid {
 		t.Run("invalid/"+name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("Validate panicked: %v", r)
+				}
+			}()
 			err := Validate(e)
 			if err == nil {
 				t.Fatalf("expected %#v to fail validation", e)

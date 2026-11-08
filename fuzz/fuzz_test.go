@@ -89,7 +89,8 @@ func validateRender(t *testing.T, e *expr.Expression) {
 	}
 	for i, param := range params {
 		switch param.(type) {
-		case *expr.Expression, expr.Expression, *expr.RangeBoundary, expr.RangeBoundary:
+		case *expr.Expression, expr.Expression, []*expr.Expression, []expr.Expression,
+			*expr.RangeBoundary, expr.RangeBoundary:
 			t.Fatalf("param %d is an AST node, not a value: %#v (sql: %s)", i, param, p)
 		}
 	}

@@ -63,6 +63,10 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 		"helper_and":     expr.Rang("a", expr.AND(expr.Lit("x"), expr.Lit("y")), expr.Lit("z"), true),
 		"helper_eq_max":  expr.Rang("a", 1, expr.Eq("b", "c"), false),
 		"unbounded_and":  rangeOf(expr.WILD("*"), expr.AND(expr.Lit("x"), expr.Lit("y"))),
+		"ast_slice":      expr.Rang("a", expr.Lit([]*expr.Expression{expr.Lit("x")}), 5, true),
+		"ast_value_list": rangeOf(expr.Lit([]expr.Expression{*expr.Lit("x")}), expr.Lit(5)),
+		"typed_nil_min":  rangeOf((*expr.Expression)(nil), expr.Lit(3)),
+		"typed_nil_max":  rangeOf(expr.Lit(1), (*expr.Expression)(nil)),
 	}
 
 	jsonBounds := map[string]string{
@@ -77,22 +81,26 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 	for name, e := range bounds {
 		for dname, d := range allDrivers {
 			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
-				got, err := d.Render(e)
-				if err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
-				}
-				if !strings.Contains(err.Error(), "must be a single term") {
-					t.Fatalf("expected a single-term range bound error, got: %v", err)
-				}
+				noPanic(t, func() {
+					got, err := d.Render(e)
+					if err == nil {
+						t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
+					}
+					if !strings.Contains(err.Error(), "must be a single term") {
+						t.Fatalf("expected a single-term range bound error, got: %v", err)
+					}
+				})
 			})
 			t.Run(name+"/"+dname+"/render_param", func(t *testing.T) {
-				got, params, err := d.RenderParam(e)
-				if err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", e, got, params)
-				}
-				if !strings.Contains(err.Error(), "must be a single term") {
-					t.Fatalf("expected a single-term range bound error, got: %v", err)
-				}
+				noPanic(t, func() {
+					got, params, err := d.RenderParam(e)
+					if err == nil {
+						t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", e, got, params)
+					}
+					if !strings.Contains(err.Error(), "must be a single term") {
+						t.Fatalf("expected a single-term range bound error, got: %v", err)
+					}
+				})
 			})
 		}
 	}
