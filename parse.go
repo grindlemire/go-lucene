@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/grindlemire/go-lucene/internal/lex"
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
@@ -468,17 +469,33 @@ func parseLiteral(token lex.Token) (e any, err error) {
 		return expr.NumberLit(fval, token.Val), nil
 	}
 
-	// if it contains unescaped wildcards then it is a wildcard string
-	if strings.ContainsAny(token.Val, "*?") {
-		return expr.WILD(token.Val), nil
+	// A term with an unescaped * or ? is a wildcard. It keeps its escapes,
+	// which mark the characters it matches literally, as in fo\*bar*. A term
+	// whose only * and ? are escaped, like fo\*, is a plain term.
+	if wildcard.HasWildcard(token.Val) {
+		return expr.WILD(escapePlus(token.Val)), nil
 	}
 
-	// if it contains an escape string then strip it out now
+	// Drop the escapes. An escaped backslash stays: foo\\bar is foo\bar.
 	if strings.Contains(token.Val, `\`) {
-		return expr.Lit(strings.ReplaceAll(token.Val, `\`, "")), nil
+		return expr.Lit(wildcard.Unescape(token.Val)), nil
 	}
 
 	return expr.Lit(token.Val), nil
+}
+
+// escapePlus escapes each unescaped + in a wildcard's text. The lexer keeps
+// the + of an exponent in a word, as in 1e+5*, and a + there is a literal
+// character. In a pattern built in code, an unescaped + is a SIMILAR TO
+// operator, so the parser's must be escaped to stay literal.
+func escapePlus(text string) string {
+	chars := wildcard.Split(text)
+	for i, c := range chars {
+		if c.Text == "+" {
+			chars[i].Escaped = true
+		}
+	}
+	return wildcard.Join(chars)
 }
 
 // decimalNumber matches a plain decimal number: an optional sign, digits with

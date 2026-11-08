@@ -1841,3 +1841,44 @@ func TestGroupingRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestParseEscapedWildcardChars checks that an escaped * or ? is a literal
+// character, as in Lucene. A term whose only * and ? are escaped is a plain
+// term. A wildcard keeps its text as written, escapes included, so the
+// drivers can tell a literal * from a wildcard.
+func TestParseEscapedWildcardChars(t *testing.T) {
+	tcs := map[string]*expr.Expression{
+		`a:fo\*`:          expr.Eq("a", expr.Lit("fo*")),
+		`a:fo\?`:          expr.Eq("a", expr.Lit("fo?")),
+		`a:\*`:            expr.Eq("a", expr.Lit("*")),
+		`a:\*x\?`:         expr.Eq("a", expr.Lit("*x?")),
+		`a:\*x*`:          expr.LIKE("a", expr.WILD(`\*x*`)),
+		`a:fo\*bar*`:      expr.LIKE("a", expr.WILD(`fo\*bar*`)),
+		`a:fo\\*`:         expr.LIKE("a", expr.WILD(`fo\\*`)),
+		`a:fo\ b?r`:       expr.LIKE("a", expr.WILD(`fo\ b?r`)),
+		`a:(fo\* OR b)`:   expr.IN("a", expr.LIST(expr.Lit("fo*"), expr.Lit("b"))),
+		`fo\*:x`:          expr.Eq("fo*", "x"),
+		`a:[fo\* TO z]`:   expr.Rang("a", expr.Lit("fo*"), "z", true),
+		`a:fo\* AND b:c*`: expr.AND(expr.Eq("a", expr.Lit("fo*")), expr.LIKE("b", expr.WILD("c*"))),
+		// An escaped backslash is one literal backslash. Both used to be
+		// dropped, so foo\\bar read as foobar.
+		`a:foo\\bar`: expr.Eq("a", expr.Lit(`foo\bar`)),
+		`a:\\`:       expr.Eq("a", expr.Lit(`\`)),
+		`a:\\\*`:     expr.Eq("a", expr.Lit(`\*`)),
+		// The lexer keeps the + of an exponent in a word. In a wildcard it
+		// is a literal +, so it is escaped: SIMILAR TO reads a bare + as
+		// "one or more".
+		`a:1e+5*`: expr.LIKE("a", expr.WILD(`1e\+5*`)),
+	}
+	for in, want := range tcs {
+		t.Run(in, func(t *testing.T) {
+			got, err := Parse(in)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", want, got)
+			}
+		})
+	}
+}
