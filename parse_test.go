@@ -965,7 +965,6 @@ func TestParseFieldGroupIgnoresDefaultField(t *testing.T) {
 		"boost_in_group":        `a:(x^2 OR y)`,
 		"fuzzy_in_group":        `a:(x~ OR y)`,
 		"bare_range_in_group":   `a:(x OR [1 TO 5])`,
-		"compare_group":         `a:>(x OR y)`,
 		"boosted_group":         `a:(x OR y)^2`,
 		"fuzzy_group":           `a:(x OR y)~`,
 		"must_group":            `+a:(x OR null)`,
@@ -1084,6 +1083,45 @@ func TestParseFieldGroupAppliesFieldToEachTerm(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestParseCompareGroupIsError checks that a comparison takes a single term.
+// a:>(x OR y) used to parse as a comparison against a boolean expression.
+// Lucene has no comparison syntax, and Elasticsearch's query_string only reads
+// a:>5 as one term with a > in front, so neither gives a meaning to a
+// comparison on a group or a range.
+func TestParseCompareGroupIsError(t *testing.T) {
+	inputs := map[string]string{
+		"or":         `a:>(x OR y)`,
+		"and":        `a:>=(x AND y)`,
+		"must_not":   `a:<(x -y)`,
+		"less_eq":    `a:<=(x OR y)`,
+		"field":      `a:>(b:c)`,
+		"range":      `a:>[1 TO 5]`,
+		"group_rang": `a:>([1 TO 5])`,
+	}
+	for name, input := range inputs {
+		for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
+			t.Run(name+"/"+variant, func(t *testing.T) {
+				got, err := Parse(input, opts...)
+				if err == nil {
+					t.Fatalf("expected an error, got %#v", got)
+				}
+				if !strings.Contains(err.Error(), "must be a single term") {
+					t.Fatalf("expected a single-term error, got: %v", err)
+				}
+			})
+		}
+	}
+
+	// A single term in parentheses is still a comparison.
+	got, err := Parse(`a:>(5)`)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	if want := expr.GREATER("a", 5); !reflect.DeepEqual(got, want) {
+		t.Fatalf(errTemplate, "parsed expression does not match", want, got)
 	}
 }
 

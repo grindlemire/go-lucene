@@ -79,8 +79,6 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 		"question_mark_in_column": {input: `a?b:c`, render: "param_postgres", want: `"a$1b" = $2`},
 		// An escaped \* is meant to match a literal *, but becomes \%.
 		"escaped_star_in_wildcard": {input: `a:\*x*`, render: "postgres", want: `"a" SIMILAR TO '\%x%'`},
-		// A comparison on a group compares the column to a boolean expression.
-		"field_group_gt": {input: `a:>("x' OR 1=1 --" OR c)`, render: "postgres", want: `"a" > ('x'' OR 1=1 --' OR 'c')`},
 		// The default field only reaches a bare wildcard, regex or null when
 		// it is the whole query, so here the wildcard stands alone...
 		"default_field_skips_wildcard": {input: `x OR foo*`, defaultField: "default", render: "postgres", want: `("default" = 'x') OR 'foo*'`},
@@ -303,6 +301,22 @@ func TestFieldGroupAppliesFieldToEachTerm(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// TestCompareGroupRenderError checks that every renderer refuses a
+// comparison on a group. a:>(x OR y) used to render "a" > ('x' OR 'y').
+func TestCompareGroupRenderError(t *testing.T) {
+	for rname, render := range renderers {
+		t.Run(rname, func(t *testing.T) {
+			got, err := render(`a:>("x' OR 1=1 --" OR c)`)
+			if err == nil {
+				t.Fatalf("expected an error, got SQL %q", got)
+			}
+			if !strings.Contains(err.Error(), "must be a single term") {
+				t.Fatalf("expected a single-term error, got: %v", err)
+			}
+		})
 	}
 }
 

@@ -61,6 +61,12 @@ func validateCompare(e *Expression) (err error) {
 		return errors.New("COMPARE validation: left value must be a literal expression")
 	}
 
+	// A comparison takes one term, as in a:>5. Neither Lucene nor
+	// Elasticsearch gives a meaning to a:>(x OR y) or a:>[1 TO 5].
+	if right, ok := e.Right.(*Expression); ok && !isLiteralExpr(right) {
+		return fmt.Errorf("COMPARE validation: the value in a %s comparison must be a single term, not %s %s expression", e.Op, article(right.Op), right.Op)
+	}
+
 	return nil
 }
 
