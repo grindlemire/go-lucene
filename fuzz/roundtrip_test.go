@@ -46,6 +46,7 @@ func FuzzStringRoundTrip(f *testing.F) {
 		`a:(x AND -y) OR a:(x OR [1 TO 5]) OR a:(b:c OR d*)`,
 		`x OR null OR foo* OR /re/ OR [1 TO 5]`,
 		`a:1E+3 OR a:[-.5 TO .5] OR a:.5e+1`,
+		`a:9223372036854775808 OR a:[1e-400 TO 0.1000000000000000055511151231257827] OR a:-0e-400`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)

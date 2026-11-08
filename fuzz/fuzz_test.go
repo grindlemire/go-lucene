@@ -45,6 +45,8 @@ func FuzzPostgresDriver(f *testing.F) {
 		// issue #57: case-insensitive fields
 		`a:(Foo OR 5 OR null) AND A:F?o*`,
 		`-a:"O'Brien" OR default:(x OR y)`,
+		// issue #77: numbers a float64 can't hold
+		`a:9223372036854775808 OR a:[1e-400 TO 0.1000000000000000055511151231257827] OR a.b:(-12345678901234567891 OR 2)`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
