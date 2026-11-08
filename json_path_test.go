@@ -363,6 +363,102 @@ func TestJSONPathStringRoundTrip(t *testing.T) {
 	}
 }
 
+// TestStringQuotesJSONPathFields checks that String() quotes a JSON-path
+// field that would not lex back as one word. It used to print the dotted
+// name as is, so labels.a\ b:x printed as labels.a b:x, which parses as
+// labels.a AND b:x.
+func TestStringQuotesJSONPathFields(t *testing.T) {
+	runStringCases(t, map[string]stringCase{
+		"plain":            {`labels.category:fruit`, `labels.category:fruit`},
+		"nested":           {`metadata.address.city:Boston`, `metadata.address.city:Boston`},
+		"escaped_space":    {`labels.a\ b:x`, `"labels.a b":x`},
+		"quoted_space":     {`"labels.a b":x`, `"labels.a b":x`},
+		"colon":            {`labels.a\:b:x`, `"labels.a:b":x`},
+		"single_quote":     {`labels.it\'s:x`, `"labels.it's":x`},
+		"brackets":         {`"labels.a[0]":x`, `"labels.a[0]":x`},
+		"escaped_brackets": {`labels.a\[0\]:x`, `"labels.a[0]":x`},
+		"wildcard_chars":   {`"labels.a*b?":x`, `"labels.a*b?":x`},
+		"keyword_key":      {`labels.AND:x`, `labels.AND:x`},
+		"number_key":       {`labels.5:x`, `labels.5:x`},
+		"unicode_key":      {`labels.é:x`, `labels.é:x`},
+		"spaced_column":    {`"my col.k":x`, `"my col.k":x`},
+		"compare":          {`labels.a\ b:>5`, `"labels.a b":>5`},
+		"range":            {`labels.a\ b:[1 TO 5]`, `"labels.a b":[1 TO 5]`},
+		"in":               {`labels.a\ b:(x OR y)`, `"labels.a b":(x OR y)`},
+		"like":             {`labels.a\ b:fo*`, `"labels.a b":fo*`},
+		"null":             {`labels.a\ b:null`, `"labels.a b":null`},
+		"field_group":      {`labels.a\ b:(x AND -y)`, `"labels.a b":x AND -"labels.a b":y`},
+	}, WithJSONFields("labels", "metadata", "my col"))
+}
+
+// TestStringHandBuiltJSONPath checks that String() prints a JSON path built
+// in code or read from JSON as a field that parses back to the same path. A
+// key that contains a dot has no spelling in a query, so it prints with an
+// escaped dot, which Parse rejects rather than reading another path.
+func TestStringHandBuiltJSONPath(t *testing.T) {
+	opt := WithJSONFields("labels", "my col")
+	path := func(column string, keys ...string) *expr.Expression {
+		return expr.Lit(expr.JSONPath{Column: expr.Column(column), Path: keys})
+	}
+	fromJSON := func(raw string) *expr.Expression {
+		var e expr.Expression
+		if err := json.Unmarshal([]byte(raw), &e); err != nil {
+			t.Fatalf("unmarshal %s: %v", raw, err)
+		}
+		return &e
+	}
+
+	roundTrips := map[string]struct {
+		input *expr.Expression
+		want  string
+	}{
+		"plain":       {expr.Eq(path("labels", "k"), "x"), `labels.k:x`},
+		"space":       {expr.Eq(path("labels", "a b"), "x"), `"labels.a b":x`},
+		"nested":      {expr.Eq(path("my col", "k", "x y"), "x"), `"my col.k.x y":x`},
+		"quote":       {expr.Eq(path("labels", "it's"), "x"), `"labels.it's":x`},
+		"compare":     {expr.GREATER(path("labels", "a b"), 5), `"labels.a b":>5`},
+		"range":       {expr.Rang(path("labels", "a b"), 1, 5, true), `"labels.a b":[1 TO 5]`},
+		"in":          {expr.IN(path("labels", "a b"), expr.LIST(expr.Lit("x"), expr.Lit("y"))), `"labels.a b":(x OR y)`},
+		"like":        {expr.LIKE(path("labels", "a b"), expr.WILD("fo*")), `"labels.a b":fo*`},
+		"json":        {fromJSON(`{"left":{"json_path":{"column":"labels","path":["a b","c:d"]}},"operator":"EQUALS","right":"x"}`), `"labels.a b.c:d":x`},
+		"json_number": {fromJSON(`{"left":{"json_path":{"column":"labels","path":["v w"]}},"operator":"EQUALS","right":{"number":{"value":1,"text":"1.0"}}}`), `"labels.v w":1.0`},
+	}
+	for name, tc := range roundTrips {
+		t.Run(name, func(t *testing.T) {
+			got := tc.input.String()
+			if got != tc.want {
+				t.Fatalf("String():\n got: %s\nwant: %s", got, tc.want)
+			}
+			parsed, err := Parse(got, opt)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", got, err)
+			}
+			if !reflect.DeepEqual(parsed, tc.input) {
+				t.Fatalf(errTemplate, "String() parses back to a different expression", tc.input, parsed)
+			}
+		})
+	}
+
+	dotted := map[string]struct {
+		input *expr.Expression
+		want  string
+	}{
+		"dot":           {expr.Eq(path("labels", "a.b"), "x"), `labels.a\.b:x`},
+		"dot_and_space": {expr.Eq(path("labels", "a b.c"), "x"), `"labels.a b\\.c":x`},
+	}
+	for name, tc := range dotted {
+		t.Run(name, func(t *testing.T) {
+			got := tc.input.String()
+			if got != tc.want {
+				t.Fatalf("String():\n got: %s\nwant: %s", got, tc.want)
+			}
+			if parsed, err := Parse(got, opt); err == nil {
+				t.Fatalf("Parse(%q): expected an error, got %#v", got, parsed)
+			}
+		})
+	}
+}
+
 func TestJSONPathEscapedQuoteInQuery(t *testing.T) {
 	opt := WithJSONFields("labels")
 	tcs := []struct {

@@ -330,9 +330,21 @@ func (p JSONPath) MarshalJSON() ([]byte, error) {
 	return json.Marshal(jsonPathLeaf{JSONPath: (*jsonPathFields)(&p)})
 }
 
-// String renders the path in lucene dot syntax, e.g. labels.category.
+// String renders the path in lucene dot syntax, e.g. labels.category. A name
+// that does not lex as one word, such as labels.a b, is quoted as a phrase:
+// "labels.a b". A dot inside the column or a key is written as \., which
+// Parse rejects for a JSON column, because a dot always separates keys and
+// the name has no spelling that reads back as the same path.
 func (p JSONPath) String() string {
-	return string(p.Column) + "." + strings.Join(p.Path, ".")
+	names := make([]string, 0, len(p.Path)+1)
+	for _, name := range append([]string{string(p.Column)}, p.Path...) {
+		names = append(names, strings.ReplaceAll(name, ".", `\.`))
+	}
+	s := strings.Join(names, ".")
+	if isPlainTerm(strings.ReplaceAll(s, `\.`, ".")) {
+		return s
+	}
+	return quotePhrase(s)
 }
 
 // GoString is a debug print for the json path type
