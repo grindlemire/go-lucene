@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -115,25 +116,25 @@ func spellsNumber(text string, v any) bool {
 	}
 	switch n := v.(type) {
 	case int:
-		return f == float64(n)
+		return spellsInt(text, big.NewInt(int64(n)))
 	case int8:
-		return f == float64(n)
+		return spellsInt(text, big.NewInt(int64(n)))
 	case int16:
-		return f == float64(n)
+		return spellsInt(text, big.NewInt(int64(n)))
 	case int32:
-		return f == float64(n)
+		return spellsInt(text, big.NewInt(int64(n)))
 	case int64:
-		return f == float64(n)
+		return spellsInt(text, big.NewInt(n))
 	case uint:
-		return f == float64(n)
+		return spellsInt(text, new(big.Int).SetUint64(uint64(n)))
 	case uint8:
-		return f == float64(n)
+		return spellsInt(text, new(big.Int).SetUint64(uint64(n)))
 	case uint16:
-		return f == float64(n)
+		return spellsInt(text, new(big.Int).SetUint64(uint64(n)))
 	case uint32:
-		return f == float64(n)
+		return spellsInt(text, new(big.Int).SetUint64(uint64(n)))
 	case uint64:
-		return f == float64(n)
+		return spellsInt(text, new(big.Int).SetUint64(n))
 	case float32:
 		return float32(f) == n
 	case float64:
@@ -141,6 +142,17 @@ func spellsNumber(text string, v any) bool {
 	default:
 		return false
 	}
+}
+
+// spellsInt reports whether the decimal number text is exactly the integer n.
+// It compares exactly rather than through a float64, which reads
+// 9007199254740993 as 9007199254740992. spellsNumber has already parsed text
+// as a float64 that neither overflowed nor underflowed, so its magnitude is
+// within a float64's range, and parsing it exactly costs time in proportion
+// to its length.
+func spellsInt(text string, n *big.Int) bool {
+	r, ok := new(big.Rat).SetString(text)
+	return ok && r.IsInt() && r.Num().Cmp(n) == 0
 }
 
 // numberString prints v the way the SQL drivers print a number as text.
