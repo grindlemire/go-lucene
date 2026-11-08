@@ -54,6 +54,14 @@ func renderField(e *Expression, verbose bool) string {
 		}
 		return renderBasic(e, true)
 	}
+	// The drivers read a string literal on the right of a LIKE as a pattern,
+	// so it prints as a wildcard term. As a phrase it would parse back as an
+	// exact match.
+	if r, ok := e.Right.(*Expression); ok && e.Op == Like && r.Op == Literal {
+		if s, ok := r.Left.(string); ok {
+			return fmt.Sprintf("%s:%s", e.Left, wildcardTerm(s))
+		}
+	}
 	return fmt.Sprintf("%s:%s%s", e.Left, compareSymbols[e.Op], fieldValue(e.Right))
 }
 
