@@ -494,6 +494,22 @@ func TestNumberKeepsWrittenTextOnlyWhenItDiffers(t *testing.T) {
 			t.Errorf("NumberLit(%#v, %q): want text %q, got %q", tc.v, tc.text, tc.text, text)
 		}
 	}
+
+	// A value changed after NumberLit no longer has the text, so String,
+	// JSON and the drivers all use the new value.
+	lit := expr.NumberLit(1.0, "1.0")
+	lit.Left = 2.0
+	if text := lit.NumberText(); text != "" {
+		t.Errorf("changed value: want no text, got %q", text)
+	}
+	if got := expr.Eq("a", lit).String(); got != "a:2.0" {
+		t.Errorf("changed value: want String() a:2.0, got %s", got)
+	}
+	raw, err := json.Marshal(lit)
+	wantJSON, _ := json.Marshal(expr.Lit(2.0))
+	if err != nil || string(raw) != string(wantJSON) {
+		t.Errorf("changed value: want JSON %s, got %s (%v)", wantJSON, raw, err)
+	}
 }
 
 func TestJSONPathFoldsCaseByDottedName(t *testing.T) {
