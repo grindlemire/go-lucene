@@ -245,6 +245,9 @@ func TestStringKeepsNumberType(t *testing.T) {
 		"big_whole":      {`a:20000000022222200000`, `a:20000000022222200000`},
 		"small_digits":   {`a:0.00001`, `a:0.00001`},
 		"must_not_dot":   {`- .5`, `-(.5)`},
+		// Too small for a float64, so it is a term. String quotes it,
+		// because strconv still reads it as a number.
+		"underflow": {`a:1e-400`, `a:"1e-400"`},
 	})
 	runStringCases(t, map[string]stringCase{
 		"default_field": {`0.`, `default:0.`},

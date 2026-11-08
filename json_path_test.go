@@ -448,6 +448,8 @@ func TestNumberKeepsWrittenTextOnlyWhenItDiffers(t *testing.T) {
 		{1.5, "1.50x"},
 		{1.5, "+1.5"},
 		{"x", "1"},
+		// 1e-400 parses to 0 only because a float64 can't hold it.
+		{0.0, "1e-400"},
 	} {
 		if text := expr.NumberLit(tc.v, tc.text).NumberText(); text != "" {
 			t.Errorf("NumberLit(%#v, %q): want no text, got %q", tc.v, tc.text, text)
@@ -560,6 +562,7 @@ func TestJSONPathJSONRejectsMalformedLeaf(t *testing.T) {
 		"number_in_list":     `{"left":"a","operator":"IN","right":{"left":[{"number":{"value":1}}],"operator":"LIST"}}`,
 		"number_injection":   `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"1 OR b:c"}}}`,
 		"number_mismatch":    `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"2.0"}}}`,
+		"number_underflow":   `{"left":"a","operator":"EQUALS","right":{"number":{"value":0,"text":"1e-400"}}}`,
 		"number_range_bound": `{"left":"a","operator":"RANGE","right":{"min":{"number":{"value":1}},"max":2,"inclusive":true}}`,
 	}
 	for name, raw := range tcs {

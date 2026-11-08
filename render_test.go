@@ -806,6 +806,10 @@ func TestDecimalNumberFormsRender(t *testing.T) {
 		"hex_int":        {`sku:0x1F`, sameSQL(`"sku" = '0x1F'`), []any{"0x1F"}},
 		"escaped_digits": {`a:\007`, sameSQL(`"a" = '007'`), []any{"007"}},
 		"range":          {`a:[007 TO 1e3]`, sameSQL(`"a" >= 7 AND "a" <= 1000`), []any{7, 1000.0}},
+
+		// A nonzero number too small for a float64 used to render as 0.
+		"float_underflow": {`a:1e-400`, sameSQL(`"a" = '1e-400'`), []any{"1e-400"}},
+		"zero_exponent":   {`a:0e-400`, sameSQL(`"a" = 0`), []any{0.0}},
 	}
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
