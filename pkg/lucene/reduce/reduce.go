@@ -485,9 +485,14 @@ func toPositiveFloat(in string) (f float64, err error) {
 // phrase, number, wildcard, regex, null or range, and the term under a boost
 // or fuzzy, whose reducers don't wrap it. AND, OR, NOT, + and - wrap their
 // own operands when they are reduced, so they come back as they are, and so
-// does a term that has a field. An empty field changes nothing.
+// does a term that has a field. An empty field or a nil e changes nothing.
+//
+// It is exported for the parser in the lucene package, which calls it on the
+// whole query once parsing is done. It is not meant to apply a default field
+// to an expression built some other way: an OR of terms, for example, comes
+// back unchanged.
 func WrapDefaultField(e *expr.Expression, field string) *expr.Expression {
-	if field == "" {
+	if field == "" || e == nil {
 		return e
 	}
 	switch e.Op {
