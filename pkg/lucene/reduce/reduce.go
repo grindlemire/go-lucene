@@ -225,8 +225,8 @@ func and(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []l
 	// we have a valid AND clause. Replace it in the stack
 	elems = []any{
 		expr.AND(
-			wrapLiteral(left, defaultField),
-			wrapLiteral(right, defaultField),
+			WrapDefaultField(left, defaultField),
+			WrapDefaultField(right, defaultField),
 		),
 	}
 	// we consumed one terminal, the AND
@@ -258,8 +258,8 @@ func or(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []le
 	// we have a valid OR clause. Replace it in the stack
 	elems = []any{
 		expr.OR(
-			wrapLiteral(left, defaultField),
-			wrapLiteral(right, defaultField),
+			WrapDefaultField(left, defaultField),
+			WrapDefaultField(right, defaultField),
 		),
 	}
 	// we consumed one terminal, the OR
@@ -286,7 +286,7 @@ func not(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []l
 	elems = elems[:len(elems)-2]
 	elems = append(elems,
 		expr.NOT(
-			wrapLiteral(negated, defaultField),
+			WrapDefaultField(negated, defaultField),
 		),
 	)
 	// we consumed one terminal, the NOT
@@ -329,7 +329,7 @@ func must(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []
 	}
 
 	// we consumed 1 terminal, the +
-	return []any{expr.MUST(wrapLiteral(rest, defaultField))}, drop(nonTerminals, 1), true
+	return []any{expr.MUST(WrapDefaultField(rest, defaultField))}, drop(nonTerminals, 1), true
 }
 
 func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
@@ -347,7 +347,7 @@ func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any,
 		return elems, nonTerminals, false
 	}
 	// we consumed one terminal, the -
-	return []any{expr.MUSTNOT(wrapLiteral(rest, defaultField))}, drop(nonTerminals, 1), true
+	return []any{expr.MUSTNOT(WrapDefaultField(rest, defaultField))}, drop(nonTerminals, 1), true
 }
 
 func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
@@ -480,14 +480,22 @@ func toPositiveFloat(in string) (f float64, err error) {
 	return f, fmt.Errorf("[%v] is not a positive float", in)
 }
 
-// wrapLiteral will wrap a literal expression in an equals expression for a defaultField.
-// we need this because we want to support lucene expressions like a:b AND "c" which needs a default
-// field to compare "c" against to be valid.
-func wrapLiteral(lit *expr.Expression, field string) *expr.Expression {
-	if lit.Op == expr.Literal && field != "" {
-		return expr.Eq(expr.Column(field), lit)
+// WrapDefaultField gives a term with no field the default field, so that
+// a:b AND "c" compares "c" against the default field. A term is a word,
+// phrase, number, wildcard, regex, null or range, and the term under a boost
+// or fuzzy, whose reducers don't wrap it. AND, OR, NOT, + and - wrap their
+// own operands when they are reduced, so they come back as they are, and so
+// does a term that has a field. An empty field changes nothing.
+func WrapDefaultField(e *expr.Expression, field string) *expr.Expression {
+	if field == "" {
+		return e
 	}
-	return lit
+	switch e.Op {
+	case expr.Literal, expr.Wild, expr.Regexp, expr.Null, expr.Range, expr.Boost, expr.Fuzzy:
+		return applyField(expr.Lit(expr.Column(field)), e)
+	default:
+		return e
+	}
 }
 
 // applyField applies field to every term in e that has no field of its own,

@@ -98,16 +98,9 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				)
 			}
 
-			// edge case for a single literal in the expression and a default field specified
-			if final.Op == expr.Literal && p.defaultField != "" {
-				final = expr.Expr(p.defaultField, expr.Equals, final.Left)
-			}
-
-			if final.Op == expr.Null && p.defaultField != "" {
-				final = expr.Eq(p.defaultField, final)
-			}
-
-			return final, nil
+			// A query that is a single term, like x, foo* or [1 TO 5], has no
+			// operator to give it the default field, so give it one here.
+			return reduce.WrapDefaultField(final, p.defaultField), nil
 		}
 
 		if p.shouldShift(next) {

@@ -79,11 +79,6 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 		"question_mark_in_column": {input: `a?b:c`, render: "param_postgres", want: `"a$1b" = $2`},
 		// An escaped \* is meant to match a literal *, but becomes \%.
 		"escaped_star_in_wildcard": {input: `a:\*x*`, render: "postgres", want: `"a" SIMILAR TO '\%x%'`},
-		// The default field only reaches a bare wildcard, regex or null when
-		// it is the whole query, so here the wildcard stands alone...
-		"default_field_skips_wildcard": {input: `x OR foo*`, defaultField: "default", render: "postgres", want: `("default" = 'x') OR 'foo*'`},
-		// ...and the null fails to render.
-		"default_field_skips_null": {input: `x OR null`, defaultField: "default", render: "postgres", wantErr: true},
 	}
 
 	for name, tc := range tcs {
@@ -106,6 +101,93 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 				t.Fatalf("\nwant %s\ngot  %s", tc.want, got)
 			}
 		})
+	}
+}
+
+// TestDefaultFieldReachesEveryTerm is the end-to-end check for the default
+// field part of issue #77. With a default field, x OR null used to fail with
+// "null cannot be rendered as a standalone value", x OR foo* rendered
+// ("default" = 'x') OR 'foo*', and "fo*" parsed as a wildcard.
+func TestDefaultFieldReachesEveryTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  map[string]string
+	}{
+		"or_null": {
+			input: `x OR null`,
+			want: map[string]string{
+				"postgres":       `("default" = 'x') OR ("default" IS NULL)`,
+				"mysql":          "(`default` = 'x') OR (`default` IS NULL)",
+				"mariadb":        "(`default` = 'x') OR (`default` IS NULL)",
+				"sqlite":         `("default" = 'x') OR ("default" IS NULL)`,
+				"param_postgres": `("default" = $1) OR ("default" IS NULL)`,
+				"param_mysql":    "(`default` = ?) OR (`default` IS NULL)",
+				"param_mariadb":  "(`default` = ?) OR (`default` IS NULL)",
+				"param_sqlite":   `("default" = ?) OR ("default" IS NULL)`,
+			},
+		},
+		"not_null": {
+			input: `x -null`,
+			want: map[string]string{
+				"postgres":       `("default" = 'x') AND ("default" IS NOT NULL)`,
+				"mysql":          "(`default` = 'x') AND (`default` IS NOT NULL)",
+				"sqlite":         `("default" = 'x') AND ("default" IS NOT NULL)`,
+				"param_postgres": `("default" = $1) AND ("default" IS NOT NULL)`,
+			},
+		},
+		"or_wildcard": {
+			input: `x OR foo*`,
+			want: map[string]string{
+				"postgres": `("default" = 'x') OR ("default" SIMILAR TO 'foo%')`,
+				"mysql":    "(`default` = 'x') OR (`default` LIKE 'foo%' ESCAPE '#')",
+				"mariadb":  "(`default` = 'x') OR (`default` LIKE 'foo%' ESCAPE '#')",
+				"sqlite":   `("default" = 'x') OR ("default" GLOB 'foo*')`,
+			},
+		},
+		"wildcard": {
+			input: `foo*`,
+			want: map[string]string{
+				"postgres": `"default" SIMILAR TO 'foo%'`,
+				"mysql":    "`default` LIKE 'foo%' ESCAPE '#'",
+				"sqlite":   `"default" GLOB 'foo*'`,
+			},
+		},
+		"range": {
+			input: `x OR [1 TO 5]`,
+			want: map[string]string{
+				"postgres":       `("default" = 'x') OR ("default" >= 1 AND "default" <= 5)`,
+				"mysql":          "(`default` = 'x') OR (`default` >= 1 AND `default` <= 5)",
+				"sqlite":         `("default" = 'x') OR ("default" >= 1 AND "default" <= 5)`,
+				"param_postgres": `("default" = $1) OR ("default" >= $2 AND "default" <= $3)`,
+				"param_mysql":    "(`default` = ?) OR (`default` >= ? AND `default` <= ?)",
+				"param_sqlite":   `("default" = ?) OR ("default" >= ? AND "default" <= ?)`,
+			},
+		},
+		"quoted_star": {
+			input: `"fo*"`,
+			want: map[string]string{
+				"postgres":       `"default" = 'fo*'`,
+				"mysql":          "`default` = 'fo*'",
+				"sqlite":         `"default" = 'fo*'`,
+				"param_postgres": `"default" = $1`,
+				"param_mysql":    "`default` = ?",
+				"param_sqlite":   `"default" = ?`,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input, WithDefaultField("default"))
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
 	}
 }
 

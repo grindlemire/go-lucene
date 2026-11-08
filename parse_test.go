@@ -885,6 +885,83 @@ func TestParseLuceneWithDefaultField(t *testing.T) {
 	}
 }
 
+// TestParseDefaultFieldReachesEveryTerm checks that the default field reaches
+// every term with no field, not only words, phrases and numbers. A wildcard,
+// regex, null, range, or a term under a boost or fuzzy only got it, if at
+// all, when it was the whole query. x OR null failed to render and
+// x OR foo* rendered the wildcard as a standalone string.
+func TestParseDefaultFieldReachesEveryTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"or_null":     {`x OR null`, expr.OR(expr.Eq("default", "x"), expr.Eq("default", expr.NULL()))},
+		"and_null":    {`null AND x`, expr.AND(expr.Eq("default", expr.NULL()), expr.Eq("default", "x"))},
+		"not_null":    {`NOT null`, expr.NOT(expr.Eq("default", expr.NULL()))},
+		"or_wildcard": {`x OR foo*`, expr.OR(expr.Eq("default", "x"), expr.LIKE("default", expr.WILD("foo*")))},
+		"wildcard":    {`foo*`, expr.LIKE("default", expr.WILD("foo*"))},
+		"must_not":    {`x -foo*`, expr.AND(expr.Eq("default", "x"), expr.MUSTNOT(expr.LIKE("default", expr.WILD("foo*"))))},
+		"must":        {`+/re/`, expr.MUST(expr.LIKE("default", expr.REGEXP("/re/")))},
+		"regexp":      {`/re/`, expr.LIKE("default", expr.REGEXP("/re/"))},
+		"or_regexp":   {`x OR /re/`, expr.OR(expr.Eq("default", "x"), expr.LIKE("default", expr.REGEXP("/re/")))},
+		"range":       {`[1 TO 5]`, expr.Rang("default", 1, 5, true)},
+		"or_range":    {`x OR {1 TO 5}`, expr.OR(expr.Eq("default", "x"), expr.Rang("default", 1, 5, false))},
+		"and_range":   {`x [1 TO *]`, expr.AND(expr.Eq("default", "x"), expr.Rang("default", 1, "*", true))},
+		"boost":       {`x^2`, expr.BOOST(expr.Eq("default", "x"), 2.0)},
+		"or_boost":    {`x^2 OR y`, expr.OR(expr.BOOST(expr.Eq("default", "x"), 2.0), expr.Eq("default", "y"))},
+		"fuzzy":       {`foo~`, expr.FUZZY(expr.Eq("default", "foo"), 1)},
+		"and_fuzzy":   {`x AND foo~2`, expr.AND(expr.Eq("default", "x"), expr.FUZZY(expr.Eq("default", "foo"), 2))},
+		"group":       {`(foo*)`, expr.LIKE("default", expr.WILD("foo*"))},
+		"next_to_field": {
+			`a:b OR foo*`,
+			expr.OR(expr.Eq("a", "b"), expr.LIKE("default", expr.WILD("foo*"))),
+		},
+		// A quoted term is a phrase, even when it is the whole query and
+		// holds * or /. It used to be read again as a wildcard or regex.
+		"quoted_star":   {`"fo*"`, expr.Eq("default", expr.Lit("fo*"))},
+		"quoted_slash":  {`"/re/"`, expr.Eq("default", expr.Lit("/re/"))},
+		"quoted_or":     {`"fo*" OR x`, expr.OR(expr.Eq("default", expr.Lit("fo*")), expr.Eq("default", "x"))},
+		"quoted_number": {`"5"`, expr.Eq("default", expr.Lit("5"))},
+		// Unchanged.
+		"word":      {`x`, expr.Eq("default", "x")},
+		"or_words":  {`x OR y`, expr.OR(expr.Eq("default", "x"), expr.Eq("default", "y"))},
+		"null":      {`null`, expr.Eq("default", expr.NULL())},
+		"field_ok":  {`a:foo*`, expr.LIKE("a", expr.WILD("foo*"))},
+		"field_grp": {`a:(x OR foo*)`, expr.OR(expr.Eq("a", "x"), expr.LIKE("a", expr.WILD("foo*")))},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input, WithDefaultField("default"))
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+
+	// Without a default field the terms stay bare, as before.
+	noDefault := map[string]*expr.Expression{
+		`x OR foo*`: expr.OR(expr.Lit("x"), expr.WILD("foo*")),
+		`x OR null`: expr.OR(expr.Lit("x"), expr.NULL()),
+		`"fo*"`:     expr.Lit("fo*"),
+		`foo~`:      expr.FUZZY(expr.Lit("foo"), 1),
+	}
+	for input, want := range noDefault {
+		t.Run("no_default/"+input, func(t *testing.T) {
+			got, err := Parse(input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", want, got)
+			}
+		})
+	}
+}
+
 // TestParseDefaultFieldInsideFieldGroup checks that a field group like
 // a:(x OR y) keeps its terms on field a when a default field is set. The
 // default field used to be applied to them, so a:(x OR null) parsed as
