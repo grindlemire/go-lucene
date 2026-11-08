@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 type renderer func(e *Expression, verbose bool) string
@@ -50,7 +51,21 @@ func renderField(e *Expression, verbose bool) string {
 		}
 		return renderBasic(e, true)
 	}
-	return fmt.Sprintf("%s:%s%s", e.Left, compareSymbols[e.Op], wrap(e.Right, prefixOps))
+	return fmt.Sprintf("%s:%s%s", e.Left, compareSymbols[e.Op], fieldValue(e.Right))
+}
+
+// fieldValue prints the value after "field:". A single term or an IN list
+// prints as is. Anything else was a group in the query and keeps its
+// parentheses: "a:b:c" does not parse and "a:b AND c" is (a:b) AND c.
+func fieldValue(in any) string {
+	if e, ok := in.(*Expression); ok {
+		switch e.Op {
+		case Literal, Wild, Regexp, Null, List:
+		default:
+			return fmt.Sprintf("(%s)", e)
+		}
+	}
+	return fmt.Sprintf("%s", in)
 }
 
 func renderBasic(e *Expression, verbose bool) string {
@@ -88,9 +103,8 @@ func binaryOperand(in any, parent Operator, right bool) string {
 }
 
 var (
-	// prefixOps need parentheses under + and - and after "field:". "--a:b" and
-	// "a:-b" do not parse, "-a:b^2" is BOOST(MUST_NOT(a:b)) and "a:b AND c" is
-	// (a:b) AND c.
+	// prefixOps need parentheses under + and -. "--a:b" does not parse and
+	// "-a:b^2" is BOOST(MUST_NOT(a:b)).
 	prefixOps = []Operator{And, Or, Not, Must, MustNot, Boost, Fuzzy}
 	// postfixOps need parentheses under ^ and ~. A prefixed term needs none:
 	// "-a:b^2" already parses as BOOST(MUST_NOT(a:b)).
@@ -119,7 +133,13 @@ func renderMustNot(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
-	return fmt.Sprintf("-%s", wrap(e.Left, prefixOps))
+	s := wrap(e.Left, prefixOps)
+	// A minus right before a digit lexes as part of a negative number, so
+	// -5 would parse as the number -5 rather than MUST_NOT(5).
+	if r, _ := utf8.DecodeRuneInString(s); unicode.IsDigit(r) {
+		s = "(" + s + ")"
+	}
+	return "-" + s
 }
 
 func renderMust(e *Expression, verbose bool) string {

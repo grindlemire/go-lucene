@@ -237,3 +237,34 @@ func TestStringKeepsNumberType(t *testing.T) {
 		"int":            {`a:5`, `a:5`},
 	})
 }
+
+// TestStringFieldGroup checks that a field group around a field expression
+// keeps its parentheses. a:b:c does not parse.
+func TestStringFieldGroup(t *testing.T) {
+	runStringCases(t, map[string]stringCase{
+		"field":          {`a:(b:c)`, `a:(b:c)`},
+		"range":          {`a:(b:[1 TO 5])`, `a:(b:[1 TO 5])`},
+		"compare":        {`a:(b:>5)`, `a:(b:>5)`},
+		"wildcard":       {`a:(b:fo*)`, `a:(b:fo*)`},
+		"in":             {`a:(b:(c OR d))`, `a:(b:(c OR d))`},
+		"must_not":       {`-a:(b:c)`, `-a:(b:c)`},
+		"boost":          {`a:(b:c)^2`, `a:(b:c)^2.0`},
+		"compare_field":  {`a:>(b:c)`, `a:>(b:c)`},
+		"must_not_plain": {`-a:b`, `-a:b`},
+	})
+}
+
+// TestStringNegatedNumber checks that a negated number keeps its parentheses.
+// -5 parses as the number -5, not as MUST_NOT(5).
+func TestStringNegatedNumber(t *testing.T) {
+	runStringCases(t, map[string]stringCase{
+		"int":          {`-(5)`, `-(5)`},
+		"float":        {`-(1.5)`, `-(1.5)`},
+		"wildcard":     {`-(1*)`, `-(1*)`},
+		"digit_word":   {`-(5a)`, `-(5a)`},
+		"negative":     {`-(-5)`, `--5`},
+		"literal":      {`-5`, `-5`},
+		"must":         {`+(5)`, `+5`},
+		"must_not_and": {`a AND -(5)`, `a AND -(5)`},
+	})
+}
