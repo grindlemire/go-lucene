@@ -111,6 +111,16 @@ func TestRenderEscapedWildcardChars(t *testing.T) {
 				"sqlite":   `"a" GLOB 'x[[]*'`,
 			},
 		},
+		// The + of an exponent is a literal +. It used to reach SIMILAR TO
+		// bare, where it means "one or more", and sent MySQL to REGEXP.
+		"exponent_plus_in_wildcard": {
+			input: `a:1e+5*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO '1e\+5%'`,
+				"mysql":    "`a` LIKE '1e+5%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB '1e+5*'`,
+			},
+		},
 		"escaped_space_in_wildcard": {
 			input: `a:foo\ bar*`,
 			want: map[string]string{

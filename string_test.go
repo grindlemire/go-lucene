@@ -315,5 +315,6 @@ func TestStringEscapedWildcardChars(t *testing.T) {
 		"range_bound":        {`a:[fo\* TO z]`, `a:["fo*" TO z]`},
 		"escaped_field":      {`fo\*:x`, `"fo*":x`},
 		"backslash_term":     {`a:foo\\bar`, `a:"foo\\bar"`},
+		"exponent_plus":      {`a:1e+5*`, `a:1e\+5*`},
 	})
 }

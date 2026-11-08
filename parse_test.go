@@ -1856,6 +1856,10 @@ func TestParseEscapedWildcardChars(t *testing.T) {
 		`a:foo\\bar`: expr.Eq("a", expr.Lit(`foo\bar`)),
 		`a:\\`:       expr.Eq("a", expr.Lit(`\`)),
 		`a:\\\*`:     expr.Eq("a", expr.Lit(`\*`)),
+		// The lexer keeps the + of an exponent in a word. In a wildcard it
+		// is a literal +, so it is escaped: SIMILAR TO reads a bare + as
+		// "one or more".
+		`a:1e+5*`: expr.LIKE("a", expr.WILD(`1e\+5*`)),
 	}
 	for in, want := range tcs {
 		t.Run(in, func(t *testing.T) {

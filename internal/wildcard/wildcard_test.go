@@ -47,6 +47,21 @@ func TestHasWildcard(t *testing.T) {
 	}
 }
 
+func TestJoin(t *testing.T) {
+	tcs := map[string]string{
+		`fo\*bar*`: `fo\*bar*`,
+		`a\\b?`:    `a\\b?`,
+		`\ab`:      `\ab`,
+		`a\`:       `a\\`,
+		"":         "",
+	}
+	for in, want := range tcs {
+		if got := Join(Split(in)); got != want {
+			t.Errorf("Join(Split(%q)) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestUnescape(t *testing.T) {
 	tcs := map[string]string{
 		`fo\*`:    "fo*",
