@@ -34,32 +34,59 @@ func renderEquals(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("%#v:%#v", e.Left, e.Right)
 	}
-	return fmt.Sprintf("%s:%s", e.Left, e.Right)
+	return fmt.Sprintf("%s:%s", e.Left, wrap(e.Right, prefixOps))
 }
 
 func renderBasic(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("(%#v) %s (%#v)", e.Left, toString[e.Op], e.Right)
 	}
-	return fmt.Sprintf("%s %s %s", group(e.Left), toString[e.Op], group(e.Right))
+	return fmt.Sprintf("%s %s %s", binaryOperand(e.Left, e.Op, false), toString[e.Op], binaryOperand(e.Right, e.Op, true))
 }
 
-// group renders an AND or OR operand of a binary operator in parentheses so
-// that String() keeps the grouping of the parsed expression.
-func group(in any) string {
+// binds ranks how tightly an operator holds its operands. The parser binds AND
+// tighter than OR and groups a chain from the left, so "a OR b AND c" is
+// a OR (b AND c) and "a AND b AND c" is (a AND b) AND c.
+func binds(op Operator) int {
+	switch op {
+	case Or:
+		return 1
+	case And:
+		return 2
+	default:
+		return 3
+	}
+}
+
+// binaryOperand wraps an AND or OR operand in parentheses only where the
+// parser would group it differently without them: on the left when it binds
+// looser than its parent, on the right when it binds looser or the same.
+func binaryOperand(in any, parent Operator, right bool) string {
 	if e, ok := in.(*Expression); ok && (e.Op == And || e.Op == Or) {
-		return fmt.Sprintf("(%s)", e)
+		child, outer := binds(e.Op), binds(parent)
+		if child < outer || (right && child == outer) {
+			return fmt.Sprintf("(%s)", e)
+		}
 	}
 	return fmt.Sprintf("%s", in)
 }
 
-// groupUnary is group for the operand of +, -, ^ and ~. It also wraps a nested
-// unary operator, because "--a:b" or "a:b^2.0~2" do not re-parse.
-func groupUnary(in any) string {
+var (
+	// prefixOps need parentheses under + and - and after "field:". "--a:b" and
+	// "a:-b" do not parse, "-a:b^2" is BOOST(MUST_NOT(a:b)) and "a:b AND c" is
+	// (a:b) AND c.
+	prefixOps = []Operator{And, Or, Not, Must, MustNot, Boost, Fuzzy}
+	// postfixOps need parentheses under ^ and ~. A prefixed term needs none:
+	// "-a:b^2" already parses as BOOST(MUST_NOT(a:b)).
+	postfixOps = []Operator{And, Or, Not, Boost, Fuzzy}
+)
+
+func wrap(in any, ops []Operator) string {
 	if e, ok := in.(*Expression); ok {
-		switch e.Op {
-		case And, Or, Not, Must, MustNot, Boost, Fuzzy:
-			return fmt.Sprintf("(%s)", e)
+		for _, op := range ops {
+			if e.Op == op {
+				return fmt.Sprintf("(%s)", e)
+			}
 		}
 	}
 	return fmt.Sprintf("%s", in)
@@ -76,14 +103,14 @@ func renderMustNot(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
-	return fmt.Sprintf("-%s", groupUnary(e.Left))
+	return fmt.Sprintf("-%s", wrap(e.Left, prefixOps))
 }
 
 func renderMust(e *Expression, verbose bool) string {
 	if verbose {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
-	return fmt.Sprintf("+%s", groupUnary(e.Left))
+	return fmt.Sprintf("+%s", wrap(e.Left, prefixOps))
 }
 
 func renderBoost(e *Expression, verbose bool) string {
@@ -96,10 +123,10 @@ func renderBoost(e *Expression, verbose bool) string {
 	}
 
 	if e.boostPower > 1 {
-		return fmt.Sprintf("%s^%.1f", groupUnary(e.Left), e.boostPower)
+		return fmt.Sprintf("%s^%.1f", wrap(e.Left, postfixOps), e.boostPower)
 	}
 
-	return fmt.Sprintf("%s^", groupUnary(e.Left))
+	return fmt.Sprintf("%s^", wrap(e.Left, postfixOps))
 }
 
 func renderFuzzy(e *Expression, verbose bool) string {
@@ -112,10 +139,10 @@ func renderFuzzy(e *Expression, verbose bool) string {
 	}
 
 	if e.fuzzyDistance > 1 {
-		return fmt.Sprintf("%s~%d", groupUnary(e.Left), e.fuzzyDistance)
+		return fmt.Sprintf("%s~%d", wrap(e.Left, postfixOps), e.fuzzyDistance)
 	}
 
-	return fmt.Sprintf("%s~", groupUnary(e.Left))
+	return fmt.Sprintf("%s~", wrap(e.Left, postfixOps))
 }
 
 func renderRange(e *Expression, verbose bool) string {
