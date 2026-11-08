@@ -111,6 +111,19 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `(a:1 OR b:2) AND c:3` | `(("a" = 1) OR ("b" = 2)) AND ("c" = 3)` | Grouping |
 | `field:(a AND -b)` | `("field" = 'a') AND (NOT("field" = 'b'))` | A field group applies its field to every term inside. A term with its own field keeps it |
 
+### Wildcards built in code
+
+`expr.LIKE` and `expr.WILD` take a pattern in Lucene wildcard syntax, as in a query: `*` and `?` are wildcards, and a backslash makes the next character literal. ``expr.LIKE("name", `fo\*bar*`)`` matches text that starts with `fo*bar`, and a literal backslash is written `\\`. The same goes for a pattern read from JSON.
+
+Earlier versions passed a backslash in a pattern built in code to MySQL and SQLite as a literal backslash. Code that puts text such as `C:\Users\` into a pattern now needs to escape it, and `expr.EscapeWildcard` turns any text into a pattern that matches only that text:
+
+```go
+// Names that start with the user's text, whatever characters it holds.
+e := expr.LIKE("name", expr.EscapeWildcard(userText)+"*")
+```
+
+It escapes the backslash, `*` and `?`, and also `|`, `()`, `[]`, `{}` and `+`. In a pattern built in code those keep their SIMILAR TO meaning on Postgres and MySQL (MySQL falls back to `REGEXP` for them), and `[...]` is a character set on SQLite too. Inside a set, an escaped `^`, `-`, `]`, `[` or `\` is a member of the set on Postgres and on MySQL 8.0 and MariaDB 10.5+. MySQL 5.7 and older MariaDB also add the backslash to the set, and GLOB has no way to escape `^`, `-` or `]` inside one.
+
 ## Null handling
 
 `field:null` renders as `IS NULL` across every dialect. The keyword is case-insensitive, and the renderer also covers the cases where null appears inside a grouped expression, behind a `NOT`, or alongside other values in an OR-chain.
