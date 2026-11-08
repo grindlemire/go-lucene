@@ -687,6 +687,50 @@ func TestParseLucene(t *testing.T) {
 				expr.Eq("k3", "v3"),
 			),
 		},
+		"implicit_and_before_group": {
+			input: `k1:v1 (k2:v2 OR k3:v3)`,
+			want: expr.AND(
+				expr.Eq("k1", "v1"),
+				expr.OR(
+					expr.Eq("k2", "v2"),
+					expr.Eq("k3", "v3"),
+				),
+			),
+		},
+		"implicit_and_between_groups": {
+			input: `(k1:v1) (k2:v2)`,
+			want: expr.AND(
+				expr.Eq("k1", "v1"),
+				expr.Eq("k2", "v2"),
+			),
+		},
+		"implicit_and_between_or_groups": {
+			input: `(k1:v1 OR k2:v2) (k3:v3 OR k4:v4)`,
+			want: expr.AND(
+				expr.OR(
+					expr.Eq("k1", "v1"),
+					expr.Eq("k2", "v2"),
+				),
+				expr.OR(
+					expr.Eq("k3", "v3"),
+					expr.Eq("k4", "v4"),
+				),
+			),
+		},
+		"implicit_and_before_field_group": {
+			input: `k1:v1 k2:(v2 OR v3)`,
+			want: expr.AND(
+				expr.Eq("k1", "v1"),
+				expr.IN(expr.Lit("k2"), expr.LIST(expr.Lit("v2"), expr.Lit("v3"))),
+			),
+		},
+		"implicit_and_after_boost_before_group": {
+			input: `k1:v1^2 (k2:v2)`,
+			want: expr.AND(
+				expr.BOOST(expr.Eq("k1", "v1"), 2),
+				expr.Eq("k2", "v2"),
+			),
+		},
 		"parenthesized_precedence": {
 			input: `k1:v1 -(k2:v2 OR k3:v3)`,
 			want: expr.AND(

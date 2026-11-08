@@ -118,9 +118,9 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				continue
 			}
 
-			// For prefix operators (-, +, NOT), inject implicit AND if the top of stack is an expression.
-			// These operators start new subexpressions, so consecutive terms like "-a:b -c:d" need AND between them.
-			if len(p.stack) > 0 && isPrefixOperator(tok) {
+			// Prefix operators (-, +, NOT) and "(" start a new subexpression. Inject an implicit AND
+			// when the top of the stack is an expression, so "-a:b -c:d" and "a:b (c:d)" both get an AND.
+			if len(p.stack) > 0 && (isPrefixOperator(tok) || tok.Typ == lex.TLParen) {
 				_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 				if !isTopToken {
 					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
