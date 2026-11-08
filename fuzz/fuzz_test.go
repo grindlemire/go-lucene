@@ -34,6 +34,9 @@ func FuzzPostgresDriver(f *testing.F) {
 		`a:[null TO 1]`,
 		`a:>null`,
 		`null`,
+		// issue #57: case-insensitive fields
+		`a:(Foo OR 5 OR null) AND A:F?o*`,
+		`-a:"O'Brien" OR default:(x OR y)`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
@@ -60,7 +63,16 @@ func FuzzPostgresDriver(f *testing.F) {
 }
 
 func validateRender(t *testing.T, e *expr.Expression) {
-	f, err := driver.NewPostgresDriver().Render(e)
+	validateRenderWith(t, driver.NewPostgresDriver(), e)
+
+	// Fold case on the columns the seeds use.
+	folded := driver.NewPostgresDriver()
+	folded.CaseInsensitiveFields = []string{"a", "A", "default"}
+	validateRenderWith(t, folded, e)
+}
+
+func validateRenderWith(t *testing.T, d driver.PostgresDriver, e *expr.Expression) {
+	f, err := d.Render(e)
 	if err != nil {
 		// Ignore errors that are expected.
 		if strings.Contains(err.Error(), "unable to render operator") ||
@@ -83,7 +95,7 @@ func validateRender(t *testing.T, e *expr.Expression) {
 	// Render accepted this expression, so RenderParam must too: the two
 	// renderers share their validation, and a mismatch means one of them
 	// is checking something the other is not.
-	p, params, err := driver.NewPostgresDriver().RenderParam(e)
+	p, params, err := d.RenderParam(e)
 	if err != nil {
 		t.Fatalf("RenderParam failed after Render succeeded: %v (sql: %s)", err, f)
 	}
