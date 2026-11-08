@@ -1259,7 +1259,9 @@ func TestParseNumberSpellings(t *testing.T) {
 
 	// A term can't start with +, so a:+5 stays an error, as in Lucene and
 	// like a:-x. Escape it to search for the text: a:\+5.
-	for _, input := range []string{`a:+5`, `a:+.5`} {
+	// A + with no digit after it is not an exponent sign, even at the end
+	// of the query, so a:1e+ fails like a:1e+ with a trailing space.
+	for _, input := range []string{`a:+5`, `a:+.5`, `a:1e+`, `a:1e+ `, `1e+`} {
 		t.Run("error/"+input, func(t *testing.T) {
 			if got, err := Parse(input); err == nil {
 				t.Fatalf("expected an error, got %#v", got)

@@ -368,6 +368,10 @@ func TestLex(t *testing.T) {
 			in:       `1e+x`,
 			expected: []Token{tok(TLiteral, "1e"), tok(TPlus, "+"), tok(TLiteral, "x")},
 		},
+		"plus_at_end_of_input": {
+			in:       `1e+`,
+			expected: []Token{tok(TLiteral, "1e"), tok(TPlus, "+")},
+		},
 		"plus_after_number": {
 			in:       `1+2`,
 			expected: []Token{tok(TLiteral, "1"), tok(TPlus, "+"), tok(TLiteral, "2")},
