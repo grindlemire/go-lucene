@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
@@ -66,24 +67,36 @@ func (mysqlDialect) RenderStandaloneWild(left string) (string, error) {
 
 // PrepareLikePattern returns the pattern transformed for LIKE (and useRegex=false)
 // when the pattern contains only simple wildcards, or transformed for REGEXP
-// (and useRegex=true) when it contains SIMILAR-TO-only metacharacters.
+// (and useRegex=true) when it contains an unescaped SIMILAR-TO-only
+// metacharacter. An escaped one is a literal character, which LIKE can match.
 func (mysqlDialect) PrepareLikePattern(pattern string) (string, bool) {
-	if strings.ContainsAny(pattern, similarToOnlyMetachars) {
-		return luceneWildcardToRegex(pattern), true
+	chars := wildcard.Split(pattern)
+	for _, c := range chars {
+		if !c.Escaped && c.In(similarToOnlyMetachars) {
+			return luceneWildcardToRegex(chars), true
+		}
 	}
-	return luceneWildcardToLike(pattern), false
+	return luceneWildcardToLike(chars), false
 }
 
 // luceneWildcardToLike translates Lucene wildcard syntax to MySQL LIKE syntax
 // using '#' as the escape character. '\' would collide with MySQL's string-literal
 // backslash meta-escape under default sql_mode.
-func luceneWildcardToLike(pattern string) string {
-	pattern = strings.ReplaceAll(pattern, `#`, `##`)
-	pattern = strings.ReplaceAll(pattern, `%`, `#%`)
-	pattern = strings.ReplaceAll(pattern, `_`, `#_`)
-	pattern = strings.ReplaceAll(pattern, `*`, `%`)
-	pattern = strings.ReplaceAll(pattern, `?`, `_`)
-	return pattern
+func luceneWildcardToLike(chars []wildcard.Char) string {
+	var b strings.Builder
+	for _, c := range chars {
+		switch {
+		case c.IsWildcard() && c.Text == "*":
+			b.WriteByte('%')
+		case c.IsWildcard():
+			b.WriteByte('_')
+		case c.In("#%_"):
+			b.WriteString("#" + c.Text)
+		default:
+			b.WriteString(c.Text)
+		}
+	}
+	return b.String()
 }
 
 // luceneWildcardToRegex translates a Lucene wildcard pattern (which may
@@ -99,26 +112,25 @@ func luceneWildcardToLike(pattern string) string {
 // extension not guaranteed by POSIX ERE; MySQL 5.7's Henry Spencer engine
 // may reject it. The capture is unused so the extra allocation is
 // negligible.
-func luceneWildcardToRegex(pattern string) string {
+func luceneWildcardToRegex(chars []wildcard.Char) string {
 	var b strings.Builder
-	b.Grow(len(pattern) + 8)
 	b.WriteString("^(")
-	for _, r := range pattern {
-		switch r {
-		case '*':
+	for _, c := range chars {
+		switch {
+		case c.IsWildcard() && c.Text == "*":
 			b.WriteString(".*")
-		case '?':
+		case c.IsWildcard():
 			b.WriteByte('.')
-		// SIMILAR TO metacharacters we retain as regex metacharacters.
-		case '|', '(', ')', '[', ']', '{', '}', '+':
-			b.WriteRune(r)
-		// Regex-only metacharacters escaped so they behave like literals
+		// SIMILAR TO metacharacters we retain as regex metacharacters,
+		// unless they are escaped.
+		case !c.Escaped && c.In(similarToOnlyMetachars):
+			b.WriteString(c.Text)
+		// Regex metacharacters escaped so they behave like literals
 		// (matching the SIMILAR TO semantics of the Postgres path).
-		case '.', '^', '$', '\\':
-			b.WriteByte('\\')
-			b.WriteRune(r)
+		case c.In(similarToOnlyMetachars + `.^$\*?`):
+			b.WriteString(`\` + c.Text)
 		default:
-			b.WriteRune(r)
+			b.WriteString(c.Text)
 		}
 	}
 	b.WriteString(")$")

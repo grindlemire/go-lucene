@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
@@ -82,12 +83,31 @@ func (postgresDialect) RenderStandaloneWild(left string) (string, error) {
 	return fmt.Sprintf("%s SIMILAR TO '%%'", left), nil
 }
 
+// similarToOperators are the characters SIMILAR TO gives a meaning to, apart
+// from its wildcards % and _. In a pattern built in code, an unescaped one
+// keeps that meaning, so *(a|b)* matches text that contains a or b.
+const similarToOperators = "|*+?{}()[]"
+
+// PrepareLikePattern writes a Lucene wildcard pattern for SIMILAR TO, whose
+// escape character is the backslash. Writing \ before an alphanumeric
+// character would make a regex escape such as \d, so only the characters
+// SIMILAR TO gives a meaning to are escaped.
 func (postgresDialect) PrepareLikePattern(pattern string) (string, bool) {
-	pattern = strings.ReplaceAll(pattern, "%", `\%`)
-	pattern = strings.ReplaceAll(pattern, "_", `\_`)
-	pattern = strings.ReplaceAll(pattern, "*", "%")
-	pattern = strings.ReplaceAll(pattern, "?", "_")
-	return pattern, false
+	var b strings.Builder
+	b.Grow(len(pattern) + 4)
+	for _, c := range wildcard.Split(pattern) {
+		switch {
+		case c.IsWildcard() && c.Text == "*":
+			b.WriteByte('%')
+		case c.IsWildcard():
+			b.WriteByte('_')
+		case c.In(`%_\`), c.Escaped && c.In(similarToOperators):
+			b.WriteString(`\` + c.Text)
+		default:
+			b.WriteString(c.Text)
+		}
+	}
+	return b.String(), false
 }
 
 func (postgresDialect) EscapeStringLiteral(s string) string {

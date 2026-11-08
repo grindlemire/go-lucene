@@ -467,7 +467,7 @@ func TestMySQLRegexFallbackEscaping(t *testing.T) {
 		"dot":       {`a.b|(c)*`, `'^(a\\.b|(c).*)$'`, `^(a\.b|(c).*)$`},
 		"caret":     {`^a|(b)`, `'^(\\^a|(b))$'`, `^(\^a|(b))$`},
 		"dollar":    {`a$|(b)`, `'^(a\\$|(b))$'`, `^(a\$|(b))$`},
-		"backslash": {`a\b|(c)`, `'^(a\\\\b|(c))$'`, `^(a\\b|(c))$`},
+		"backslash": {`a\\b|(c)`, `'^(a\\\\b|(c))$'`, `^(a\\b|(c))$`},
 		"quote":     {`it's|(x)`, `'^(it''s|(x))$'`, `^(it's|(x))$`},
 	}
 	d := NewMySQLDriver()
@@ -633,17 +633,17 @@ func TestRenderSafeValueBoundary(t *testing.T) {
 			want:  want{`"a" > 'x'' OR 1=1 --'`, "`a` > 'x'' OR 1=1 --'", `"a" > 'x'' OR 1=1 --'`},
 		},
 		"quote_in_wildcard": {
-			input: expr.LIKE("a", `x'_\*`),
+			input: expr.LIKE("a", `x'_\\*`),
 			want: want{
-				`"a" SIMILAR TO 'x''\_\%'`,
+				`"a" SIMILAR TO 'x''\_\\%'`,
 				"`a` LIKE 'x''#_\\\\%' ESCAPE '#'",
 				`"a" GLOB 'x''_\*'`,
 			},
 		},
 		"quote_in_mysql_regex_fallback": {
-			input: expr.LIKE("a", `x'\(y)*`),
+			input: expr.LIKE("a", `x'\\(y)*`),
 			want: want{
-				`"a" SIMILAR TO 'x''\(y)%'`,
+				`"a" SIMILAR TO 'x''\\(y)%'`,
 				"`a` REGEXP '^(x''\\\\\\\\(y).*)$'",
 				`"a" GLOB 'x''\(y)*'`,
 			},

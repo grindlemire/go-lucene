@@ -155,7 +155,10 @@ func (e *Expression) NumberText() string {
 	return e.numberText
 }
 
-// WILD represents a literal wildcard expression
+// WILD represents a literal wildcard expression. Its value uses Lucene
+// wildcard syntax: * matches any run of characters, ? matches one character,
+// and a backslash makes the next character literal, so fo\*bar* matches text
+// that starts with fo*bar.
 func WILD(in any) *Expression {
 	return Expr(in, Wild)
 }
@@ -194,7 +197,8 @@ func LESSEQ(a any, b any) *Expression {
 	return Expr(a, LessEq, b)
 }
 
-// LIKE creates a LIKE expression. b uses Lucene wildcard syntax (* and ?, not SQL % and _).
+// LIKE creates a LIKE expression. b uses Lucene wildcard syntax (* and ?, not
+// SQL % and _), with a backslash before a * or ? that should match itself.
 func LIKE(a any, b any) *Expression {
 	return Expr(a, Like, b)
 }
@@ -780,8 +784,9 @@ func literalToExpr(in any) *Expression {
 		return REGEXP(s)
 	}
 
-	// if it contains a * or ? then it probably is a wildcard expression
-	// TODO this should probably check for escaping
+	// A string with a * or ? is a wildcard pattern, even when they are all
+	// escaped: the backslashes are part of the pattern, so fo\* matches the
+	// text fo*.
 	if strings.ContainsAny(s, "*?") {
 		return WILD(s)
 	}

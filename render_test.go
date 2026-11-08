@@ -63,42 +63,75 @@ func TestRangeBoundInjectionErrors(t *testing.T) {
 	}
 }
 
-// TestRenderKnownQuirksStaySafe pins inputs that render wrong SQL but keep
-// every user-supplied term escaped or bound. They are separate bugs from
-// issue #68 and are not fixed here; the pins show where the boundary is and
-// should be updated when those bugs are fixed.
-func TestRenderKnownQuirksStaySafe(t *testing.T) {
+// TestRenderEscapedWildcardChars is the end-to-end check for escaped
+// wildcard characters (issue #77). An escaped \* used to stay a wildcard:
+// a:\*x* rendered "a" SIMILAR TO '\%x%' and a:fo\* rendered a LIKE.
+func TestRenderEscapedWildcardChars(t *testing.T) {
 	tcs := map[string]struct {
-		input        string
-		defaultField string
-		render       string
-		want         string
-		wantErr      bool
+		input string
+		want  map[string]string
 	}{
-		// An escaped \* is meant to match a literal *, but becomes \%.
-		"escaped_star_in_wildcard": {input: `a:\*x*`, render: "postgres", want: `"a" SIMILAR TO '\%x%'`},
+		"only_escaped_star": {
+			input: `a:fo\*`,
+			want: map[string]string{
+				"postgres": `"a" = 'fo*'`,
+				"mysql":    "`a` = 'fo*'",
+				"sqlite":   `"a" = 'fo*'`,
+			},
+		},
+		"only_escaped_question": {
+			input: `a:fo\?`,
+			want: map[string]string{
+				"postgres": `"a" = 'fo?'`,
+				"mysql":    "`a` = 'fo?'",
+				"sqlite":   `"a" = 'fo?'`,
+			},
+		},
+		"escaped_star_in_wildcard": {
+			input: `a:\*x*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO '\*x%'`,
+				"mysql":    "`a` LIKE '*x%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB '[*]x*'`,
+			},
+		},
+		"escaped_question_in_wildcard": {
+			input: `a:x\?*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO 'x\?%'`,
+				"mysql":    "`a` LIKE 'x?%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB 'x[?]*'`,
+			},
+		},
+		"escaped_bracket_in_wildcard": {
+			input: `a:x\[*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO 'x\[%'`,
+				"mysql":    "`a` LIKE 'x[%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB 'x[[]*'`,
+			},
+		},
+		"escaped_space_in_wildcard": {
+			input: `a:foo\ bar*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO 'foo bar%'`,
+				"mysql":    "`a` LIKE 'foo bar%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB 'foo bar*'`,
+			},
+		},
 	}
-
 	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			var opts []Opt
-			if tc.defaultField != "" {
-				opts = append(opts, WithDefaultField(tc.defaultField))
-			}
-			got, err := renderers[tc.render](tc.input, opts...)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected an error, got SQL %q", got)
+		for dname, want := range tc.want {
+			t.Run(name+"/"+dname, func(t *testing.T) {
+				got, err := renderers[dname](tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("\nwant %s\ngot  %s", tc.want, got)
-			}
-		})
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
 	}
 }
 

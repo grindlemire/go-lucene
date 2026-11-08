@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/grindlemire/go-lucene/internal/lex"
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
@@ -468,8 +469,10 @@ func parseLiteral(token lex.Token) (e any, err error) {
 		return expr.NumberLit(fval, token.Val), nil
 	}
 
-	// if it contains unescaped wildcards then it is a wildcard string
-	if strings.ContainsAny(token.Val, "*?") {
+	// A term with an unescaped * or ? is a wildcard. It keeps its escapes,
+	// which mark the characters it matches literally, as in fo\*bar*. A term
+	// whose only * and ? are escaped, like fo\*, is a plain term.
+	if wildcard.HasWildcard(token.Val) {
 		return expr.WILD(token.Val), nil
 	}
 
