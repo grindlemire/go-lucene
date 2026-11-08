@@ -246,6 +246,14 @@ func TestRenderParamPassesThroughBindValues(t *testing.T) {
 // binds the float as before.
 func TestNumberThatLosesDigitsIsWritten(t *testing.T) {
 	big := expr.NumberLit(9223372036854775808.0, "9223372036854775808")
+	// changed returns that literal with its value replaced after NumberLit
+	// checked the text. The text no longer spells the value, so the driver
+	// renders the value.
+	changed := func(v any) *expr.Expression {
+		lit := expr.NumberLit(9223372036854775808.0, "9223372036854775808")
+		lit.Left = v
+		return lit
+	}
 	tcs := map[string]struct {
 		input      *expr.Expression
 		want       string
@@ -278,6 +286,30 @@ func TestNumberThatLosesDigitsIsWritten(t *testing.T) {
 			want:       `"a" = 1000`,
 			wantParam:  `"a" = $1`,
 			wantParams: []any{1000.0},
+		},
+		"value_changed": {
+			input:      expr.Eq("a", changed(5.0)),
+			want:       `"a" = 5`,
+			wantParam:  `"a" = $1`,
+			wantParams: []any{5.0},
+		},
+		"value_changed_to_float32": {
+			input:      expr.Eq("a", changed(float32(1.5))),
+			want:       `"a" = 1.5`,
+			wantParam:  `"a" = $1`,
+			wantParams: []any{float32(1.5)},
+		},
+		"value_changed_to_int": {
+			input:      expr.Eq("a", changed(7)),
+			want:       `"a" = 7`,
+			wantParam:  `"a" = $1`,
+			wantParams: []any{7},
+		},
+		"bound_value_changed": {
+			input:      rangeOf(changed(1e19), 5),
+			want:       `"a" >= 10000000000000000000 AND "a" <= 5`,
+			wantParam:  `"a" >= $1 AND "a" <= $2`,
+			wantParams: []any{1e19, 5},
 		},
 	}
 	for name, tc := range tcs {
