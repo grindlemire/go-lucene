@@ -116,6 +116,78 @@ func TestWildcardEscapesInRenderedSQL(t *testing.T) {
 	}
 }
 
+// TestWildcardBracketExpression checks a bracket expression in a pattern
+// built in code. Inside the brackets every character is a member of the set,
+// so * and ? are not translated, and an escaped ^, -, ], [ or \ keeps its
+// backslash where the dialect reads one. x[\^a]* used to give Postgres
+// x[^a]%, which negates the set, and x[a\-c]* became the range a-c.
+// GLOB has no escape inside brackets, so SQLite lists only the cases it can
+// write.
+func TestWildcardBracketExpression(t *testing.T) {
+	tcs := map[string]map[string]string{
+		`x[\^a]*`: {
+			"postgres": `x[\^a]%`,
+			"mysql":    `^(x[\^a].*)$`,
+		},
+		`x[a\-c]*`: {
+			"postgres": `x[a\-c]%`,
+			"mysql":    `^(x[a\-c].*)$`,
+		},
+		`x[a\]]*`: {
+			"postgres": `x[a\]]%`,
+			"mysql":    `^(x[a\]].*)$`,
+		},
+		`x[a\[]*`: {
+			"postgres": `x[a\[]%`,
+			"mysql":    `^(x[a\[].*)$`,
+		},
+		`x[a\\]*`: {
+			"postgres": `x[a\\]%`,
+			"mysql":    `^(x[a\\].*)$`,
+			"sqlite":   `x[a\]*`,
+		},
+		`x[*?%_.]*`: {
+			"postgres": `x[*?%_.]%`,
+			"mysql":    `^(x[*?%_.].*)$`,
+			"sqlite":   `x[*?%_.]*`,
+		},
+		`x[\*\?]?`: {
+			"postgres": `x[*?]_`,
+			"mysql":    `^(x[*?].)$`,
+			"sqlite":   `x[*?]?`,
+		},
+		// A ] right after the [ is a member, as in POSIX.
+		`x[]a]*`: {
+			"postgres": `x[]a]%`,
+			"mysql":    `^(x[]a].*)$`,
+			"sqlite":   `x[]a]*`,
+		},
+		// Without its ], a [ starts no bracket expression.
+		`x[a*`: {
+			"postgres": `x[a%`,
+			"mysql":    `^(x[a.*)$`,
+			"sqlite":   `x[a*`,
+		},
+	}
+	for pattern, want := range tcs {
+		for dname, d := range allDrivers {
+			w, ok := want[dname]
+			if !ok {
+				continue
+			}
+			t.Run(pattern+"/"+dname, func(t *testing.T) {
+				_, params, err := d.RenderParam(expr.LIKE("a", expr.WILD(pattern)))
+				if err != nil {
+					t.Fatalf("RenderParam: unexpected error: %v", err)
+				}
+				if len(params) != 1 || params[0] != w {
+					t.Fatalf("want params [%q], got %#v", w, params)
+				}
+			})
+		}
+	}
+}
+
 // TestMySQLRegexFallbackKeepsEscapesLiteral checks the MySQL REGEXP fallback,
 // which a pattern built in code takes when it has an unescaped SIMILAR TO
 // operator such as | or (. An escaped character in the same pattern is

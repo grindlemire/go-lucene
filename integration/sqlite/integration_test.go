@@ -334,7 +334,7 @@ var escapedWildcardCases = []struct {
 	{"escaped_pipe", `name:a\|*`, []int{23}},
 	{"escaped_plus", `name:a\+*`, []int{24}},
 	{"escaped_brace", `name:a\{*`, []int{25}},
-	{"single_char", `name:a?b`, []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}},
+	{"single_char", `name:a?b`, []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28}},
 }
 
 func TestSQLiteIntegrationEscapedWildcards(t *testing.T) {
@@ -346,7 +346,7 @@ func TestSQLiteIntegrationEscapedWildcards(t *testing.T) {
             (11, 'a*b'), (12, 'axb'), (13, 'a?b'), (14, 'a%b'), (15, 'a_b'),
             (16, 'a[b'), (17, 'a\b'), (18, 'a#b'), (19, 'a]b'), (20, 'a.b'),
             (21, 'a b'), (22, 'a(b'), (23, 'a|b'), (24, 'a+b'), (25, 'a{b'),
-            (26, 'ab');
+            (26, 'ab'), (27, 'a^b'), (28, 'a-b');
     `
 	if _, err := db.Exec(rows); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -370,6 +370,39 @@ func TestSQLiteIntegrationEscapedWildcards(t *testing.T) {
 			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
 				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
 					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	// A pattern built in code can hold a GLOB bracket expression. Inside it
+	// * ? [ and \ are members of the set, escaped or not.
+	drv := lucenedriver.NewSQLiteDriver()
+	brackets := []struct {
+		name    string
+		pattern string
+		wantIDs []int
+	}{
+		{"bracket_wildcard_chars", `a[*?]b`, []int{11, 13}},
+		{"bracket_escaped_wildcard_chars", `a[\*\?]b`, []int{11, 13}},
+		{"bracket_escaped_open", `a[\[x]b`, []int{12, 16}},
+		{"bracket_escaped_backslash", `a[\\x]b`, []int{12, 17}},
+	}
+	for _, tc := range brackets {
+		t.Run(tc.name, func(t *testing.T) {
+			e := expr.LIKE("name", tc.pattern)
+			where, err := drv.Render(e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s\n  want ids %v\n  got  ids %v", tc.pattern, where, tc.wantIDs, got)
+			}
+			where, params, err := drv.RenderParam(e)
+			if err != nil {
+				t.Fatalf("render param: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s params=%v\n  want ids %v\n  got  ids %v", tc.pattern, where, params, tc.wantIDs, got)
 			}
 		})
 	}
