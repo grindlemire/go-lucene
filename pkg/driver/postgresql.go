@@ -88,15 +88,29 @@ func (postgresDialect) RenderStandaloneWild(left string) (string, error) {
 // keeps that meaning, so *(a|b)* matches text that contains a or b.
 const similarToOperators = "|*+?{}()[]"
 
+// bracketMetachars are the characters a regex bracket expression gives a
+// meaning to. Postgres and the MySQL REGEXP fallback keep the backslash on an
+// escaped one inside brackets, so x[\^a] stays the set of ^ and a.
+const bracketMetachars = `\]^-[`
+
 // PrepareLikePattern writes a Lucene wildcard pattern for SIMILAR TO, whose
 // escape character is the backslash. Writing \ before an alphanumeric
 // character would make a regex escape such as \d, so only the characters
-// SIMILAR TO gives a meaning to are escaped.
+// SIMILAR TO gives a meaning to are escaped. Inside a bracket expression,
+// which only a pattern built in code has, every character is a member of the
+// set: * and ? are not wildcards there, and only bracketMetachars keep their
+// backslash.
 func (postgresDialect) PrepareLikePattern(pattern string) (string, bool) {
 	var b strings.Builder
 	b.Grow(len(pattern) + 4)
-	for _, c := range wildcard.Split(pattern) {
+	chars := wildcard.Split(pattern)
+	inBrackets := wildcard.InBrackets(chars)
+	for i, c := range chars {
 		switch {
+		case inBrackets[i] && c.Escaped && c.In(bracketMetachars):
+			b.WriteString(`\` + c.Text)
+		case inBrackets[i]:
+			b.WriteString(c.Text)
 		case c.IsWildcard() && c.Text == "*":
 			b.WriteByte('%')
 		case c.IsWildcard():
