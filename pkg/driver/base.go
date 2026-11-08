@@ -508,25 +508,65 @@ func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string
 	return str, nil
 }
 
-// fieldShape spreads a field over a group of terms. Render does not run
-// expr.Validate, so a tree built in code or read from JSON can hold an EQUALS
-// on a group, which the parser never builds. It gets its field on every term
-// in the group, the way the parser reads a:(x AND y), so it renders as the
-// parsed query does. A comparison with a field of its own, as in
-// expr.Eq("a", expr.Eq("b", 1)), is not a group and renders as before.
+// fieldShape checks that a field operator has a field and a value it can
+// compare, and spreads a field over a group of terms. Render does not run
+// expr.Validate, so a tree built in code or read from JSON can hold a group
+// where the parser only puts a single term.
+//
+// An EQUALS on a group gets its field on every term in the group, the way
+// the parser reads a:(x AND y), so it renders as the parsed query does. A
+// comparison, an IN list item and a field compare one value, so a group there
+// is an error, as a:>(x OR y) is for the parser. The right side of an IN must
+// be a LIST. A LIKE pattern is checked by likeOperand. A comparison with a
+// field of its own, as in expr.Eq("a", expr.Eq("b", 1)), is not a group and
+// renders as before.
 func fieldShape(e *expr.Expression) (*expr.Expression, error) {
-	if e.Op != expr.Equals {
+	switch e.Op {
+	case expr.Equals, expr.Like, expr.In, expr.Range, expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+	default:
 		return e, nil
 	}
+
+	if e.Op == expr.Range && e.Left == nil {
+		return nil, fmt.Errorf("a range needs a field, as in field:[a TO b]")
+	}
+	if field, ok := e.Left.(*expr.Expression); ok && isGroup(field) {
+		return nil, fmt.Errorf("the field of %s %s must be a single term, not %s %s expression", article(e.Op), e.Op, article(field.Op), field.Op)
+	}
+
 	value, ok := e.Right.(*expr.Expression)
-	if !ok || !isGroup(value) || value.Op == expr.List {
+	if !ok {
 		return e, nil
 	}
-	field, ok := e.Left.(*expr.Expression)
-	if !ok {
-		field = &expr.Expression{Op: expr.Literal, Left: e.Left}
+	switch e.Op {
+	case expr.Equals:
+		if !isGroup(value) {
+			return e, nil
+		}
+		if value.Op == expr.List {
+			return nil, fmt.Errorf("the value in an EQUALS must be a single term, not a LIST expression")
+		}
+		field, ok := e.Left.(*expr.Expression)
+		if !ok {
+			field = &expr.Expression{Op: expr.Literal, Left: e.Left}
+		}
+		return reduce.FieldGroup(field, value), nil
+	case expr.In:
+		if value.Op != expr.List {
+			return nil, fmt.Errorf("the right side of an IN must be a LIST, not %s %s expression", article(value.Op), value.Op)
+		}
+		items, _ := value.Left.([]*expr.Expression)
+		for _, item := range items {
+			if item != nil && isGroup(item) {
+				return nil, fmt.Errorf("an IN list item must be a single term, not %s %s expression", article(item.Op), item.Op)
+			}
+		}
+	case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+		if isGroup(value) {
+			return nil, fmt.Errorf("the value in %s %s comparison must be a single term, not %s %s expression", article(e.Op), e.Op, article(value.Op), value.Op)
+		}
 	}
-	return reduce.FieldGroup(field, value), nil
+	return e, nil
 }
 
 // isGroup reports whether e holds terms that still need a field: an AND, OR,
@@ -673,7 +713,7 @@ func likeOperand(right any) (pattern string, hasPattern bool, err error) {
 		switch v.Op {
 		case expr.Wild, expr.Literal, expr.Regexp:
 		default:
-			return "", false, fmt.Errorf("LIKE pattern must be a single term, not a %s expression", v.Op)
+			return "", false, fmt.Errorf("LIKE pattern must be a single term, not %s %s expression", article(v.Op), v.Op)
 		}
 		switch left := v.Left.(type) {
 		case string:

@@ -2,6 +2,7 @@ package driver
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
@@ -117,5 +118,60 @@ func TestRenderSpreadsFieldGroup(t *testing.T) {
 				t.Fatalf("want params %#v, got %#v", tc.params, params)
 			}
 		})
+	}
+}
+
+// TestRenderRejectsMisplacedGroup checks the shapes where spreading a field
+// makes no sense. The parser rejects a:>(x OR y) with "must be a single
+// term", and the drivers now reject the same shapes when built in code. They
+// used to render SQL such as "a" > ('x' OR 'y') or "a" IN 'x' OR 'y'.
+func TestRenderRejectsMisplacedGroup(t *testing.T) {
+	labels := expr.Lit(expr.JSONPath{Column: "labels", Path: []string{"k"}})
+	fieldless := &expr.Expression{Op: expr.Range, Right: &expr.RangeBoundary{Min: expr.Lit(1), Max: expr.Lit(5), Inclusive: true}}
+
+	tcs := map[string]struct {
+		input   *expr.Expression
+		wantErr string
+	}{
+		"greater_or":      {expr.GREATER("a", expr.OR("x", "y")), "the value in a GREATER comparison must be a single term, not an OR expression"},
+		"greater_eq_and":  {expr.GREATEREQ("a", expr.AND("x", "y")), "the value in a GREATER_EQ comparison must be a single term, not an AND expression"},
+		"less_not":        {expr.LESS("a", expr.NOT(expr.Lit(1))), "the value in a LESS comparison must be a single term, not a NOT expression"},
+		"less_eq_range":   {expr.LESSEQ("a", fieldless), "the value in a LESS_EQ comparison must be a single term, not a RANGE expression"},
+		"json_greater_or": {&expr.Expression{Op: expr.Greater, Left: labels, Right: expr.OR(1, 2)}, "the value in a GREATER comparison must be a single term, not an OR expression"},
+		"like_or":         {expr.LIKE("a", expr.OR(expr.WILD("x*"), expr.WILD("y*"))), "LIKE pattern must be a single term, not an OR expression"},
+		"equals_list":     {expr.Eq("a", expr.LIST(expr.Lit("x"), expr.Lit("y"))), "the value in an EQUALS must be a single term, not a LIST expression"},
+		"in_not_list":     {expr.IN("a", expr.OR("x", "y")), "the right side of an IN must be a LIST, not an OR expression"},
+		"in_list_and":     {expr.IN("a", expr.LIST(expr.AND("x", "y"))), "an IN list item must be a single term, not an AND expression"},
+		"range_no_field":  {fieldless, "a range needs a field, as in field:[a TO b]"},
+		"field_is_and":    {&expr.Expression{Op: expr.Equals, Left: expr.AND("x", "y"), Right: expr.Lit("z")}, "the field of an EQUALS must be a single term, not an AND expression"},
+		"field_is_or":     {expr.GREATER(expr.OR("x", "y"), 1), "the field of a GREATER must be a single term, not an OR expression"},
+		"from_json":       {mustUnmarshal(t, `{"left":"a","operator":"GREATER","right":{"left":"x","operator":"OR","right":"y"}}`), "must be a single term, not an OR expression"},
+	}
+
+	for name, tc := range tcs {
+		for dname, d := range allDrivers {
+			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
+				noPanic(t, func() {
+					got, err := d.Render(tc.input)
+					if err == nil {
+						t.Fatalf("expected error rendering %#v, got SQL %q", tc.input, got)
+					}
+					if !strings.Contains(err.Error(), tc.wantErr) {
+						t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
+					}
+				})
+			})
+			t.Run(name+"/"+dname+"/render_param", func(t *testing.T) {
+				noPanic(t, func() {
+					got, params, err := d.RenderParam(tc.input)
+					if err == nil {
+						t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", tc.input, got, params)
+					}
+					if !strings.Contains(err.Error(), tc.wantErr) {
+						t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
+					}
+				})
+			})
+		}
 	}
 }
