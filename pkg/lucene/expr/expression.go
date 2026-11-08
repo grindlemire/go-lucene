@@ -703,9 +703,11 @@ func checkedNumberLit(v any, text string) (*Expression, error) {
 // form. A term is written as a plain JSON string when that string decodes
 // back to the same kind of term, and as {"<key>": "<value>"} otherwise: the
 // literal fo* is {"literal":"fo*"}, because the string "fo*" decodes as a
-// wildcard.
+// wildcard, and a wildcard built in code with no * is {"wildcard":"foo"}.
 var termKeys = map[Operator]string{
 	Literal: "literal",
+	Wild:    "wildcard",
+	Regexp:  "regexp",
 }
 
 // unmarshalTerm decodes the object form of a string term. ok is false when
