@@ -518,9 +518,9 @@ func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string
 // group gets the field on every term in it, as in a:(x AND y), and a value
 // with a field of its own keeps it, so expr.Eq("a", expr.Eq("b", 1)) is
 // b = 1, as a:(b:1) is. A comparison, an IN list item and a field compare
-// one value, so a group there is an error, as a:>(x OR y) is for the parser.
-// The right side of an IN must be a LIST. A LIKE pattern is checked by
-// likeOperand.
+// one value, so anything but a single term there is an error, as
+// a:>(x OR y) is for the parser and expr.Validate. The right side of an IN
+// must be a LIST. A LIKE pattern is checked by likeOperand.
 func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 	switch e.Op {
 	case expr.Equals, expr.Like, expr.In, expr.Range, expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
@@ -534,7 +534,7 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 		}
 		return nil, fmt.Errorf("%s %s needs a field, as in %s", article(e.Op), e.Op, fieldExamples[e.Op])
 	}
-	if field, ok := e.Left.(*expr.Expression); ok && isGroup(field) {
+	if field, ok := e.Left.(*expr.Expression); ok && !isSingleTerm(field) {
 		return nil, fmt.Errorf("the field of %s %s must be a single term, not %s %s expression", article(e.Op), e.Op, article(field.Op), field.Op)
 	}
 
@@ -561,12 +561,12 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 		}
 		items, _ := value.Left.([]*expr.Expression)
 		for _, item := range items {
-			if item != nil && isGroup(item) {
+			if item != nil && !isSingleTerm(item) {
 				return nil, fmt.Errorf("an IN list item must be a single term, not %s %s expression", article(item.Op), item.Op)
 			}
 		}
 	case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
-		if isGroup(value) {
+		if !isSingleTerm(value) {
 			return nil, fmt.Errorf("the value in %s %s comparison must be a single term, not %s %s expression", article(e.Op), e.Op, article(value.Op), value.Op)
 		}
 	}
@@ -591,19 +591,6 @@ func isSingleTerm(e *expr.Expression) bool {
 	switch e.Op {
 	case expr.Undefined, expr.Literal, expr.Wild, expr.Regexp, expr.Null:
 		return true
-	default:
-		return false
-	}
-}
-
-// isGroup reports whether e holds terms that still need a field: an AND, OR,
-// NOT, MUST, MUST_NOT, BOOST or FUZZY, a range with no field, or a LIST.
-func isGroup(e *expr.Expression) bool {
-	switch e.Op {
-	case expr.And, expr.Or, expr.Not, expr.Must, expr.MustNot, expr.Boost, expr.Fuzzy, expr.List:
-		return true
-	case expr.Range:
-		return e.Left == nil
 	default:
 		return false
 	}

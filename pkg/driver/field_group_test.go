@@ -194,6 +194,12 @@ func TestRenderRejectsMisplacedGroup(t *testing.T) {
 		"field_is_and":    {&expr.Expression{Op: expr.Equals, Left: expr.AND("x", "y"), Right: expr.Lit("z")}, "the field of an EQUALS must be a single term, not an AND expression"},
 		"field_is_or":     {expr.GREATER(expr.OR("x", "y"), 1), "the field of a GREATER must be a single term, not an OR expression"},
 		"from_json":       {mustUnmarshal(t, `{"left":"a","operator":"GREATER","right":{"left":"x","operator":"OR","right":"y"}}`), "must be a single term, not an OR expression"},
+		// A value or field with a field of its own is not a single term
+		// either. These used to render "a" > ("b" = 1) and the like.
+		"greater_equals":  {expr.GREATER("a", expr.Eq("b", 1)), "the value in a GREATER comparison must be a single term, not an EQUALS expression"},
+		"less_own_range":  {expr.LESS("a", expr.Rang("b", 1, 5, true)), "the value in a LESS comparison must be a single term, not a RANGE expression"},
+		"in_list_equals":  {expr.IN("a", expr.LIST(expr.Eq("b", "c"))), "an IN list item must be a single term, not an EQUALS expression"},
+		"field_is_equals": {&expr.Expression{Op: expr.Equals, Left: expr.Eq("b", "c"), Right: expr.Lit("z")}, "the field of an EQUALS must be a single term, not an EQUALS expression"},
 		// A field operator with no field used to render ( = 'x') AND ( = 'y').
 		"equals_no_field":      {&expr.Expression{Op: expr.Equals, Right: expr.AND("x", "y")}, "an EQUALS needs a field, as in field:value"},
 		"equals_term_no_field": {&expr.Expression{Op: expr.Equals, Right: expr.Lit("x")}, "an EQUALS needs a field, as in field:value"},
