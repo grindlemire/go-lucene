@@ -100,6 +100,8 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `field:*` | `"field" SIMILAR TO '%'` | Match anything non-null |
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | Wildcard suffix |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | Single-character wildcard |
+| `field:pat\*` | `"field" = 'pat*'` | An escaped `*` or `?` is a literal character, so a term with no other wildcard is an exact match |
+| `field:pat\**` | `"field" SIMILAR TO 'pat\*%'` | In a wildcard, an escaped character matches only itself |
 | `field:null` | `"field" IS NULL` | Null check (case-insensitive) |
 | `NOT field:null` | `"field" IS NOT NULL` | Negated null check |
 | `-field:null` | `"field" IS NOT NULL` | Same as `NOT field:null` |
@@ -210,6 +212,7 @@ SQLite lacks direct equivalents for a few Postgres operators, so the SQLite driv
 | `field:*` | `"field" SIMILAR TO '%'` | `"field" IS NOT NULL` |
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | `"field" GLOB 'pat*'` |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | `"field" GLOB 'pat?'` |
+| `field:pat\**` | `"field" SIMILAR TO 'pat\*%'` | `"field" GLOB 'pat[*]*'` |
 | `field:/regex/` | `"field" ~ 'regex'` | `"field" REGEXP 'regex'` |
 | parameters | `$1, $2, ...` | `?` |
 
@@ -217,7 +220,7 @@ SQLite lacks direct equivalents for a few Postgres operators, so the SQLite driv
 
 **GLOB is case-sensitive** and uses Unix glob syntax. Lucene's `*` and `?` map cleanly onto GLOB's `*` and `?`. To ignore case on a field, see [Case-insensitive fields](#case-insensitive-fields).
 
-**GLOB has no escape character.** To match a literal `*` or `?`, use the regex form `field:/.../`.
+**GLOB has no escape character.** An escaped `\*`, `\?` or `\[` in a wildcard is written as a bracket expression that holds only that character: `[*]`, `[?]` or `[[]`.
 
 **GLOB has no alternation.** A pattern like `field:*(a|b)*` matches the literal characters `(a|b)`, not "a or b". Use `field:/.*(a|b).*/` if you need alternation in SQLite.
 
@@ -273,6 +276,7 @@ MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | `` `field` LIKE 'pat%' ESCAPE '#' `` |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | `` `field` LIKE 'pat_' ESCAPE '#' `` |
 | `field:100%*` (literal `%`) | `"field" SIMILAR TO '100\%%'` | `` `field` LIKE '100#%%' ESCAPE '#' `` |
+| `field:pat\**` (literal `*`) | `"field" SIMILAR TO 'pat\*%'` | `` `field` LIKE 'pat*%' ESCAPE '#' `` |
 | `field:*(a\|b)*` (passed via `expr.LIKE`, see note) | `"field" SIMILAR TO '%(a\|b)%'` | `` `field` REGEXP '^(.*(a\|b).*)$' `` |
 | `field:/regex/` | `"field" ~ 'regex'` | `` `field` REGEXP 'regex' `` |
 | bool literal `true` | `true` | `TRUE` |
@@ -282,7 +286,7 @@ MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL
 
 **Identifiers always quote with backticks.** Column names containing a backtick are rejected at render time. The always-quote policy handles MySQL 8.0's expanded reserved-word list (`RANK`, `LEAD`, `WINDOW`, `ROWS`, etc.) automatically.
 
-**`LIKE` vs `REGEXP` is decided by pattern content.** Simple Lucene wildcards (`*`, `?`) stay on the index-friendly `LIKE` path. Patterns containing `|`, `()`, `[]`, `{}`, or `+` fall back to `REGEXP` with an anchored `^(...)$` translation so the match semantics line up with Postgres `SIMILAR TO`. A plain capturing group is used rather than `(?:...)` because the non-capturing form is a Perl extension that POSIX ERE (MySQL 5.7 / MariaDB 10.0-10.4) does not guarantee.
+**`LIKE` vs `REGEXP` is decided by pattern content.** Simple Lucene wildcards (`*`, `?`) stay on the index-friendly `LIKE` path. Patterns containing an unescaped `|`, `()`, `[]`, `{}`, or `+` fall back to `REGEXP` with an anchored `^(...)$` translation so the match semantics line up with Postgres `SIMILAR TO`. A plain capturing group is used rather than `(?:...)` because the non-capturing form is a Perl extension that POSIX ERE (MySQL 5.7 / MariaDB 10.0-10.4) does not guarantee.
 
 **The `ESCAPE '#'` clause is intentional.** Using `#` instead of the default backslash keeps the rendered SQL portable across `sql_mode` settings. Under `NO_BACKSLASH_ESCAPES`, a `\` escape clause would be reinterpreted and break the LIKE pattern.
 
@@ -363,12 +367,31 @@ func (sqlServerDialect) RenderStandaloneWild(left string) (string, error) {
 }
 
 func (sqlServerDialect) PrepareLikePattern(pattern string) (string, bool) {
-    // SQL Server LIKE uses % and _ like SIMILAR TO; escape literals with [].
-    pattern = strings.ReplaceAll(pattern, "%", "[%]")
-    pattern = strings.ReplaceAll(pattern, "_", "[_]")
-    pattern = strings.ReplaceAll(pattern, "*", "%")
-    pattern = strings.ReplaceAll(pattern, "?", "_")
-    return pattern, false
+    // In the pattern, * and ? are wildcards and a backslash makes the next
+    // character literal. SQL Server LIKE uses % and _ for wildcards and []
+    // for character sets, so a literal %, _ or [ goes inside brackets.
+    var b strings.Builder
+    escaped := false
+    for _, r := range pattern {
+        switch {
+        case r == '\\' && !escaped:
+            escaped = true
+            continue
+        case r == '*' && !escaped:
+            b.WriteString("%")
+        case r == '?' && !escaped:
+            b.WriteString("_")
+        case r == '%' || r == '_' || r == '[':
+            b.WriteString("[" + string(r) + "]")
+        default:
+            b.WriteRune(r)
+        }
+        escaped = false
+    }
+    if escaped {
+        b.WriteString(`\`) // a backslash at the end is a literal backslash
+    }
+    return b.String(), false
 }
 
 func (sqlServerDialect) EscapeStringLiteral(s string) string {
@@ -412,3 +435,5 @@ To render [JSON fields](#json-fields), a dialect also implements `driver.JSONPat
 The `Dialect` interface evolved across releases: `EscapeLikePattern` was replaced by `PrepareLikePattern` (which additionally returns a `useRegex` flag so dialects can route alternation/grouping patterns to a regex path), and `EscapeStringLiteral` was added so dialects can control string-literal quoting (MySQL needs this to double backslashes under default `sql_mode`).
 
 `PrepareLikePattern` now receives the raw, unescaped pattern, and in the non-parameterized path its result is escaped with `EscapeStringLiteral` afterwards. A dialect that escaped its own output for SQL string literals should stop, or the escaping is applied twice.
+
+The pattern is in Lucene wildcard syntax: an unescaped `*` or `?` is a wildcard, and a backslash makes the next character literal. A query such as `name:fo\*bar*` reaches `PrepareLikePattern` as `fo\*bar*`, where only the last `*` is a wildcard. A dialect that turned every `*` into its own wildcard should skip the escaped ones and drop the backslash.
