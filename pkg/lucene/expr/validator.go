@@ -154,19 +154,20 @@ func validateRange(e *Expression) (err error) {
 }
 
 // validateRangeBound checks that a range bound is a single term, using the
-// same rules the driver applies when it renders the bound. Null and wildcard
-// expressions are accepted; Null is let through so the renderer can return
-// its dedicated error for it. A literal or regexp expression is checked by the
-// value it holds, and any other expression is rejected. The value itself may
+// same rules the driver applies when it renders the bound. A null expression
+// is accepted so the renderer can return its dedicated error for it. A
+// literal, wildcard, or regexp expression is checked by the value it holds (a
+// bare * wildcard is an open bound, any other wildcard is literal text), and
+// any other expression is rejected. The value itself may
 // be any Go value that IsASTOrJSONContainer does not flag, so named numeric
 // types and time.Time bounds are accepted for the parameterized renderers.
 func validateRangeBound(side string, bound any) error {
 	val := bound
 	if e, ok := bound.(*Expression); ok && e != nil {
 		switch e.Op {
-		case Null, Wild:
+		case Null:
 			return nil
-		case Literal, Regexp:
+		case Literal, Wild, Regexp:
 			val = e.Left
 		default:
 			// An unquoted space or colon inside a bound is what produces an

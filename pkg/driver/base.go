@@ -626,7 +626,12 @@ func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 		case expr.Null:
 			return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
 		case expr.Wild:
-			return nil, true, nil
+			// Only a bare * leaves this side open. Any other wildcard bound,
+			// such as ab*, is literal text, as in Lucene.
+			if s, ok := e.Left.(string); ok && s == "*" {
+				return nil, true, nil
+			}
+			val = e.Left
 		case expr.Literal, expr.Regexp:
 			val = e.Left
 		default:
