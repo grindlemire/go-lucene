@@ -2,8 +2,8 @@ package lucene
 
 import (
 	"fmt"
-	"math"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -381,16 +381,17 @@ func parseLiteral(token lex.Token) (e any, err error) {
 		return expr.REGEXP(token.Val), nil
 	}
 
-	// attempt to parse it as an integer
+	// attempt to parse it as an integer. Atoi only accepts decimal digits.
 	ival, err := strconv.Atoi(token.Val)
 	if err == nil {
 		return expr.Lit(ival), nil
 	}
 
-	// attempt to parse it as a float. ParseFloat also accepts words like inf
-	// and NaN; those stay terms because SQL has no literal for them.
+	// attempt to parse it as a float. ParseFloat also accepts inf, NaN, hex
+	// floats like 0x1p3 and digit separators like 1_000; those stay terms
+	// because only a plain decimal number is a number.
 	fval, err := strconv.ParseFloat(token.Val, 64)
-	if err == nil && !math.IsInf(fval, 0) && !math.IsNaN(fval) {
+	if err == nil && decimalNumber.MatchString(token.Val) {
 		return expr.Lit(fval), nil
 	}
 
@@ -406,6 +407,11 @@ func parseLiteral(token lex.Token) (e any, err error) {
 
 	return expr.Lit(token.Val), nil
 }
+
+// decimalNumber matches a plain decimal number: an optional sign, digits with
+// an optional fraction, and an optional exponent, such as 5, -1.5, 5., .5 or
+// 1e-3. This is SQL's numeric literal syntax.
+var decimalNumber = regexp.MustCompile(`^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
 
 // isNumberLiteral reports whether parseLiteral turned a token into a number.
 func isNumberLiteral(in any) bool {
