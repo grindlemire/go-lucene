@@ -244,8 +244,8 @@ func renderLiteral(e *Expression, verbose bool) string {
 
 	// A number keeps the text it was written as. The lexer read that text as
 	// one token, so it parses back to the same number and text.
-	if e.numberText != "" {
-		return e.numberText
+	if text := e.NumberText(); text != "" {
+		return text
 	}
 
 	switch v := e.Left.(type) {

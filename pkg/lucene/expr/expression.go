@@ -170,6 +170,10 @@ func numberString(v any) string {
 // NumberText returns the text that a NumberLit was written as. It is empty
 // when the number prints as written.
 func (e *Expression) NumberText() string {
+	// Left can change after NumberLit checked the text, so check it again.
+	if e.numberText == "" || !spellsNumber(e.numberText, e.Left) {
+		return ""
+	}
 	return e.numberText
 }
 
@@ -487,8 +491,8 @@ type jsonExpression struct {
 // MarshalJSON is a custom JSON serialization for the Expression
 func (e Expression) MarshalJSON() (out []byte, err error) {
 	// if we are in a leaf node just marshal the value
-	if e.Op == Literal && e.numberText != "" {
-		return json.Marshal(numberLeaf{Number: numberFields{Value: e.Left, Text: e.numberText}})
+	if text := e.NumberText(); e.Op == Literal && text != "" {
+		return json.Marshal(numberLeaf{Number: numberFields{Value: e.Left, Text: text}})
 	}
 	if e.Op == Literal || e.Op == Wild || e.Op == Regexp || e.Op == Null {
 		return json.Marshal(e.Left)
