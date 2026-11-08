@@ -226,10 +226,14 @@ func TestNamedNumericType(t *testing.T) {
 }
 
 // TestRenderRangeBoundRejectsNullByteAndInvalidUTF8 checks that string and
-// column range bounds get the same literal checks as every other string the
-// non-parameterized renderers write. Invalid UTF-8 matters on MySQL with a
-// multibyte client charset such as GBK, where 0xbf followed by a backslash
-// is one character and can swallow the escape in front of a closing quote.
+// column range bounds get the same NUL and UTF-8 checks as every other string
+// the non-parameterized renderers write.
+//
+// The UTF-8 check does not make ToMySQL safe under a GBK, Big5, or SJIS
+// connection charset. Valid UTF-8 can end in a byte that starts a two-byte
+// character in those charsets: 丿 is E4 B8 BF, and BF followed by the
+// backslash ToMySQL uses for escaping is one GBK character, which swallows
+// the escape. ToMySQL assumes a utf8mb4 connection.
 func TestRenderRangeBoundRejectsNullByteAndInvalidUTF8(t *testing.T) {
 	cases := map[string]*expr.Expression{
 		"null_byte_min":      expr.Rang("a", "x\x00", "z", true),
