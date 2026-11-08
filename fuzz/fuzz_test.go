@@ -23,6 +23,17 @@ func FuzzPostgresDriver(f *testing.F) {
 		`-bbq:"woo"`,
 		`(a:b)^10`,
 		`a:foo~`,
+		// issue #68: compound range bounds
+		`0:[0 0 TO 0]`,
+		`a:["\" AND 1) OR 1=1 --" z TO q]`,
+		`a:[1 TO (b:c)]`,
+		`a:{"x y" TO *}`,
+		`a:inf OR b:[NaN TO 1]`,
+		`0:1 AND 1.5:>2 AND 007:[1 TO *]`,
+		// null is rejected at render time in these positions
+		`a:[null TO 1]`,
+		`a:>null`,
+		`null`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
@@ -57,6 +68,9 @@ func validateRender(t *testing.T, e *expr.Expression) {
 			strings.Contains(err.Error(), "literal contains null byte") ||
 			strings.Contains(err.Error(), "column name contains a double quote") ||
 			strings.Contains(err.Error(), "column name is empty") ||
+			strings.Contains(err.Error(), "null is not allowed as a range bound") ||
+			strings.Contains(err.Error(), "cannot be used with null") ||
+			strings.Contains(err.Error(), "null cannot be rendered as a standalone value") ||
 			strings.Contains(err.Error(), "the BETWEEN operator needs a two item list in the right hand side") {
 			return
 		}
@@ -64,12 +78,62 @@ func validateRender(t *testing.T, e *expr.Expression) {
 		t.Fatal(err)
 	}
 
-	j, err := pg_query.ParseToJSON("SELECT * FROM test WHERE a = b AND (" + f + ")")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireSingleSelect(t, f)
 
-	if strings.Contains(j, "CommentStmt") {
-		t.Fatal("CommentStmt found")
+	// Render accepted this expression, so RenderParam must too: the two
+	// renderers share their validation, and a mismatch means one of them
+	// is checking something the other is not.
+	p, params, err := driver.NewPostgresDriver().RenderParam(e)
+	if err != nil {
+		t.Fatalf("RenderParam failed after Render succeeded: %v (sql: %s)", err, f)
 	}
+	for i, param := range params {
+		switch param.(type) {
+		case *expr.Expression, expr.Expression, []*expr.Expression, []expr.Expression,
+			*expr.RangeBoundary, expr.RangeBoundary:
+			t.Fatalf("param %d is an AST node, not a value: %#v (sql: %s)", i, param, p)
+		}
+	}
+	requireSingleSelect(t, p)
+}
+
+// requireSingleSelect fails unless the rendered filter, placed between two
+// sentinel conditions, parses as one SELECT whose WHERE clause is
+// `before = 1 AND (filter) AND after = 2`. A filter that breaks out of a
+// literal or identifier must close the paren to do anything useful, which
+// adds a statement, adds an AND arm, changes the top-level operator, or
+// comments out the trailing sentinel. A statement count alone misses the
+// last three: `"\" AND 1) OR 1=1 --"` still parses as one SELECT.
+func requireSingleSelect(t *testing.T, filter string) {
+	t.Helper()
+	query := "SELECT * FROM test WHERE before = 1 AND (" + filter + ") AND after = 2"
+	tree, err := pg_query.Parse(query)
+	if err != nil {
+		t.Fatalf("%v (sql: %s)", err, query)
+	}
+	if n := len(tree.GetStmts()); n != 1 {
+		t.Fatalf("rendered SQL parsed as %d statements (sql: %s)", n, query)
+	}
+	sel := tree.GetStmts()[0].GetStmt().GetSelectStmt()
+	if sel == nil {
+		t.Fatalf("rendered SQL is not a SELECT (sql: %s)", query)
+	}
+	where := sel.GetWhereClause().GetBoolExpr()
+	if where == nil || where.GetBoolop() != pg_query.BoolExprType_AND_EXPR || len(where.GetArgs()) != 3 {
+		t.Fatalf("filter escaped its parentheses (sql: %s)", query)
+	}
+	args := where.GetArgs()
+	if leftColumn(args[0]) != "before" || leftColumn(args[2]) != "after" {
+		t.Fatalf("filter escaped its parentheses (sql: %s)", query)
+	}
+}
+
+// leftColumn returns the column name on the left of a simple `col = value`
+// expression, or "" if n is not one.
+func leftColumn(n *pg_query.Node) string {
+	fields := n.GetAExpr().GetLexpr().GetColumnRef().GetFields()
+	if len(fields) != 1 {
+		return ""
+	}
+	return fields[0].GetString_().GetSval()
 }

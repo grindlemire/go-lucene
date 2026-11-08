@@ -497,9 +497,14 @@ func TestMySQLIntegrationFallbackPath(t *testing.T) {
 		{name: "char_class", pattern: "[ab]*", wantIDs: []int{1, 2}},
 		{name: "grouping", pattern: "(app)*", wantIDs: []int{1}},
 		{name: "alternation", pattern: "*(ppl|nan)*", wantIDs: []int{1, 2}},
+		// `.` and `$` are literal in a Lucene wildcard. If MySQL's string
+		// parser drops the backslash the fallback puts in front of them,
+		// `ppl.` matches "apple" and `e$` anchors on it, and row 1 leaks in.
+		{name: "literal_dot", pattern: "*(ppl.|nan)*", wantIDs: []int{2}},
+		{name: "literal_dollar", pattern: "*(e$|nan)*", wantIDs: []int{2}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name+"/rendered", func(t *testing.T) {
 			e := expr.LIKE("name", tc.pattern)
 			where, err := drv.Render(e)
 			if err != nil {
@@ -509,6 +514,18 @@ func TestMySQLIntegrationFallbackPath(t *testing.T) {
 			if !equalInts(got, tc.wantIDs) {
 				t.Fatalf("pattern=%q where=%s\n  want ids %v\n  got  ids %v",
 					tc.pattern, where, tc.wantIDs, got)
+			}
+		})
+		t.Run(tc.name+"/parameterized", func(t *testing.T) {
+			e := expr.LIKE("name", tc.pattern)
+			where, params, err := drv.RenderParam(e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			got := queryIDs(t, db, where, params...)
+			if !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s params=%v\n  want ids %v\n  got  ids %v",
+					tc.pattern, where, params, tc.wantIDs, got)
 			}
 		})
 	}

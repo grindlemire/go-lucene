@@ -3,6 +3,7 @@ package lucene
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
@@ -1065,6 +1066,162 @@ func TestQuotedPhraseRoundTrip(t *testing.T) {
 
 			if !reflect.DeepEqual(first, second) {
 				t.Fatalf(errTemplate, "round trip through String() changed the expression", first, second)
+			}
+		})
+	}
+}
+
+// TestParseRangeBoundMustBeSingleTerm validates that each side of a range
+// is a single term (a word, number, phrase, or *). Anything else used to
+// parse and then render only part of the bound into SQL (issue #68).
+func TestParseRangeBoundMustBeSingleTerm(t *testing.T) {
+	invalid := map[string]string{
+		"issue_repro":            `0:[0 0 TO 0]`,
+		"implicit_and_min":       `a:[1 2 TO 3]`,
+		"implicit_and_exclusive": `a:{x y TO z}`,
+		"implicit_and_phrases":   `a:["x" "y" TO z]`,
+		"explicit_and_min":       `a:[1 AND 2 TO 3]`,
+		"explicit_or_min":        `a:[1 OR 2 TO 3]`,
+		"grouped_or_min":         `a:[(1 OR 2) TO 3]`,
+		"grouped_or_max":         `a:[1 TO (3 OR 4)]`,
+		"grouped_and_max":        `a:[1 TO (3 4)]`,
+		"grouped_field_max":      `a:[1 TO (b:c)]`,
+		"nested_range_max":       `a:[1 TO (b:[1 TO 2])]`,
+		"not_min":                `a:[NOT 1 TO 3]`,
+		"must_min":               `a:[+1 TO 3]`,
+		"must_not_min":           `a:[-x TO 3]`,
+		"field_min":              `a:[b:c TO 3]`,
+		"fuzzy_min":              `a:[1~ TO 3]`,
+		"fuzzy_max":              `a:[1 TO 3~]`,
+		"boost_min":              `a:[1^2 TO 3]`,
+		"sql_breakout_min":       `a:["\" AND 1); DROP TABLE test; --" z TO q]`,
+	}
+
+	for name, input := range invalid {
+		for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
+			t.Run(name+"/"+variant, func(t *testing.T) {
+				e, err := Parse(input, opts...)
+				if err == nil {
+					sql, _ := ToPostgres(input, opts...)
+					t.Fatalf("expected parse error for %q, got %#v which renders to postgres as %q", input, e, sql)
+				}
+				if !strings.Contains(err.Error(), "must be a single term") {
+					t.Fatalf("expected a single-term range bound error for %q, got: %v", input, err)
+				}
+			})
+		}
+	}
+
+	valid := map[string]string{
+		"inclusive":         `a:[1 TO 5]`,
+		"exclusive":         `a:{1 TO 5}`,
+		"mixed_brackets":    `a:[1 TO 5}`,
+		"unbounded_min":     `a:[* TO 5]`,
+		"unbounded_max":     `a:{2 TO *}`,
+		"fully_unbounded":   `a:[* TO *]`,
+		"quoted_bounds":     `a:{"ab" TO "az"}`,
+		"quoted_with_space": `a:["x y" TO z]`,
+		"single_quoted":     `a:['x y' TO z]`,
+		"negative_number":   `a:[-1 TO 3]`,
+		"float_bounds":      `a:[1.5 TO 3.25]`,
+		"lowercase_to":      `a:[1 to 3]`,
+		"followed_by_term":  `a:[1 TO 3] b`,
+		"wildcard_bound":    `a:[ab* TO c]`,
+		"regexp_bounds":     `a:[/x/ TO /y/]`,
+		"null_bound":        `a:[null TO 3]`, // parses; rejected at render time
+		"grouped_ranges":    `(a:[1 TO 2] OR b:{x TO y}) AND c:d`,
+	}
+
+	for name, input := range valid {
+		for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
+			t.Run(name+"/"+variant, func(t *testing.T) {
+				if _, err := Parse(input, opts...); err != nil {
+					t.Fatalf("expected %q to parse, got: %v", input, err)
+				}
+			})
+		}
+	}
+}
+
+// TestParseNumericFieldIsColumn checks that a field name that looks like a
+// number is still a column, with its text kept as written. It used to parse
+// as a number, so 0:1 rendered as `0 = 1` and the parameterized renderers
+// bound the field name as a value.
+func TestParseNumericFieldIsColumn(t *testing.T) {
+	tcs := map[string]struct {
+		input        string
+		defaultField string
+		want         *expr.Expression
+	}{
+		"int_field":      {input: `0:1`, want: expr.Eq("0", 1)},
+		"leading_zeros":  {input: `007:x`, want: expr.Eq("007", "x")},
+		"float_field":    {input: `1.50:x`, want: expr.Eq("1.50", "x")},
+		"exponent_field": {input: `1e3:x`, want: expr.Eq("1e3", "x")},
+		"range":          {input: `0:[1 TO 2]`, want: expr.Rang("0", 1, 2, true)},
+		"greater":        {input: `0:>1`, want: expr.GREATER("0", 1)},
+		"less_eq":        {input: `0:<=1`, want: expr.LESSEQ("0", 1)},
+		"in_group":       {input: `0:(1 OR 2)`, want: expr.IN("0", expr.LIST(expr.Lit(1), expr.Lit(2)))},
+		"wildcard_value": {input: `0:1*`, want: expr.LIKE("0", expr.WILD("1*"))},
+		"null_value":     {input: `0:null`, want: expr.Eq("0", expr.NULL())},
+		"negated":        {input: `NOT 0:1`, want: expr.NOT(expr.Eq("0", 1))},
+		// Numbers that are not followed by a colon stay numbers.
+		"value_stays_number": {input: `a:0`, want: expr.Eq("a", 0)},
+		"bare_number":        {input: `1`, want: expr.Lit(1)},
+		"bare_number_and_field": {
+			input: `1 AND 0:1`,
+			want:  expr.AND(expr.Lit(1), expr.Eq("0", 1)),
+		},
+		"default_field": {
+			input:        `0:1 2`,
+			defaultField: "df",
+			want:         expr.AND(expr.Eq("0", 1), expr.Eq("df", 2)),
+		},
+		"default_field_bare_number": {
+			input:        `2`,
+			defaultField: "df",
+			want:         expr.Eq("df", 2),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input, WithDefaultField(tc.defaultField))
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+}
+
+// TestParseNonFiniteNumberIsTerm checks that words like inf and NaN parse as
+// plain terms. strconv.ParseFloat accepts them, and the resulting +Inf/NaN
+// float used to render as a bare `+Inf` or `NaN`, which SQL reads as a column
+// reference rather than a value.
+func TestParseNonFiniteNumberIsTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"inf":          {`a:inf`, expr.Eq("a", "inf")},
+		"infinity":     {`a:Infinity`, expr.Eq("a", "Infinity")},
+		"nan":          {`a:NaN`, expr.Eq("a", "NaN")},
+		"inf_field":    {`inf:1`, expr.Eq("inf", 1)},
+		"inf_in_range": {`a:[1 TO inf]`, expr.Rang("a", 1, "inf", true)},
+		"inf_in_list":  {`a:(1 OR nan)`, expr.IN("a", expr.LIST(expr.Lit(1), expr.Lit("nan")))},
+		"finite_float": {`a:1.5`, expr.Eq("a", 1.5)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
 			}
 		})
 	}

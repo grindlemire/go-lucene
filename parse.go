@@ -2,6 +2,7 @@ package lucene
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -90,6 +91,13 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				lit, err := parseLiteral(tok)
 				if err != nil {
 					return e, err
+				}
+
+				// The left side of field:value is always a column, even when it
+				// looks like a number. Keep the text as written so 007:x stays
+				// "007" rather than becoming the number 7.
+				if isNumberLiteral(lit) && p.lex.Peek().Typ == lex.TColon {
+					lit = expr.Lit(tok.Val)
 				}
 
 				// we should always check if the current top of the stack is another token
@@ -290,9 +298,10 @@ func parseLiteral(token lex.Token) (e any, err error) {
 		return expr.Lit(ival), nil
 	}
 
-	// attempt to parse it as a float
+	// attempt to parse it as a float. ParseFloat also accepts words like inf
+	// and NaN; those stay terms because SQL has no literal for them.
 	fval, err := strconv.ParseFloat(token.Val, 64)
-	if err == nil {
+	if err == nil && !math.IsInf(fval, 0) && !math.IsNaN(fval) {
 		return expr.Lit(fval), nil
 	}
 
@@ -307,6 +316,20 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	}
 
 	return expr.Lit(token.Val), nil
+}
+
+// isNumberLiteral reports whether parseLiteral turned a token into a number.
+func isNumberLiteral(in any) bool {
+	e, ok := in.(*expr.Expression)
+	if !ok || e.Op != expr.Literal {
+		return false
+	}
+	switch e.Left.(type) {
+	case int, float64:
+		return true
+	default:
+		return false
+	}
 }
 
 // unescapePhrase strips the surrounding quote delimiters off a TQuoted token's
