@@ -2,6 +2,7 @@ package expr
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -225,9 +226,25 @@ func renderLiteral(e *Expression, verbose bool) string {
 			return quotePhrase(string(v))
 		}
 		return string(v)
+	case float64:
+		return formatFloat(v)
 	}
 
 	return fmt.Sprintf("%v", e.Left)
+}
+
+// formatFloat prints f so the parser reads it back as the same float: always
+// with a decimal point or an exponent, so 5.0 does not come back as the int 5,
+// and with no + in the exponent, which the lexer would split off.
+func formatFloat(f float64) string {
+	if abs := math.Abs(f); abs != 0 && (abs < 1e-4 || abs >= 1e21) {
+		return strings.Replace(strconv.FormatFloat(f, 'e', -1, 64), "e+", "e", 1)
+	}
+	s := strconv.FormatFloat(f, 'f', -1, 64)
+	if !strings.Contains(s, ".") {
+		s += ".0"
+	}
+	return s
 }
 
 // isPlainTerm reports whether s lexes as one word with no escapes: letters,
