@@ -2,6 +2,7 @@ package lucene
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -49,8 +50,12 @@ func TestRangeBoundInjectionErrors(t *testing.T) {
 		for rname, render := range renderers {
 			for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
 				t.Run(name+"/"+rname+"/"+variant, func(t *testing.T) {
-					if got, err := render(input, opts...); err == nil {
+					got, err := render(input, opts...)
+					if err == nil {
 						t.Fatalf("expected an error for %q, got SQL %q", input, got)
+					}
+					if !strings.Contains(err.Error(), "must be a single term") {
+						t.Fatalf("expected a single-term range bound error for %q, got: %v", input, err)
 					}
 				})
 			}

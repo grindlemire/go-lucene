@@ -3,6 +3,7 @@ package driver
 import (
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -76,13 +77,21 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 	for name, e := range bounds {
 		for dname, d := range allDrivers {
 			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
-				if got, err := d.Render(e); err == nil {
+				got, err := d.Render(e)
+				if err == nil {
 					t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
+				}
+				if !strings.Contains(err.Error(), "must be a single term") {
+					t.Fatalf("expected a single-term range bound error, got: %v", err)
 				}
 			})
 			t.Run(name+"/"+dname+"/render_param", func(t *testing.T) {
-				if got, params, err := d.RenderParam(e); err == nil {
+				got, params, err := d.RenderParam(e)
+				if err == nil {
 					t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", e, got, params)
+				}
+				if !strings.Contains(err.Error(), "must be a single term") {
+					t.Fatalf("expected a single-term range bound error, got: %v", err)
 				}
 			})
 		}
@@ -166,6 +175,53 @@ func TestRenderParamPassesThroughBindValues(t *testing.T) {
 	}
 	if want := `"a" = $1`; got != want || len(params) != 1 || params[0] != math.Inf(1) {
 		t.Fatalf("want %q with [+Inf], got %q with %#v", want, got, params)
+	}
+}
+
+// TestNamedNumericType pins how a named integer type is handled. Render only
+// writes the built-in numeric types as SQL numbers, so it rejects one rather
+// than guessing at a format; RenderParam binds the value unchanged and leaves
+// the conversion to the database driver.
+func TestNamedNumericType(t *testing.T) {
+	type status int
+
+	tcs := map[string]struct {
+		input     *expr.Expression
+		renderErr string
+		params    []any
+	}{
+		"equals": {
+			input:     expr.Eq("status", status(1)),
+			renderErr: "unsupported value of type",
+			params:    []any{status(1)},
+		},
+		"range": {
+			input:     expr.Rang("status", status(1), status(3), true),
+			renderErr: "unsupported range bound value of type",
+			params:    []any{status(1), status(3)},
+		},
+	}
+	for name, tc := range tcs {
+		for dname, d := range allDrivers {
+			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
+				got, err := d.Render(tc.input)
+				if err == nil {
+					t.Fatalf("expected error rendering %#v, got SQL %q", tc.input, got)
+				}
+				if !strings.Contains(err.Error(), tc.renderErr) {
+					t.Fatalf("expected an error containing %q, got: %v", tc.renderErr, err)
+				}
+			})
+			t.Run(name+"/"+dname+"/render_param", func(t *testing.T) {
+				got, params, err := d.RenderParam(tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !reflect.DeepEqual(params, tc.params) {
+					t.Fatalf("want params %#v, got %#v (sql: %s)", tc.params, params, got)
+				}
+			})
+		}
 	}
 }
 

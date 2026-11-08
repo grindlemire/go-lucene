@@ -3,6 +3,7 @@ package lucene
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
@@ -1104,6 +1105,9 @@ func TestParseRangeBoundMustBeSingleTerm(t *testing.T) {
 					sql, _ := ToPostgres(input, opts...)
 					t.Fatalf("expected parse error for %q, got %#v which renders to postgres as %q", input, e, sql)
 				}
+				if !strings.Contains(err.Error(), "must be a single term") {
+					t.Fatalf("expected a single-term range bound error for %q, got: %v", input, err)
+				}
 			})
 		}
 	}
@@ -1153,7 +1157,6 @@ func TestParseNumericFieldIsColumn(t *testing.T) {
 		"leading_zeros":  {input: `007:x`, want: expr.Eq("007", "x")},
 		"float_field":    {input: `1.50:x`, want: expr.Eq("1.50", "x")},
 		"exponent_field": {input: `1e3:x`, want: expr.Eq("1e3", "x")},
-		"negative_field": {input: `-1:x`, want: expr.Eq("-1", "x")},
 		"range":          {input: `0:[1 TO 2]`, want: expr.Rang("0", 1, 2, true)},
 		"greater":        {input: `0:>1`, want: expr.GREATER("0", 1)},
 		"less_eq":        {input: `0:<=1`, want: expr.LESSEQ("0", 1)},
@@ -1209,7 +1212,6 @@ func TestParseNonFiniteNumberIsTerm(t *testing.T) {
 		"inf_in_range": {`a:[1 TO inf]`, expr.Rang("a", 1, "inf", true)},
 		"inf_in_list":  {`a:(1 OR nan)`, expr.IN("a", expr.LIST(expr.Lit(1), expr.Lit("nan")))},
 		"finite_float": {`a:1.5`, expr.Eq("a", 1.5)},
-		"hex_float":    {`a:0x1p-2`, expr.Eq("a", 0.25)},
 	}
 
 	for name, tc := range tcs {

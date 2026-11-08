@@ -521,14 +521,18 @@ func TestValidateRangeBounds(t *testing.T) {
 	}
 	for name, e := range invalid {
 		t.Run("invalid/"+name, func(t *testing.T) {
-			if err := Validate(e); err == nil {
+			err := Validate(e)
+			if err == nil {
 				t.Fatalf("expected %#v to fail validation", e)
+			}
+			if !strings.Contains(err.Error(), "must be a single term") {
+				t.Fatalf("expected a single-term range bound error, got: %v", err)
 			}
 		})
 	}
 
-	// Bounds decoded from JSON skip the parser, so the validator is the only
-	// check before render. Objects and arrays decode to map/slice values.
+	// Bounds decoded from JSON skip the parser, so they are only validated if
+	// the caller runs Validate. Objects and arrays decode to map/slice values.
 	jsonInvalid := map[string]string{
 		"object_min": `{"left":"a","operator":"RANGE","right":{"min":{"x":"1') OR 1=1 --"},"max":2,"inclusive":true}}`,
 		"array_max":  `{"left":"a","operator":"RANGE","right":{"min":1,"max":["1') OR 1=1 --"],"inclusive":true}}`,
@@ -540,8 +544,12 @@ func TestValidateRangeBounds(t *testing.T) {
 			if err := json.Unmarshal([]byte(raw), &e); err != nil {
 				t.Fatalf("unmarshal failed: %v", err)
 			}
-			if err := Validate(&e); err == nil {
+			err := Validate(&e)
+			if err == nil {
 				t.Fatalf("expected %#v to fail validation", &e)
+			}
+			if !strings.Contains(err.Error(), "must be a single term") {
+				t.Fatalf("expected a single-term range bound error, got: %v", err)
 			}
 		})
 	}
