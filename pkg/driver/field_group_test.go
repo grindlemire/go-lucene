@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -100,6 +101,14 @@ func TestRenderSpreadsFieldGroup(t *testing.T) {
 	d := NewPostgresDriver()
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
+			// Rendering builds a new tree and leaves the caller's as it was.
+			before := fmt.Sprintf("%#v", tc.input)
+			defer func() {
+				if after := fmt.Sprintf("%#v", tc.input); after != before {
+					t.Errorf("rendering changed the input:\n    before %s\n    after  %s", before, after)
+				}
+			}()
+
 			got, err := d.Render(tc.input)
 			if err != nil {
 				t.Fatalf("Render: unexpected error: %v", err)
