@@ -18,6 +18,7 @@ sql, params, err := lucene.ToParameterizedPostgres(query)
 - [Operator reference](#operator-reference)
 - [Null handling](#null-handling)
 - [JSON fields](#json-fields)
+- [Case-insensitive fields](#case-insensitive-fields)
 - [SQLite](#sqlite)
 - [MySQL](#mysql)
 - [Custom drivers](#custom-drivers)
@@ -161,6 +162,37 @@ Every operator works on a JSON path: comparisons, ranges, IN lists, wildcards, r
 - A numeric comparison on a JSON path cannot use an index, because it reads the value through a type check.
 - Array containment (`labels.tags:foo` meaning "the array contains foo") is not supported.
 
+## Case-insensitive fields
+
+List the fields that should ignore case with `WithCaseInsensitiveFields`. String equality, phrases, IN lists and wildcards on those fields wrap both sides in `LOWER()` and keep the dialect's usual operator:
+
+```go
+sql, err := lucene.ToPostgres(`name:Foo* AND title:"Foo Bar"`,
+    lucene.WithCaseInsensitiveFields("name", "title"))
+// (LOWER("name") SIMILAR TO LOWER('Foo%')) AND (LOWER("title") = LOWER('Foo Bar'))
+```
+
+| Lucene | Postgres | MySQL / MariaDB | SQLite |
+|---|---|---|---|
+| `name:Foo` | `LOWER("name") = LOWER('Foo')` | ``LOWER(`name`) = LOWER('Foo')`` | `LOWER("name") = LOWER('Foo')` |
+| `name:Foo*` | `LOWER("name") SIMILAR TO LOWER('Foo%')` | ``LOWER(`name`) LIKE LOWER('Foo%') ESCAPE '#'`` | `LOWER("name") GLOB LOWER('Foo*')` |
+| `name:(Foo OR Bar)` | `LOWER("name") IN (LOWER('Foo'), LOWER('Bar'))` | same with backticks | same as Postgres |
+| `name:(Foo OR 5 OR null)` | `(LOWER("name") = LOWER('Foo') OR "name" = 5 OR "name" IS NULL)` | same with backticks | same as Postgres |
+
+- The parameterized form wraps the placeholder (`LOWER($1)`, `LOWER(?)`). The values are passed as written; lowercasing happens in the database.
+- Only string values fold. A number (`name:5`) renders as before, because `LOWER()` of a number is an error in Postgres. A quoted number (`name:"5"`) is a string and folds. In an IN list, the strings fold and the numbers are compared as before, joined with `OR`.
+- A bare term folds when the default field is listed: `Foo` with `WithDefaultField("name")` renders `LOWER("name") = LOWER('Foo')`.
+- Regexes (`name:/Fo+/`) keep their case. There is no case-insensitive regex syntax that works on MySQL 5.7, MariaDB and SQLite alike.
+- Ranges, `>`/`<`/`>=`/`<=` comparisons, `name:*` and `name:null` render as before, and so does every field you did not list. Field names match exactly: listing `name` does not fold `Name`.
+- On MySQL and MariaDB, a wildcard with `|`, `()`, `[]`, `{}` or `+` goes through `REGEXP` (see [MySQL](#mysql)) and folds the same way: ``LOWER(`name`) REGEXP LOWER('^(...)$')``.
+- `Parse` ignores the option. The `ToX` functions read it. If you render a parsed expression with a driver yourself, set `CaseInsensitiveFields` on the driver: `d := driver.NewPostgresDriver(); d.CaseInsensitiveFields = []string{"name"}`.
+
+Things to know about `LOWER()`:
+
+- **SQLite's `lower()` folds ASCII letters only.** `É` and `é` still differ, so `name:éclair` does not match `Éclair`. Load the ICU extension if you need Unicode case folding.
+- **MySQL's `LOWER()` does nothing to binary strings.** On a `BINARY`, `VARBINARY` or `BLOB` column the match stays case-sensitive. Convert the column to a character type, or `CONVERT()` it in a view.
+- **A plain index on the column is no longer used.** Add an expression index on `lower(col)` to stay indexed: `CREATE INDEX ON items (lower(name))` in Postgres (add `text_pattern_ops` for prefix wildcards), `CREATE INDEX idx ON items ((LOWER(name)))` in MySQL 8.0.13+, `CREATE INDEX idx ON items (lower(name))` in SQLite. SQLite uses it for `=` and `IN`, not for `GLOB`.
+
 ## SQLite
 
 SQLite lacks direct equivalents for a few Postgres operators, so the SQLite driver renders them differently:
@@ -175,7 +207,7 @@ SQLite lacks direct equivalents for a few Postgres operators, so the SQLite driv
 
 ### Things to watch for
 
-**GLOB is case-sensitive** and uses Unix glob syntax. Lucene's `*` and `?` map cleanly onto GLOB's `*` and `?`.
+**GLOB is case-sensitive** and uses Unix glob syntax. Lucene's `*` and `?` map cleanly onto GLOB's `*` and `?`. To ignore case on a field, see [Case-insensitive fields](#case-insensitive-fields).
 
 **GLOB has no escape character.** To match a literal `*` or `?`, use the regex form `field:/.../`.
 
@@ -246,9 +278,9 @@ MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL
 
 **The `ESCAPE '#'` clause is intentional.** Using `#` instead of the default backslash keeps the rendered SQL portable across `sql_mode` settings. Under `NO_BACKSLASH_ESCAPES`, a `\` escape clause would be reinterpreted and break the LIKE pattern.
 
-**Non-parameterized output is best-effort under `NO_BACKSLASH_ESCAPES`.** `ToMySQL` doubles backslashes in string literals (correct under the default `sql_mode`, portable under `NO_BACKSLASH_ESCAPES` in a harmless-but-literal way). If your server runs with `NO_BACKSLASH_ESCAPES`, use `ToParameterizedMySQL` instead: parameters travel over the wire protocol and bypass string-literal parsing entirely.
+**Non-parameterized output is best-effort under `NO_BACKSLASH_ESCAPES`.** `ToMySQL` doubles backslashes in string literals (correct under the default `sql_mode`, portable under `NO_BACKSLASH_ESCAPES` in a harmless-but-literal way). If your server runs with `NO_BACKSLASH_ESCAPES`, use `ToParameterizedMySQL` instead: parameters travel over the wire protocol and bypass string-literal parsing entirely. Non-parameterized `ToMySQL`/`ToMariaDB` also assume a `utf8mb4` connection charset; with a multibyte charset like GBK, Big5 or SJIS, use the parameterized API.
 
-**Case sensitivity follows the column collation.** `LIKE` and `REGEXP` honor the operand collation: a `_ci` collation matches case-insensitively, `_bin` matches case-sensitively. The driver can't fix this without parsing column metadata; if you need explicit casing, attach `BINARY` or `COLLATE` in your query.
+**Case sensitivity follows the column collation.** `LIKE` and `REGEXP` honor the operand collation: a `_ci` collation matches case-insensitively, `_bin` matches case-sensitively. The driver can't fix this without parsing column metadata; if you need explicit casing, attach `BINARY` or `COLLATE` in your query, or list the field in [`WithCaseInsensitiveFields`](#case-insensitive-fields).
 
 **Regex engine varies by database and version.** MySQL 5.7 and MariaDB 10.0-10.4 use Henry Spencer POSIX regex. MySQL 8.0+ uses ICU. MariaDB 10.5+ uses PCRE2. Perl-style escapes (`\d`, `\w`, `\s`) work on ICU and PCRE2 but not on Henry Spencer. For portability across all four, use POSIX bracket classes (`[[:digit:]]`, `[[:space:]]`, `[[:alnum:]_]`).
 
@@ -370,3 +402,5 @@ To render [JSON fields](#json-fields), a dialect also implements `driver.JSONPat
 `expr.Like`, `expr.Range`, and `expr.Regexp` are no longer dispatched through `RenderFNs`. If a custom driver used to override any of those three through the map, move the logic into a `driver.Dialect` implementation (`RenderLike`, `RenderStandaloneWild`, `PrepareLikePattern`) and set it on `Base.Dialect`. Map entries for those operators are silently ignored.
 
 The `Dialect` interface evolved across releases: `EscapeLikePattern` was replaced by `PrepareLikePattern` (which additionally returns a `useRegex` flag so dialects can route alternation/grouping patterns to a regex path), and `EscapeStringLiteral` was added so dialects can control string-literal quoting (MySQL needs this to double backslashes under default `sql_mode`).
+
+`PrepareLikePattern` now receives the raw, unescaped pattern, and in the non-parameterized path its result is escaped with `EscapeStringLiteral` afterwards. A dialect that escaped its own output for SQL string literals should stop, or the escaping is applied twice.

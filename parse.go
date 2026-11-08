@@ -2,6 +2,7 @@ package lucene
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -42,10 +43,33 @@ func WithJSONFields(columns ...string) Opt {
 	}
 }
 
+// WithCaseInsensitiveFields makes string matches on the listed fields ignore
+// case: equality, phrases, IN lists and wildcards. The SQL wraps the column
+// and the value in LOWER(). Numbers, regexes, ranges, comparisons, field:*
+// and null checks render as without the option. Field names match exactly.
+// Calling it more than once adds to the list.
+//
+// The ToPostgres, ToSQLite, ToMySQL and ToMariaDB functions (and their
+// parameterized forms) read this option. Parse ignores it: the expression it
+// returns is the same. When rendering a parsed expression with a driver
+// yourself, set driver.Base.CaseInsensitiveFields on the driver instead.
+func WithCaseInsensitiveFields(fields ...string) Opt {
+	return func(p *parser) {
+		p.caseInsensitiveFields = append(p.caseInsensitiveFields, fields...)
+	}
+}
+
 // Parse will parse a lucene expression string using a buffer and the shift reduce algorithm. The returned expression
 // is an AST that can be rendered to a variety of different formats.
 func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
-	p := &parser{
+	e, _, err = parseWithOptions(input, opts...)
+	return e, err
+}
+
+// parseWithOptions parses input and also returns the parser, so the render
+// functions can read options that apply at render time.
+func parseWithOptions(input string, opts ...Opt) (e *expr.Expression, p *parser, err error) {
+	p = &parser{
 		lex:          lex.Lex(input),
 		stack:        []any{},
 		nonTerminals: []lex.Token{{Typ: lex.TStart}},
@@ -55,12 +79,12 @@ func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
 		opt(p)
 	}
 	if p.optErr != nil {
-		return e, p.optErr
+		return e, p, p.optErr
 	}
 
 	ex, err := p.parse()
 	if err != nil {
-		return e, err
+		return e, p, err
 	}
 
 	if len(p.jsonFields) > 0 {
@@ -69,10 +93,10 @@ func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
 
 	err = expr.Validate(ex)
 	if err != nil {
-		return e, err
+		return e, p, err
 	}
 
-	return ex, nil
+	return ex, p, nil
 }
 
 type parser struct {
@@ -83,6 +107,9 @@ type parser struct {
 	defaultField string
 	jsonFields   map[string]bool
 	optErr       error
+
+	// caseInsensitiveFields is read by the render functions, not the parser.
+	caseInsensitiveFields []string
 }
 
 // toJSONPaths replaces each column named "<json column>.<path>" with an expr.JSONPath.
@@ -146,6 +173,13 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 					return e, err
 				}
 
+				// The left side of field:value is always a column, even when it
+				// looks like a number. Keep the text as written so 007:x stays
+				// "007" rather than becoming the number 7.
+				if isNumberLiteral(lit) && p.lex.Peek().Typ == lex.TColon {
+					lit = expr.Lit(tok.Val)
+				}
+
 				// we should always check if the current top of the stack is another token
 				// if it isn't then we have an implicit AND we need to inject.
 				if len(p.stack) > 0 {
@@ -172,9 +206,9 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				continue
 			}
 
-			// For prefix operators (-, +, NOT), inject implicit AND if the top of stack is an expression.
-			// These operators start new subexpressions, so consecutive terms like "-a:b -c:d" need AND between them.
-			if len(p.stack) > 0 && isPrefixOperator(tok) {
+			// Prefix operators (-, +, NOT) and "(" start a new subexpression. Inject an implicit AND
+			// when the top of the stack is an expression, so "-a:b -c:d" and "a:b (c:d)" both get an AND.
+			if len(p.stack) > 0 && (isPrefixOperator(tok) || tok.Typ == lex.TLParen) {
 				_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 				if !isTopToken {
 					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
@@ -344,9 +378,10 @@ func parseLiteral(token lex.Token) (e any, err error) {
 		return expr.Lit(ival), nil
 	}
 
-	// attempt to parse it as a float
+	// attempt to parse it as a float. ParseFloat also accepts words like inf
+	// and NaN; those stay terms because SQL has no literal for them.
 	fval, err := strconv.ParseFloat(token.Val, 64)
-	if err == nil {
+	if err == nil && !math.IsInf(fval, 0) && !math.IsNaN(fval) {
 		return expr.Lit(fval), nil
 	}
 
@@ -361,6 +396,20 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	}
 
 	return expr.Lit(token.Val), nil
+}
+
+// isNumberLiteral reports whether parseLiteral turned a token into a number.
+func isNumberLiteral(in any) bool {
+	e, ok := in.(*expr.Expression)
+	if !ok || e.Op != expr.Literal {
+		return false
+	}
+	switch e.Left.(type) {
+	case int, float64:
+		return true
+	default:
+		return false
+	}
 }
 
 // unescapePhrase strips the surrounding quote delimiters off a TQuoted token's

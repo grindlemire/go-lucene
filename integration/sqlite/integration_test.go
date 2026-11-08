@@ -224,6 +224,83 @@ func TestSQLiteIntegrationParameterized(t *testing.T) {
 	}
 }
 
+func TestSQLiteIntegrationCaseInsensitiveFields(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const labels = `
+        ALTER TABLE items ADD COLUMN label TEXT;
+        UPDATE items SET label = 'FooBar' WHERE id = 1;
+        UPDATE items SET label = 'Foo' WHERE id = 2;
+        UPDATE items SET label = 'foo' WHERE id = 3;
+        UPDATE items SET label = 'BAR' WHERE id = 4;
+        INSERT INTO items (id, name, category, price, status, label) VALUES
+            (6, 'fig', 'fruit', 2.00, 'active', 'Éclair');
+    `
+	if _, err := db.Exec(labels); err != nil {
+		t.Fatalf("seed labels: %v", err)
+	}
+
+	// Row 5 has label = NULL.
+	cases := []struct {
+		name    string
+		lucene  string
+		wantIDs []int
+	}{
+		{"wildcard", `label:foo*`, []int{1, 2, 3}},
+		{"wildcard_upper", `label:FOO*`, []int{1, 2, 3}},
+		{"single_char", `label:F?O`, []int{2, 3}},
+		{"equality", `label:foo`, []int{2, 3}},
+		{"equality_upper", `label:FOO`, []int{2, 3}},
+		{"phrase", `label:"FOOBAR"`, []int{1}},
+		{"in_list", `label:(foo OR bar)`, []int{2, 3, 4}},
+		{"in_list_with_null", `label:(foo OR null)`, []int{2, 3, 5}},
+		{"mixed_in_list", `label:(foo OR 5)`, []int{2, 3}},
+		{"negated_wildcard", `-label:foo*`, []int{4, 6}},
+		{"regex_keeps_case", `label:/^Foo/`, []int{1, 2}},
+		{"standalone_star", `label:*`, []int{1, 2, 3, 4, 6}},
+		{"null", `label:null`, []int{5}},
+		{"unlisted_keeps_case", `name:APPLE`, nil},
+		// SQLite's lower() folds ASCII letters only.
+		{"non_ascii_keeps_case", `label:éclair`, nil},
+		// price is listed too, but a number is compared as a number.
+		{"number_not_folded", `price:1.5`, []int{1}},
+	}
+
+	opt := lucene.WithCaseInsensitiveFields("label", "price")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToSQLite(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedSQLite(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToParameterizedSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	t.Run("listed_default_field", func(t *testing.T) {
+		where, params, err := lucene.ToParameterizedSQLite(`FOO`, opt, lucene.WithDefaultField("label"))
+		if err != nil {
+			t.Fatalf("ToParameterizedSQLite: %v", err)
+		}
+		if got, want := queryIDs(t, db, where, params...), []int{2, 3}; !equalInts(got, want) {
+			t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, want, got)
+		}
+	})
+}
+
 func TestSQLiteIntegrationJSONPath(t *testing.T) {
 	requireIntegration(t)
 	db := openTestDB(t)
@@ -302,3 +379,4 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 		})
 	}
 }
+

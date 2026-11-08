@@ -497,9 +497,14 @@ func TestMySQLIntegrationFallbackPath(t *testing.T) {
 		{name: "char_class", pattern: "[ab]*", wantIDs: []int{1, 2}},
 		{name: "grouping", pattern: "(app)*", wantIDs: []int{1}},
 		{name: "alternation", pattern: "*(ppl|nan)*", wantIDs: []int{1, 2}},
+		// `.` and `$` are literal in a Lucene wildcard. If MySQL's string
+		// parser drops the backslash the fallback puts in front of them,
+		// `ppl.` matches "apple" and `e$` anchors on it, and row 1 leaks in.
+		{name: "literal_dot", pattern: "*(ppl.|nan)*", wantIDs: []int{2}},
+		{name: "literal_dollar", pattern: "*(e$|nan)*", wantIDs: []int{2}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name+"/rendered", func(t *testing.T) {
 			e := expr.LIKE("name", tc.pattern)
 			where, err := drv.Render(e)
 			if err != nil {
@@ -509,6 +514,18 @@ func TestMySQLIntegrationFallbackPath(t *testing.T) {
 			if !equalInts(got, tc.wantIDs) {
 				t.Fatalf("pattern=%q where=%s\n  want ids %v\n  got  ids %v",
 					tc.pattern, where, tc.wantIDs, got)
+			}
+		})
+		t.Run(tc.name+"/parameterized", func(t *testing.T) {
+			e := expr.LIKE("name", tc.pattern)
+			where, params, err := drv.RenderParam(e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			got := queryIDs(t, db, where, params...)
+			if !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s params=%v\n  want ids %v\n  got  ids %v",
+					tc.pattern, where, params, tc.wantIDs, got)
 			}
 		})
 	}
@@ -528,6 +545,133 @@ func TestMySQLParameterPlaceholderIsQuestionMark(t *testing.T) {
 	}
 	if len(params) != 1 || params[0] != "b" {
 		t.Fatalf("want params [\"b\"], got %v", params)
+	}
+}
+
+// TestMySQLIntegrationCaseInsensitiveFields runs WithCaseInsensitiveFields
+// against a utf8mb4_bin column, where plain comparisons are case-sensitive,
+// so every match below comes from LOWER().
+func TestMySQLIntegrationCaseInsensitiveFields(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const labels = `
+		ALTER TABLE items
+			ADD COLUMN label VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+			ADD COLUMN bin VARBINARY(64);
+		UPDATE items SET label = 'FooBar' WHERE id = 1;
+		UPDATE items SET label = 'Foo' WHERE id = 2;
+		UPDATE items SET label = 'foo' WHERE id = 3;
+		UPDATE items SET label = 'BAR' WHERE id = 4;
+		UPDATE items SET label = 'Éclair' WHERE id = 6;
+		UPDATE items SET label = 'other' WHERE id = 7;
+		UPDATE items SET bin = label;
+	`
+	if _, err := db.Exec(labels); err != nil {
+		t.Fatalf("seed labels: %v", err)
+	}
+
+	t.Run("column_is_case_sensitive_without_option", func(t *testing.T) {
+		for q, want := range map[string][]int{`label:FOO`: nil, `label:foo*`: {3}} {
+			where, err := lucene.ToMySQL(q)
+			if err != nil {
+				t.Fatalf("ToMySQL(%q): %v", q, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, want) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v", q, where, want, got)
+			}
+		}
+	})
+
+	// Row 5 has label = NULL.
+	cases := []integrationCase{
+		{name: "wildcard", lucene: `label:foo*`, wantIDs: []int{1, 2, 3}},
+		{name: "wildcard_upper", lucene: `label:FOO*`, wantIDs: []int{1, 2, 3}},
+		{name: "single_char", lucene: `label:F?O`, wantIDs: []int{2, 3}},
+		{name: "equality", lucene: `label:foo`, wantIDs: []int{2, 3}},
+		{name: "equality_upper", lucene: `label:FOO`, wantIDs: []int{2, 3}},
+		{name: "phrase", lucene: `label:"FOOBAR"`, wantIDs: []int{1}},
+		{name: "in_list", lucene: `label:(foo OR bar)`, wantIDs: []int{2, 3, 4}},
+		{name: "in_list_with_null", lucene: `label:(foo OR null)`, wantIDs: []int{2, 3, 5}},
+		{name: "mixed_in_list", lucene: `label:(foo OR 5)`, wantIDs: []int{2, 3}},
+		{name: "negated_wildcard", lucene: `-label:foo*`, wantIDs: []int{4, 6, 7}},
+		{name: "regex_keeps_case", lucene: `label:/^Foo/`, wantIDs: []int{1, 2}},
+		{name: "standalone_star", lucene: `label:*`, wantIDs: []int{1, 2, 3, 4, 6, 7}},
+		{name: "null", lucene: `label:null`, wantIDs: []int{5}},
+		// MySQL's LOWER() folds non-ASCII letters too.
+		{name: "non_ascii", lucene: `label:ÉCLAIR`, wantIDs: []int{6}},
+		// rank is listed, but a number is compared as a number.
+		{name: "number_not_folded", lucene: "rank:50", wantIDs: []int{5}},
+		// LOWER() does nothing to a binary string.
+		{name: "binary_column_keeps_case", lucene: `bin:foo`, wantIDs: []int{3}},
+	}
+
+	opt := lucene.WithCaseInsensitiveFields("label", "rank", "bin")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToMySQL(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedMySQL(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToParameterizedMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	t.Run("listed_default_field", func(t *testing.T) {
+		where, params, err := lucene.ToParameterizedMySQL(`FOO`, opt, lucene.WithDefaultField("label"))
+		if err != nil {
+			t.Fatalf("ToParameterizedMySQL: %v", err)
+		}
+		if got, want := queryIDs(t, db, where, params...), []int{2, 3}; !equalInts(got, want) {
+			t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, want, got)
+		}
+	})
+
+	// The LIKE -> REGEXP fallback folds too. As in
+	// TestMySQLIntegrationFallbackPath, the parser cannot produce these
+	// patterns, so the expressions are built directly.
+	drv := driver.NewMySQLDriver()
+	drv.CaseInsensitiveFields = []string{"label"}
+	fallback := []struct {
+		name    string
+		pattern string
+		wantIDs []int
+	}{
+		{name: "fallback_alternation", pattern: "(FOO|bar)", wantIDs: []int{2, 3, 4}},
+		{name: "fallback_grouping", pattern: "(foo)*", wantIDs: []int{1, 2, 3}},
+	}
+	for _, tc := range fallback {
+		t.Run(tc.name, func(t *testing.T) {
+			e := expr.LIKE("label", tc.pattern)
+			where, err := drv.Render(e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s\n  want ids %v\n  got  ids %v",
+					tc.pattern, where, tc.wantIDs, got)
+			}
+			where, params, err := drv.RenderParam(e)
+			if err != nil {
+				t.Fatalf("render param: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s params=%v\n  want ids %v\n  got  ids %v",
+					tc.pattern, where, params, tc.wantIDs, got)
+			}
+		})
 	}
 }
 
