@@ -3,6 +3,8 @@ package driver
 import (
 	"fmt"
 	"math"
+	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -130,6 +132,13 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 			return "", nil, err
 		}
 		return "?", []any{s}, nil
+	}
+
+	// A number that a float64 can't hold goes into the SQL as written. No Go
+	// value the drivers bind holds it: a float64 rounds it, and a string is
+	// compared as text against a JSON value in MySQL and SQLite.
+	if text, ok := lostDigits(e); ok {
+		return string(text), nil, nil
 	}
 
 	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
@@ -321,6 +330,10 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 			return "", err
 		}
 		return b.dialect().EscapeStringLiteral(s), nil
+	}
+
+	if text, ok := lostDigits(e); ok {
+		return string(text), nil
 	}
 
 	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
@@ -602,9 +615,70 @@ func formatNumber(v any, floatFmt byte) (s string, ok bool, err error) {
 		return formatFloat(float64(n), floatFmt, 32)
 	case float64:
 		return formatFloat(n, floatFmt, 64)
+	case numberText:
+		return string(n), true, nil
 	default:
 		return "", false, nil
 	}
+}
+
+// numberText is the text a number was written as, for a number that its Go
+// value does not hold. lostDigits only returns one that is a plain decimal
+// number, so it is safe to write into the SQL.
+type numberText string
+
+// plainDecimal matches a plain decimal number, with an optional minus, digits
+// with an optional dot or a dot and digits, and an optional exponent, such as
+// -1.5 or 9223372036854775808. That is SQL's numeric literal syntax, so text
+// that matches it reads as one number in the SQL.
+var plainDecimal = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+
+// lostDigits returns the text that e, a number literal, was written as when
+// its float value is a different number. A float64 holds
+// 9223372036854775808 as 9223372036854776000, for example, and
+// 0.1000000000000000055511151231257827 as 0.1. Such a number has to reach
+// the database as its text for the database to compare it as written.
+//
+// The text goes into the SQL unquoted, so lostDigits checks it here rather
+// than relying on NumberLit: it must be a plain decimal number, and it must
+// still parse to the value, which a caller can change after NumberLit
+// checked it.
+func lostDigits(e *expr.Expression) (numberText, bool) {
+	text := e.NumberText()
+	if e.Op != expr.Literal || text == "" || !plainDecimal.MatchString(text) {
+		return "", false
+	}
+	var held string
+	switch f := e.Left.(type) {
+	case float64:
+		parsed, err := strconv.ParseFloat(text, 64)
+		if err != nil || parsed != f || f == 0 {
+			return "", false
+		}
+		held = strconv.FormatFloat(f, 'g', -1, 64)
+	case float32:
+		parsed, err := strconv.ParseFloat(text, 32)
+		if err != nil || float32(parsed) != f || f == 0 {
+			return "", false
+		}
+		held = strconv.FormatFloat(float64(f), 'g', -1, 32)
+	default:
+		// An integer renders as its own digits, so its text never reaches
+		// the SQL.
+		return "", false
+	}
+	// The text parsed to a float that is neither 0 nor infinite, so its
+	// magnitude is within a float's range, and parsing it exactly costs time
+	// in proportion to its length.
+	written, ok := new(big.Rat).SetString(text)
+	if !ok {
+		return "", false
+	}
+	value, ok := new(big.Rat).SetString(held)
+	if !ok || written.Cmp(value) == 0 {
+		return "", false
+	}
+	return numberText(text), true
 }
 
 func formatFloat(f float64, floatFmt byte, bitSize int) (string, bool, error) {
@@ -704,6 +778,7 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 
 // extractBoundValue unwraps a range boundary value from its Expression wrapper.
 // Returns the bound's Go value, which can be any non-AST, non-container value, and whether the bound is unbounded (*).
+// A number that its Go value does not hold is returned as its numberText.
 // A bound must be a single term. Render does not run Validate, so a hand-built
 // or JSON-decoded AST can still carry a compound bound here.
 func extractBoundValue(bound any) (val any, unbounded bool, err error) {
@@ -726,6 +801,9 @@ func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 			}
 		case expr.Literal, expr.Regexp:
 			val = e.Left
+			if text, ok := lostDigits(e); ok {
+				val = text
+			}
 		default:
 			return nil, false, fmt.Errorf("range bound must be a single term, not %s %s expression", article(e.Op), e.Op)
 		}
@@ -767,7 +845,7 @@ func (b Base) formatRangeValue(val any) (string, error) {
 // isNumericBound checks whether a range bound value is numeric.
 func isNumericBound(val any) bool {
 	switch val.(type) {
-	case int, float64:
+	case int, float64, numberText:
 		return true
 	default:
 		return false
@@ -890,12 +968,16 @@ func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (strin
 
 // rangeParam renders one range bound for the parameterized path. A column is
 // written into the SQL as a quoted identifier, as Render does, so both modes
-// compare against the column; anything else becomes a placeholder and is
-// appended to params.
+// compare against the column. So is a number that its Go value does not hold,
+// as RenderParam does for one outside a range. Anything else becomes a
+// placeholder and is appended to params.
 func (b Base) rangeParam(val any, params []any) (string, []any, error) {
-	if c, ok := val.(expr.Column); ok {
-		quoted, err := b.quoteColumn(c)
+	switch v := val.(type) {
+	case expr.Column:
+		quoted, err := b.quoteColumn(v)
 		return quoted, params, err
+	case numberText:
+		return string(v), params, nil
 	}
 	return "?", append(params, val), nil
 }

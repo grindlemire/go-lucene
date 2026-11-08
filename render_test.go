@@ -749,6 +749,126 @@ func TestNonFiniteWordsRenderAsStrings(t *testing.T) {
 	}
 }
 
+// TestNumbersThatLoseDigitsRenderAsWritten is the end-to-end check for numbers
+// that a float64 can't hold, from issue #77. a:9223372036854775808 used to
+// render "a" = 9.223372036854776e+18 and bind that float64, so the database
+// compared against 9223372036854776000. Such a number now reaches the SQL as
+// written, in both modes. No Go value the drivers bind holds it, so
+// RenderParam writes it into the SQL rather than binding it.
+func TestNumbersThatLoseDigitsRenderAsWritten(t *testing.T) {
+	tcs := map[string]struct {
+		input  string
+		want   map[string]string
+		params []any
+	}{
+		"int_overflow": {
+			input: `a:9223372036854775808`,
+			want:  inlineSQL(`"a" = 9223372036854775808`),
+		},
+		"negative_int_overflow": {
+			input: `a:-9223372036854775809`,
+			want:  inlineSQL(`"a" = -9223372036854775809`),
+		},
+		"too_many_digits": {
+			input: `a:0.1000000000000000055511151231257827`,
+			want:  inlineSQL(`"a" = 0.1000000000000000055511151231257827`),
+		},
+		"comparison": {
+			input: `a:>=12345678901234567891`,
+			want:  inlineSQL(`"a" >= 12345678901234567891`),
+		},
+		"range": {
+			input: `a:[9223372036854775808 TO 12345678901234567891]`,
+			want:  inlineSQL(`"a" >= 9223372036854775808 AND "a" <= 12345678901234567891`),
+		},
+		"open_range": {
+			input: `a:{* TO 9223372036854775808}`,
+			want:  inlineSQL(`"a" < 9223372036854775808`),
+		},
+		"range_with_param": {
+			input: `a:[1 TO 9223372036854775808]`,
+			want: map[string]string{
+				"postgres":       `"a" >= 1 AND "a" <= 9223372036854775808`,
+				"sqlite":         `"a" >= 1 AND "a" <= 9223372036854775808`,
+				"mysql":          "`a` >= 1 AND `a` <= 9223372036854775808",
+				"param_postgres": `"a" >= $1 AND "a" <= 9223372036854775808`,
+				"param_sqlite":   `"a" >= ? AND "a" <= 9223372036854775808`,
+				"param_mysql":    "`a` >= ? AND `a` <= 9223372036854775808",
+			},
+			params: []any{1},
+		},
+		"in_list": {
+			input: `a:(9223372036854775808 OR 2)`,
+			want: map[string]string{
+				"postgres":       `"a" IN (9223372036854775808, 2)`,
+				"sqlite":         `"a" IN (9223372036854775808, 2)`,
+				"mysql":          "`a` IN (9223372036854775808, 2)",
+				"param_postgres": `"a" IN (9223372036854775808, $1)`,
+				"param_sqlite":   `"a" IN (9223372036854775808, ?)`,
+				"param_mysql":    "`a` IN (9223372036854775808, ?)",
+			},
+			params: []any{2},
+		},
+		"placeholders_stay_numbered": {
+			input: `a:1 AND b:9223372036854775808 AND c:2`,
+			want: map[string]string{
+				"postgres":       `(("a" = 1) AND ("b" = 9223372036854775808)) AND ("c" = 2)`,
+				"param_postgres": `(("a" = $1) AND ("b" = 9223372036854775808)) AND ("c" = $2)`,
+			},
+			params: []any{1, 2},
+		},
+		// 1e20 is exactly a float64, so it binds as before.
+		"exact_float_bound": {
+			input: `a:[9223372036854775808 TO 1e20]`,
+			want: map[string]string{
+				"postgres":       `"a" >= 9223372036854775808 AND "a" <= 100000000000000000000`,
+				"param_postgres": `"a" >= 9223372036854775808 AND "a" <= $1`,
+			},
+			params: []any{1e20},
+		},
+		"default_field": {
+			input: `9223372036854775808`,
+			want:  inlineSQL(`"f" = 9223372036854775808`),
+		},
+	}
+	for name, tc := range tcs {
+		opts := []Opt{WithDefaultField("f")}
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input, opts...)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+		for rname, render := range paramRenderers {
+			t.Run(name+"/"+rname+"_params", func(t *testing.T) {
+				_, params, err := render(tc.input, opts...)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(params) != len(tc.params) || (len(params) > 0 && !reflect.DeepEqual(params, tc.params)) {
+					t.Fatalf("want params %#v, got %#v", tc.params, params)
+				}
+			})
+		}
+	}
+}
+
+// inlineSQL gives the same SQL for every renderer in both modes, for SQL with
+// no bind parameters where MySQL and MariaDB differ only in quoting columns
+// with backticks.
+func inlineSQL(postgres string) map[string]string {
+	want := sameSQL(postgres)
+	for name, sql := range sameSQL(postgres) {
+		want["param_"+name] = sql
+	}
+	return want
+}
+
 // paramRenderers lists the parameterized render entry points with their
 // bind parameters.
 var paramRenderers = map[string]func(string, ...Opt) (string, []any, error){
@@ -983,10 +1103,8 @@ func TestPlusInsideWildcardIsLiteral(t *testing.T) {
 
 // TestDecimalNumberFormsRender pins the SQL for each spelling of a plain
 // decimal number, in both render modes. Leading zeros are dropped, an exponent
-// is folded into the value.
-//
-// int_overflow pins a known limit, not a design choice: an integer too big
-// for an int renders as the nearest float64, which loses its low digits.
+// is folded into the value. A number that a float64 can't hold keeps its
+// written text instead; TestNumbersThatLoseDigitsRenderAsWritten covers it.
 func TestDecimalNumberFormsRender(t *testing.T) {
 	tcs := map[string]struct {
 		input      string
@@ -999,11 +1117,14 @@ func TestDecimalNumberFormsRender(t *testing.T) {
 		"exponent":       {`a:1e3`, sameSQL(`"a" = 1000`), []any{1000.0}},
 		"upper_exponent": {`a:1E3`, sameSQL(`"a" = 1000`), []any{1000.0}},
 		"fraction":       {`a:1.5e-3`, sameSQL(`"a" = 0.0015`), []any{0.0015}},
-		"int_overflow":   {`a:9223372036854775808`, sameSQL(`"a" = 9.223372036854776e+18`), []any{9223372036854775808.0}},
 		"float_overflow": {`a:1e400`, sameSQL(`"a" = '1e400'`), []any{"1e400"}},
 		"hex_int":        {`sku:0x1F`, sameSQL(`"sku" = '0x1F'`), []any{"0x1F"}},
 		"escaped_digits": {`a:\007`, sameSQL(`"a" = '007'`), []any{"007"}},
 		"range":          {`a:[007 TO 1e3]`, sameSQL(`"a" >= 7 AND "a" <= 1000`), []any{7, 1000.0}},
+
+		// A nonzero number too small for a float64 used to render as 0.
+		"float_underflow": {`a:1e-400`, sameSQL(`"a" = '1e-400'`), []any{"1e-400"}},
+		"zero_exponent":   {`a:0e-400`, sameSQL(`"a" = 0`), []any{0.0}},
 	}
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {

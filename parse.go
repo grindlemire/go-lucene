@@ -463,9 +463,11 @@ func parseLiteral(token lex.Token) (e any, err error) {
 
 	// attempt to parse it as a float. ParseFloat also accepts inf, NaN, hex
 	// floats like 0x1p3 and digit separators like 1_000; those stay terms
-	// because only a plain decimal number is a number.
+	// because only a plain decimal number is a number. A number too big for a
+	// float64 fails to parse and stays a term, and so does one too small,
+	// which ParseFloat rounds to 0.
 	fval, err := strconv.ParseFloat(token.Val, 64)
-	if err == nil && decimalNumber.MatchString(token.Val) {
+	if err == nil && decimalNumber.MatchString(token.Val) && !underflows(token.Val, fval) {
 		return expr.NumberLit(fval, token.Val), nil
 	}
 
@@ -502,6 +504,16 @@ func escapePlus(text string) string {
 // an optional fraction, and an optional exponent, such as 5, -1.5, 5., .5 or
 // 1e-3. This is SQL's numeric literal syntax.
 var decimalNumber = regexp.MustCompile(`^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+
+// underflows reports whether the decimal number text is not zero but parsed
+// to f == 0, because it is too small for a float64, such as 1e-400.
+func underflows(text string, f float64) bool {
+	if f != 0 {
+		return false
+	}
+	mantissa, _, _ := strings.Cut(strings.ToLower(text), "e")
+	return strings.ContainsAny(mantissa, "123456789")
+}
 
 // isNumberLiteral reports whether parseLiteral turned a token into a number.
 func isNumberLiteral(in any) bool {
