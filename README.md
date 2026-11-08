@@ -59,6 +59,8 @@ sql, params, err := lucene.ToParameterizedMySQL(`color:red AND type:"gala"`)
 // params: ["red", "gala"]
 ```
 
+A number with more digits than a float64 holds, like `9223372036854775808` or `0.1000000000000000055511151231257827`, goes into the SQL instead of being bound. A float64 would round it, a string would compare as text against a JSON value in MySQL and SQLite, and Postgres rejects a string past the range of a `bigint` column, so the database reads it from the SQL as written: `id:9223372036854775808` gives `"id" = 9223372036854775808` and no parameter. It is always a plain decimal number, so it can't change the query. SQLite reads an integer past int64 as a REAL, so there it still compares as the nearest double.
+
 ### Inline values
 
 If you don't need parameter binding (for example, when generating SQL for inspection), `ToPostgres`, `ToSQLite`, and `ToMySQL` embed values directly into the string:
@@ -87,7 +89,7 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 |---|---|---|
 | `field:value` | `"field" = 'value'` | Exact match |
 | `field:"phrase with spaces"` | `"field" = 'phrase with spaces'` | Quoted phrase |
-| `field:1.5` | `"field" = 1.5` | A plain decimal number like `5`, `-1.5` or `1e3` is a number. Anything else, like `0x1p3`, `1_000` or `inf`, is a string. Quote it (`"007"`) to keep a number's text |
+| `field:1.5` | `"field" = 1.5` | A plain decimal number like `5`, `-1.5` or `1e3` is a number. Anything else, like `0x1p3`, `1_000` or `inf`, is a string, and so is a number too big or too small for a float64, like `1e400` or `1e-400`. Quote it (`"007"`) to keep a number's text. A number that a float64 rounds, like `9223372036854775808`, is written into the SQL as written in both forms (see [Parameterized queries](#parameterized-queries-recommended)) |
 | `a:1 AND b:2` | `("a" = 1) AND ("b" = 2)` | Boolean AND |
 | `a:1 OR b:2` | `("a" = 1) OR ("b" = 2)` | Boolean OR |
 | `NOT field:value` | `NOT("field" = 'value')` | Negation |
