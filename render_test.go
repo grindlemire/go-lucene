@@ -82,6 +82,11 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 		// A field group compares the column to a boolean expression.
 		"field_group_and": {input: `a:("x' OR 1=1 --" AND c)`, render: "postgres", want: `"a" = ('x'' OR 1=1 --' AND 'c')`},
 		"field_group_gt":  {input: `a:>("x' OR 1=1 --" OR c)`, render: "postgres", want: `"a" > ('x'' OR 1=1 --' OR 'c')`},
+		// The default field only reaches a bare wildcard, regex or null when
+		// it is the whole query, so here the wildcard stands alone...
+		"default_field_skips_wildcard": {input: `x OR foo*`, defaultField: "default", render: "postgres", want: `("default" = 'x') OR 'foo*'`},
+		// ...and the null fails to render.
+		"default_field_skips_null": {input: `x OR null`, defaultField: "default", render: "postgres", wantErr: true},
 	}
 
 	for name, tc := range tcs {
