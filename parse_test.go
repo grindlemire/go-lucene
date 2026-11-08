@@ -1218,6 +1218,90 @@ func TestParseRangeNeedsField(t *testing.T) {
 	}
 }
 
+// TestParseNumberSpellings checks numbers written with a + in the exponent or
+// a leading dot. a:1E+3 used to parse as a:1E AND +3, and a:.5 and a:-.5
+// failed to parse.
+func TestParseNumberSpellings(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"exponent_plus":       {`a:1E+3`, expr.Eq("a", 1000.0)},
+		"exponent_plus_lower": {`a:1e+3`, expr.Eq("a", 1000.0)},
+		"negative_exponent":   {`a:-2.5e+2`, expr.Eq("a", -250.0)},
+		"exponent_in_range":   {`a:[1e+2 TO 1E+3]`, expr.Rang("a", 100.0, 1000.0, true)},
+		"exponent_compare":    {`a:>=1e+3`, expr.GREATEREQ("a", 1000.0)},
+		"exponent_in_list":    {`a:(1e+3 OR 2)`, expr.IN("a", expr.LIST(expr.Lit(1000.0), expr.Lit(2)))},
+		"exponent_boost":      {`a:b^1e+1`, expr.BOOST(expr.Eq("a", "b"), 10.0)},
+		"leading_dot":         {`a:.5`, expr.Eq("a", 0.5)},
+		"negative_dot":        {`a:-.5`, expr.Eq("a", -0.5)},
+		"dot_range":           {`a:[-.5 TO .5]`, expr.Rang("a", -0.5, 0.5, true)},
+		"dot_exponent":        {`a:.5e+1`, expr.Eq("a", 5.0)},
+		"dot_word":            {`a:.foo`, expr.Eq("a", ".foo")},
+		"dot_field":           {`.5:x`, expr.Eq(".5", "x")},
+		"minus_dot_word":      {`-.foo`, expr.MUSTNOT(expr.Lit(".foo"))},
+		// Unchanged: + outside an exponent still means MUST.
+		"plus_after_word": {`a:be+3`, expr.AND(expr.Eq("a", "be"), expr.MUST(expr.Lit(3)))},
+		"exponent_minus":  {`a:1e-3`, expr.Eq("a", 0.001)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+
+	// A term can't start with +, so a:+5 stays an error, as in Lucene and
+	// like a:-x. Escape it to search for the text: a:\+5.
+	// A + with no digit after it is not an exponent sign, even at the end
+	// of the query, so a:1e+ fails like a:1e+ with a trailing space.
+	for _, input := range []string{`a:+5`, `a:+.5`, `a:1e+`, `a:1e+ `, `1e+`} {
+		t.Run("error/"+input, func(t *testing.T) {
+			if got, err := Parse(input); err == nil {
+				t.Fatalf("expected an error, got %#v", got)
+			}
+		})
+	}
+}
+
+// TestParseReportsLexerError checks that a query the lexer rejects fails
+// with the lexer's message. The parser used to drop it and report "no items
+// left to reduce" instead.
+func TestParseReportsLexerError(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"unterminated_quote":  {`a:"abc`, "unterminated quote"},
+		"unterminated_regexp": {`a:/re`, "unterminated regexp"},
+		"unknown_character":   {`a:b & c`, "error parsing token [&]"},
+		"after_a_term":        {`a:b OR "c`, "unterminated quote"},
+		// A trailing backslash used to stay in the term: a*\ was the
+		// wildcard a*\ and a:\ compared a to the empty string.
+		"trailing_backslash":       {`a*\`, "term can not end with an escape character"},
+		"trailing_backslash_value": {`a:\`, "term can not end with an escape character"},
+		"lone_backslash":           {`\`, "term can not end with an escape character"},
+		"backslash_in_group":       {`a:(b OR c\`, "term can not end with an escape character"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err == nil {
+				t.Fatalf("expected an error, got %#v", got)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected an error containing %q, got: %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestParseFailure(t *testing.T) {
 	type tc struct {
 		input string
