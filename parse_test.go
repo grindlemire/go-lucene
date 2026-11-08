@@ -947,6 +947,50 @@ func TestParseDefaultFieldInsideFieldGroup(t *testing.T) {
 	}
 }
 
+// TestParseFieldGroupIgnoresDefaultField checks queries where every term sits
+// inside a field group: each must parse the same with and without a default
+// field, whatever operators or modifiers are in or around the group.
+func TestParseFieldGroupIgnoresDefaultField(t *testing.T) {
+	inputs := map[string]string{
+		"nested_group":          `a:(x OR (y AND z))`,
+		"double_parens":         `a:((x OR null))`,
+		"implicit_and":          `a:(x y)`,
+		"must_not_in_group":     `a:(x -y)`,
+		"must_in_group":         `a:(+x OR y)`,
+		"not_in_group":          `a:(x OR NOT y)`,
+		"wildcard_in_group":     `a:(x OR foo*)`,
+		"regexp_in_group":       `a:(x OR /re/)`,
+		"field_term_in_group":   `a:(b:c OR d)`,
+		"range_in_group":        `a:(x OR b:[1 TO 5])`,
+		"boost_in_group":        `a:(x^2 OR y)`,
+		"fuzzy_in_group":        `a:(x~ OR y)`,
+		"compare_group":         `a:>(x OR y)`,
+		"boosted_group":         `a:(x OR y)^2`,
+		"fuzzy_group":           `a:(x OR y)~`,
+		"must_group":            `+a:(x OR null)`,
+		"must_not_group":        `-a:(x OR null)`,
+		"not_group":             `NOT a:(x OR null)`,
+		"two_groups":            `a:(x OR y) AND b:(z OR null)`,
+		"group_inside_bare_one": `(a:(x OR y) OR b:z)`,
+	}
+
+	for name, input := range inputs {
+		t.Run(name, func(t *testing.T) {
+			want, err := Parse(input)
+			if err != nil {
+				t.Fatalf("wanted no error without a default field, got: %v", err)
+			}
+			got, err := Parse(input, WithDefaultField("default"))
+			if err != nil {
+				t.Fatalf("wanted no error with a default field, got: %v", err)
+			}
+			if !reflect.DeepEqual(want, got) {
+				t.Fatalf(errTemplate, "default field changed the parse", want, got)
+			}
+		})
+	}
+}
+
 func TestParseFailure(t *testing.T) {
 	type tc struct {
 		input string
