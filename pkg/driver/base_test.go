@@ -461,6 +461,85 @@ func TestMySQLRegexFallbackEscaping(t *testing.T) {
 	}
 }
 
+// TestRenderColumnRangeBound checks that a column used as a range bound is
+// compared as a column in both modes. RenderParam used to bind it as a
+// parameter, so the database compared against the column's name as a string.
+func TestRenderColumnRangeBound(t *testing.T) {
+	type want struct {
+		render, param string
+		params        []any
+	}
+	tcs := map[string]struct {
+		input *expr.Expression
+		want  map[string]want
+	}{
+		"column_range": {
+			input: expr.Rang("a", expr.Column("lo"), expr.Column("hi"), true),
+			want: map[string]want{
+				"postgres": {`"a" BETWEEN "lo" AND "hi"`, `"a" BETWEEN "lo" AND "hi"`, nil},
+				"mysql":    {"`a` BETWEEN `lo` AND `hi`", "`a` BETWEEN `lo` AND `hi`", nil},
+				"sqlite":   {`"a" BETWEEN "lo" AND "hi"`, `"a" BETWEEN "lo" AND "hi"`, nil},
+			},
+		},
+		"column_and_number": {
+			input: expr.Rang("a", expr.Lit(expr.Column("b")), 5, true),
+			want: map[string]want{
+				"postgres": {`"a" >= "b" AND "a" <= 5`, `"a" >= "b" AND "a" <= $1`, []any{5}},
+				"mysql":    {"`a` >= `b` AND `a` <= 5", "`a` >= `b` AND `a` <= ?", []any{5}},
+				"sqlite":   {`"a" >= "b" AND "a" <= 5`, `"a" >= "b" AND "a" <= ?`, []any{5}},
+			},
+		},
+		"number_and_column_exclusive": {
+			input: expr.Rang("a", 1, expr.Column("b"), false),
+			want: map[string]want{
+				"postgres": {`"a" > 1 AND "a" < "b"`, `"a" > $1 AND "a" < "b"`, []any{1}},
+				"mysql":    {"`a` > 1 AND `a` < `b`", "`a` > ? AND `a` < `b`", []any{1}},
+				"sqlite":   {`"a" > 1 AND "a" < "b"`, `"a" > ? AND "a" < "b"`, []any{1}},
+			},
+		},
+		"open_min_column_max": {
+			input: expr.Rang("a", "*", expr.Column("hi"), true),
+			want: map[string]want{
+				"postgres": {`"a" <= "hi"`, `"a" <= "hi"`, nil},
+				"mysql":    {"`a` <= `hi`", "`a` <= `hi`", nil},
+				"sqlite":   {`"a" <= "hi"`, `"a" <= "hi"`, nil},
+			},
+		},
+		"column_min_open_max": {
+			input: expr.Rang("a", expr.Column("lo"), "*", false),
+			want: map[string]want{
+				"postgres": {`"a" > "lo"`, `"a" > "lo"`, nil},
+				"mysql":    {"`a` > `lo`", "`a` > `lo`", nil},
+				"sqlite":   {`"a" > "lo"`, `"a" > "lo"`, nil},
+			},
+		},
+	}
+	for name, tc := range tcs {
+		for dname, d := range allDrivers {
+			w := tc.want[dname]
+			t.Run(name+"/"+dname, func(t *testing.T) {
+				got, err := d.Render(tc.input)
+				if err != nil {
+					t.Fatalf("Render: unexpected error: %v", err)
+				}
+				if got != w.render {
+					t.Fatalf(errTemplate, "Render sql does not match", w.render, got)
+				}
+				got, params, err := d.RenderParam(tc.input)
+				if err != nil {
+					t.Fatalf("RenderParam: unexpected error: %v", err)
+				}
+				if got != w.param {
+					t.Fatalf(errTemplate, "RenderParam sql does not match", w.param, got)
+				}
+				if len(params) != len(w.params) || (len(params) > 0 && !reflect.DeepEqual(params, w.params)) {
+					t.Fatalf("want params %#v, got %#v", w.params, params)
+				}
+			})
+		}
+	}
+}
+
 // TestRenderSafeValueBoundary pins inputs on the safe side of the checks
 // above, so tightening them does not start rejecting valid ASTs, and shows
 // how each dialect escapes the strings that do get written into SQL.
@@ -494,10 +573,6 @@ func TestRenderSafeValueBoundary(t *testing.T) {
 		"bool_range": {
 			input: expr.Rang("a", false, true, true),
 			want:  want{`"a" BETWEEN false AND true`, "`a` BETWEEN FALSE AND TRUE", `"a" BETWEEN 0 AND 1`},
-		},
-		"column_range": {
-			input: expr.Rang("a", expr.Column("lo"), expr.Column("hi"), true),
-			want:  want{`"a" BETWEEN "lo" AND "hi"`, "`a` BETWEEN `lo` AND `hi`", `"a" BETWEEN "lo" AND "hi"`},
 		},
 		"regexp_range": {
 			input: expr.Rang("a", expr.REGEXP("/x/"), expr.REGEXP("/y/"), true),

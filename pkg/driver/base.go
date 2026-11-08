@@ -751,29 +751,54 @@ func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (strin
 		return "1=1", nil, nil
 	}
 
+	var minSQL, maxSQL string
+	var params []any
+	if !minUnbounded {
+		if minSQL, params, err = b.rangeParam(minVal, params); err != nil {
+			return "", nil, err
+		}
+	}
+	if !maxUnbounded {
+		if maxSQL, params, err = b.rangeParam(maxVal, params); err != nil {
+			return "", nil, err
+		}
+	}
+
 	if minUnbounded {
 		if inclusive {
-			return fmt.Sprintf("%s <= ?", left), []any{maxVal}, nil
+			return fmt.Sprintf("%s <= %s", left, maxSQL), params, nil
 		}
-		return fmt.Sprintf("%s < ?", left), []any{maxVal}, nil
+		return fmt.Sprintf("%s < %s", left, maxSQL), params, nil
 	}
 
 	if maxUnbounded {
 		if inclusive {
-			return fmt.Sprintf("%s >= ?", left), []any{minVal}, nil
+			return fmt.Sprintf("%s >= %s", left, minSQL), params, nil
 		}
-		return fmt.Sprintf("%s > ?", left), []any{minVal}, nil
+		return fmt.Sprintf("%s > %s", left, minSQL), params, nil
 	}
 
 	if isNumericBound(minVal) || isNumericBound(maxVal) {
 		if inclusive {
-			return fmt.Sprintf("%s >= ? AND %s <= ?", left, left), []any{minVal, maxVal}, nil
+			return fmt.Sprintf("%s >= %s AND %s <= %s", left, minSQL, left, maxSQL), params, nil
 		}
-		return fmt.Sprintf("%s > ? AND %s < ?", left, left), []any{minVal, maxVal}, nil
+		return fmt.Sprintf("%s > %s AND %s < %s", left, minSQL, left, maxSQL), params, nil
 	}
 
 	if inclusive {
-		return fmt.Sprintf("%s BETWEEN ? AND ?", left), []any{minVal, maxVal}, nil
+		return fmt.Sprintf("%s BETWEEN %s AND %s", left, minSQL, maxSQL), params, nil
 	}
-	return fmt.Sprintf("%s > ? AND %s < ?", left, left), []any{minVal, maxVal}, nil
+	return fmt.Sprintf("%s > %s AND %s < %s", left, minSQL, left, maxSQL), params, nil
+}
+
+// rangeParam renders one range bound for the parameterized path. A column is
+// written into the SQL as a quoted identifier, as Render does, so both modes
+// compare against the column; anything else becomes a placeholder and is
+// appended to params.
+func (b Base) rangeParam(val any, params []any) (string, []any, error) {
+	if c, ok := val.(expr.Column); ok {
+		quoted, err := b.quoteColumn(c)
+		return quoted, params, err
+	}
+	return "?", append(params, val), nil
 }
