@@ -90,6 +90,9 @@ type parser struct {
 func (p *parser) parse() (e *expr.Expression, err error) {
 	for {
 		next := p.lex.Peek()
+		if next.Typ == lex.TErr {
+			return e, fmt.Errorf("error parsing: %s", next.Val)
+		}
 		if p.shouldAccept(next) {
 			if len(p.stack) != 1 {
 				return e, fmt.Errorf("multiple expressions left after parsing: %v", p.stack)

@@ -1218,6 +1218,32 @@ func TestParseRangeNeedsField(t *testing.T) {
 	}
 }
 
+// TestParseReportsLexerError checks that a query the lexer rejects fails
+// with the lexer's message. The parser used to drop it and report "no items
+// left to reduce" instead.
+func TestParseReportsLexerError(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"unterminated_quote":  {`a:"abc`, "unterminated quote"},
+		"unterminated_regexp": {`a:/re`, "unterminated regexp"},
+		"unknown_character":   {`a:b & c`, "error parsing token [&]"},
+		"after_a_term":        {`a:b OR "c`, "unterminated quote"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err == nil {
+				t.Fatalf("expected an error, got %#v", got)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected an error containing %q, got: %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestParseFailure(t *testing.T) {
 	type tc struct {
 		input string
