@@ -483,6 +483,20 @@ func TestMySQLIntegrationParameterized(t *testing.T) {
 	}
 }
 
+// roundTrip returns e after a trip through JSON.
+func roundTrip(t *testing.T, e *expr.Expression) *expr.Expression {
+	t.Helper()
+	raw, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out expr.Expression
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	return &out
+}
+
 // TestMySQLIntegrationHandBuiltFieldGroup runs EQUALS on a group, built in
 // code or read from JSON, which the driver spreads over every term the way
 // the parser reads a field group. `name` = ('apple' OR 'banana') used to
@@ -508,6 +522,9 @@ func TestMySQLIntegrationHandBuiltFieldGroup(t *testing.T) {
 		{"or_null", expr.Eq("status", expr.OR("active", expr.NULL())), []int{1, 2, 4, 5, 6, 7}},
 		{"ranges", expr.Eq("price", expr.OR(priceRange(expr.Lit(1), expr.Lit(2)), priceRange(expr.Lit(5), expr.WILD("*")))), []int{1, 4, 5}},
 		{"from_json", &fromJSON, []int{1, 2}},
+		{"ranges_from_json", roundTrip(t, expr.Eq("price", expr.OR(priceRange(expr.Lit(1), expr.Lit(2)), priceRange(expr.Lit(5), expr.WILD("*"))))), []int{1, 4, 5}},
+		// A value with a field of its own keeps it, as name:(category:fruit) does.
+		{"own_field", expr.Eq("name", expr.Eq("category", "fruit")), []int{1, 2, 4}},
 	}
 
 	d := driver.NewMySQLDriver()
