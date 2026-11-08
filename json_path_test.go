@@ -268,6 +268,25 @@ func TestJSONPathEndToEnd(t *testing.T) {
 			pgParams:  []any{"red", "blue"},
 			sqlParams: []any{"red", "blue"},
 		},
+		// A number that a float64 can't hold is written into the SQL, as on a
+		// plain column. Bound as a string, MySQL and SQLite would compare it
+		// with the JSON value as text.
+		"equals_number_too_big_for_float": {
+			input:     `labels.count:9223372036854775808`,
+			postgres:  `CASE WHEN json_typeof(("labels"->'count')::json) = 'number' AND length("labels"->>'count') <= 1000 AND "labels"->>'count' ~ '^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]{1,4})?$' THEN ("labels"->>'count')::numeric = 9223372036854775808 ELSE "labels"->>'count' = '9223372036854775808' END`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.count')) IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN JSON_EXTRACT(`labels`, '$.count') = 9223372036854775808 ELSE CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.count')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.count')) END = '9223372036854775808' END",
+			sqlite:    `CASE WHEN json_type("labels", '$.count') IN ('integer', 'real') THEN json_extract("labels", '$.count') = 9223372036854775808 ELSE CASE json_type("labels", '$.count') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.count') AS TEXT) END = '9223372036854775808' END`,
+			pgParams:  []any{"9223372036854775808"},
+			sqlParams: []any{"9223372036854775808"},
+		},
+		"range_number_too_big_for_float": {
+			input:     `labels.count:[1 TO 9223372036854775808]`,
+			postgres:  `CASE WHEN json_typeof(("labels"->'count')::json) = 'number' AND length("labels"->>'count') <= 1000 AND "labels"->>'count' ~ '^-?[0-9]+([.][0-9]+)?([eE][+-]?[0-9]{1,4})?$' THEN ("labels"->>'count')::numeric >= 1 AND ("labels"->>'count')::numeric <= 9223372036854775808 WHEN "labels"->>'count' IS NOT NULL THEN FALSE END`,
+			mysql:     "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.count')) IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN JSON_EXTRACT(`labels`, '$.count') >= 1 AND JSON_EXTRACT(`labels`, '$.count') <= 9223372036854775808 WHEN CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.count')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.count')) END IS NOT NULL THEN FALSE END",
+			sqlite:    `CASE WHEN json_type("labels", '$.count') IN ('integer', 'real') THEN json_extract("labels", '$.count') >= 1 AND json_extract("labels", '$.count') <= 9223372036854775808 WHEN CASE json_type("labels", '$.count') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.count') AS TEXT) END IS NOT NULL THEN FALSE END`,
+			pgParams:  []any{1},
+			sqlParams: []any{1},
+		},
 		"unregistered_dotted_column": {
 			input:     `other.category:fruit`,
 			postgres:  `"other.category" = 'fruit'`,
