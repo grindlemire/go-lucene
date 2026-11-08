@@ -354,10 +354,14 @@ func (l *Lexer) next() rune {
 	return r
 }
 
-// peek returns but does not consume the next rune in the input.
+// peek returns but does not consume the next rune in the input. It reads the
+// input directly rather than calling next and backup: at the end of the input,
+// next sets atEOF, which would stop a later backup from stepping back.
 func (l *Lexer) peek() rune {
-	r := l.next()
-	l.backup()
+	if int(l.pos) >= len(l.input) {
+		return eof
+	}
+	r, _ := utf8.DecodeRuneInString(l.input[l.pos:])
 	return r
 }
 
