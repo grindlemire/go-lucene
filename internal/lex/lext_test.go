@@ -335,6 +335,32 @@ func TestLex(t *testing.T) {
 				tok(TLiteral, "#channel"),
 			},
 		},
+		// A backslash escapes the next character, so one at the end of the
+		// input has nothing to escape. Lucene rejects it the same way.
+		"trailing_backslash": {
+			in:       `a*\`,
+			expected: []Token{tok(TErr, "term can not end with an escape character")},
+		},
+		"trailing_backslash_after_field": {
+			in: `a:b\`,
+			expected: []Token{
+				tok(TLiteral, "a"),
+				tok(TColon, ":"),
+				tok(TErr, "term can not end with an escape character"),
+			},
+		},
+		"lone_backslash": {
+			in:       `\`,
+			expected: []Token{tok(TErr, "term can not end with an escape character")},
+		},
+		"escaped_backslash_at_end": {
+			in:       `a\\`,
+			expected: []Token{tok(TLiteral, `a\\`)},
+		},
+		"escaped_char_at_end": {
+			in:       `a\*`,
+			expected: []Token{tok(TLiteral, `a\*`)},
+		},
 		"dollar_in_literal": {
 			in: "$variable",
 			expected: []Token{

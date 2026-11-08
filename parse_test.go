@@ -1230,6 +1230,12 @@ func TestParseReportsLexerError(t *testing.T) {
 		"unterminated_regexp": {`a:/re`, "unterminated regexp"},
 		"unknown_character":   {`a:b & c`, "error parsing token [&]"},
 		"after_a_term":        {`a:b OR "c`, "unterminated quote"},
+		// A trailing backslash used to stay in the term: a*\ was the
+		// wildcard a*\ and a:\ compared a to the empty string.
+		"trailing_backslash":       {`a*\`, "term can not end with an escape character"},
+		"trailing_backslash_value": {`a:\`, "term can not end with an escape character"},
+		"lone_backslash":           {`\`, "term can not end with an escape character"},
+		"backslash_in_group":       {`a:(b OR c\`, "term can not end with an escape character"},
 	}
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {

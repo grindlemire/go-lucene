@@ -292,7 +292,11 @@ loop:
 		case isAlphaNumeric(r) || isWildcard(r) || isLiteralChar(r) || r == '.' || r == '-':
 			// do nothing
 		case isEscape(r):
-			l.next() // just ignore the next character
+			// skip the escaped character. A backslash at the end of the
+			// input has nothing to escape, which Lucene rejects too.
+			if l.next() == eof {
+				return l.errorf("term can not end with an escape character")
+			}
 		default:
 			l.backup()
 			break loop
