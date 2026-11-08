@@ -134,23 +134,50 @@ func TestRenderRejectsUnsupportedValues(t *testing.T) {
 
 	// Rejected by both Render and RenderParam: AST pieces in a value slot.
 	// encoding/json produces these when a "right" object has min/max keys.
-	both := map[string]*expr.Expression{
-		"json_equals_boundary":  mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":{"min":"x\" OR 1=1 --","max":"z","inclusive":true}}`),
-		"json_greater_boundary": mustUnmarshal(t, `{"left":"a","operator":"GREATER","right":{"min":"x","max":"z","inclusive":true}}`),
-		"json_in_boundary":      mustUnmarshal(t, `{"left":"a","operator":"IN","right":{"min":"x","max":"z","inclusive":true}}`),
-		"json_like_boundary":    mustUnmarshal(t, `{"left":"a","operator":"LIKE","right":{"min":"x","max":"z","inclusive":true}}`),
-		"equals_raw_boundary":   expr.Eq("a", &expr.RangeBoundary{Min: expr.Lit(`x" OR 1=1 --`), Max: expr.Lit("z")}),
+	const boundaryValue = "unsupported value of type *expr.RangeBoundary"
+	both := map[string]struct {
+		input   *expr.Expression
+		wantErr string
+	}{
+		"json_equals_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":{"min":"x\" OR 1=1 --","max":"z","inclusive":true}}`),
+			boundaryValue,
+		},
+		"json_greater_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"GREATER","right":{"min":"x","max":"z","inclusive":true}}`),
+			boundaryValue,
+		},
+		"json_in_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"IN","right":{"min":"x","max":"z","inclusive":true}}`),
+			boundaryValue,
+		},
+		"json_like_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"LIKE","right":{"min":"x","max":"z","inclusive":true}}`),
+			"LIKE pattern must be a single term, not *expr.RangeBoundary",
+		},
+		"equals_raw_boundary": {
+			expr.Eq("a", &expr.RangeBoundary{Min: expr.Lit(`x" OR 1=1 --`), Max: expr.Lit("z")}),
+			boundaryValue,
+		},
 	}
-	for name, e := range both {
+	for name, tc := range both {
 		for dname, d := range allDrivers {
 			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
-				if got, err := d.Render(e); err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
+				got, err := d.Render(tc.input)
+				if err == nil {
+					t.Fatalf("expected error rendering %#v, got SQL %q", tc.input, got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
 				}
 			})
 			t.Run(name+"/"+dname+"/render_param", func(t *testing.T) {
-				if got, params, err := d.RenderParam(e); err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", e, got, params)
+				got, params, err := d.RenderParam(tc.input)
+				if err == nil {
+					t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", tc.input, got, params)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
 				}
 			})
 		}
@@ -159,23 +186,30 @@ func TestRenderRejectsUnsupportedValues(t *testing.T) {
 	// Rejected by Render only. A parameter is never spliced into the SQL, and
 	// types like time.Time or driver.Valuer implementations are legitimate
 	// bind values, so RenderParam keeps passing them through.
-	renderOnly := map[string]*expr.Expression{
-		"struct_value":      expr.Eq("a", expr.Lit(stringer{"x') OR 1=1 --"})),
-		"json_number_value": expr.Eq("a", expr.Lit(json.Number("1) OR (1=1"))),
-		"time_value":        expr.Eq("a", expr.Lit(time.Unix(0, 0).UTC())),
-		"nan_value":         expr.Eq("a", expr.Lit(math.NaN())),
-		"inf_value":         expr.GREATER("a", expr.Lit(math.Inf(1))),
-		"neg_inf_in_list":   expr.IN("a", expr.LIST(expr.Lit(1), expr.Lit(math.Inf(-1)))),
-		"nan_range_bound":   expr.Rang("a", math.NaN(), 1, true),
-		"inf_range_bound":   expr.Rang("a", 1, math.Inf(1), true),
-		"struct_range":      expr.Rang("a", stringer{"x"}, stringer{"y"}, true),
-		"time_range":        expr.Rang("a", time.Unix(0, 0).UTC(), time.Unix(60, 0).UTC(), true),
+	renderOnly := map[string]struct {
+		input   *expr.Expression
+		wantErr string
+	}{
+		"struct_value":      {expr.Eq("a", expr.Lit(stringer{"x') OR 1=1 --"})), "unsupported value of type driver.stringer"},
+		"json_number_value": {expr.Eq("a", expr.Lit(json.Number("1) OR (1=1"))), "unsupported value of type json.Number"},
+		"time_value":        {expr.Eq("a", expr.Lit(time.Unix(0, 0).UTC())), "unsupported value of type time.Time"},
+		"nan_value":         {expr.Eq("a", expr.Lit(math.NaN())), "NaN has no SQL literal form"},
+		"inf_value":         {expr.GREATER("a", expr.Lit(math.Inf(1))), "+Inf has no SQL literal form"},
+		"neg_inf_in_list":   {expr.IN("a", expr.LIST(expr.Lit(1), expr.Lit(math.Inf(-1)))), "-Inf has no SQL literal form"},
+		"nan_range_bound":   {expr.Rang("a", math.NaN(), 1, true), "NaN has no SQL literal form"},
+		"inf_range_bound":   {expr.Rang("a", 1, math.Inf(1), true), "+Inf has no SQL literal form"},
+		"struct_range":      {expr.Rang("a", stringer{"x"}, stringer{"y"}, true), "unsupported range bound value of type driver.stringer"},
+		"time_range":        {expr.Rang("a", time.Unix(0, 0).UTC(), time.Unix(60, 0).UTC(), true), "unsupported range bound value of type time.Time"},
 	}
-	for name, e := range renderOnly {
+	for name, tc := range renderOnly {
 		for dname, d := range allDrivers {
 			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
-				if got, err := d.Render(e); err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
+				got, err := d.Render(tc.input)
+				if err == nil {
+					t.Fatalf("expected error rendering %#v, got SQL %q", tc.input, got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
 				}
 			})
 		}
