@@ -84,6 +84,7 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 |---|---|---|
 | `field:value` | `"field" = 'value'` | Exact match |
 | `field:"phrase with spaces"` | `"field" = 'phrase with spaces'` | Quoted phrase |
+| `field:1.5` | `"field" = 1.5` | A plain decimal number like `5`, `-1.5` or `1e3` is a number. Anything else, like `0x1p3`, `1_000` or `inf`, is a string. Quote it (`"007"`) to keep a number's text |
 | `a:1 AND b:2` | `("a" = 1) AND ("b" = 2)` | Boolean AND |
 | `a:1 OR b:2` | `("a" = 1) OR ("b" = 2)` | Boolean OR |
 | `NOT field:value` | `NOT("field" = 'value')` | Negation |

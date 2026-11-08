@@ -1483,6 +1483,108 @@ func TestParseNonFiniteNumberIsTerm(t *testing.T) {
 	}
 }
 
+// TestParseNonDecimalNumberIsTerm checks that a term is a number only when it
+// is a plain decimal number (issue #69). strconv.ParseFloat also accepts hex
+// floats and underscore digit separators, so 0x1p3 used to become 8 and 1_000
+// became 1000. They now stay terms with their text unchanged, in every spot
+// that turns a term into a number.
+func TestParseNonDecimalNumberIsTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"hex_float":          {`a:0x1p3`, expr.Eq("a", "0x1p3")},
+		"hex_float_upper":    {`a:0X1P-2`, expr.Eq("a", "0X1P-2")},
+		"negative_hex_float": {`a:-0x1p3`, expr.Eq("a", "-0x1p3")},
+		"digit_separator":    {`a:1_000`, expr.Eq("a", "1_000")},
+		"negative_separator": {`a:-1_0`, expr.Eq("a", "-1_0")},
+		"separator_in_float": {`a:1_0.5`, expr.Eq("a", "1_0.5")},
+		"separator_in_range": {`a:[1 TO 1_000]`, expr.Rang("a", 1, "1_000", true)},
+		"hex_float_in_range": {`a:{0x1p3 TO 9}`, expr.Rang("a", "0x1p3", 9, false)},
+		"comparison":         {`a:>0x1p3`, expr.GREATER("a", "0x1p3")},
+		"in_list":            {`a:(1_000 OR 0x1p3)`, expr.IN("a", expr.LIST(expr.Lit("1_000"), expr.Lit("0x1p3")))},
+		"boost_hex_float":    {`a:b^0x1p3`, expr.AND(expr.BOOST(expr.Eq("a", "b"), 1.0), "0x1p3")},
+		"boost_separator":    {`a:b^1_0`, expr.AND(expr.BOOST(expr.Eq("a", "b"), 1.0), "1_0")},
+		"boost_inf":          {`a:b^inf`, expr.AND(expr.BOOST(expr.Eq("a", "b"), 1.0), "inf")},
+		"boost_quoted":       {`a:b^"5"`, expr.AND(expr.BOOST(expr.Eq("a", "b"), 1.0), "5")},
+		"fuzzy_separator":    {`a:b~1_0`, expr.AND(expr.FUZZY(expr.Eq("a", "b"), 1), "1_0")},
+		"fuzzy_quoted":       {`a:b~"2"`, expr.AND(expr.FUZZY(expr.Eq("a", "b"), 1), "2")},
+		"fuzzy_escaped":      {`a:b~\2`, expr.AND(expr.FUZZY(expr.Eq("a", "b"), 1), "2")},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+
+	defaultFieldTcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"single_term": {`0x1p3`, expr.Eq("f", "0x1p3")},
+		"in_and":      {`x AND 1_000`, expr.AND(expr.Eq("f", "x"), expr.Eq("f", "1_000"))},
+	}
+
+	for name, tc := range defaultFieldTcs {
+		t.Run("default_field_"+name, func(t *testing.T) {
+			got, err := Parse(tc.input, WithDefaultField("f"))
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+}
+
+// TestParseDecimalNumberForms pins which terms parse as numbers. Integers that
+// fit in an int are ints, other decimal numbers are float64s, and escaping or
+// quoting a number keeps its text. Spellings that print differently from how
+// they were written, like 007 or 1e3, are pinned in TestDecimalNumberFormsRender.
+func TestParseDecimalNumberForms(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"int":                 {`a:5`, expr.Eq("a", 5)},
+		"negative_int":        {`a:-5`, expr.Eq("a", -5)},
+		"float":               {`a:1.5`, expr.Eq("a", 1.5)},
+		"max_int":             {`a:9223372036854775807`, expr.Eq("a", 9223372036854775807)},
+		"float_overflow":      {`a:1e400`, expr.Eq("a", "1e400")},
+		"hex_int":             {`a:0x10`, expr.Eq("a", "0x10")},
+		"escaped_digits":      {`a:\007`, expr.Eq("a", "007")},
+		"quoted_digits":       {`a:"007"`, expr.Eq("a", "007")},
+		"escaped_plus":        {`a:\+5`, expr.Eq("a", "+5")},
+		"non_ascii_digits":    {`a:١٢٣`, expr.Eq("a", "١٢٣")},
+		"leading_zeros_field": {`007:5`, expr.Eq("007", 5)},
+		"hex_float_field":     {`0x1p3:5`, expr.Eq("0x1p3", 5)},
+		"boost_exponent":      {`a:b^1e1`, expr.BOOST(expr.Eq("a", "b"), 10.0)},
+		"boost_fraction":      {`a:b^0.5`, expr.BOOST(expr.Eq("a", "b"), 0.5)},
+		"fuzzy_leading_zero":  {`a:b~02`, expr.FUZZY(expr.Eq("a", "b"), 2)},
+		"fuzzy_whole_float":   {`a:b~2.0`, expr.FUZZY(expr.Eq("a", "b"), 2)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+}
+
 // TestGroupingRoundTrip verifies that String() writes the parentheses that
 // grouping needs, and only those, so Parse -> String() -> Parse gives the same
 // expression and flat chains print without extra nesting (issue #64).

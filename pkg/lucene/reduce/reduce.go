@@ -1,8 +1,7 @@
 package reduce
 
 import (
-	"fmt"
-	"strconv"
+	"math"
 
 	"github.com/grindlemire/go-lucene/internal/lex"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
@@ -372,7 +371,7 @@ func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 
 	// We have 3+ elements. Check if elems[2] is a valid numeric distance
 	if distance, ok := elems[2].(*expr.Expression); ok {
-		if idistance, err := strconv.Atoi(distance.String()); err == nil {
+		if idistance, ok := wholeNumber(distance); ok {
 			return []any{expr.FUZZY(rest, idistance)}, drop(nonTerminals, 1), true
 		}
 		// elems[2] is an Expression but not a valid numeric distance
@@ -410,7 +409,7 @@ func boost(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 
 	// We have 3+ elements. Check if elems[2] is a valid numeric power
 	if power, ok := elems[2].(*expr.Expression); ok {
-		if fpower, err := toPositiveFloat(power.String()); err == nil {
+		if fpower, ok := positiveNumber(power); ok {
 			// Valid power - reduce all 3 elements
 			return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
 		}
@@ -466,18 +465,40 @@ func drop[T any](stack []T, i int) []T {
 	return stack[:len(stack)-i]
 }
 
-func toPositiveFloat(in string) (f float64, err error) {
-	i, err := strconv.Atoi(in)
-	if err == nil && i > 0 {
-		return float64(i), nil
+// positiveNumber returns the value of a number literal greater than zero. The
+// parser has already decided which terms are numbers, so a term it kept as
+// text, such as 0x1p3 or inf, is not a boost power.
+func positiveNumber(e *expr.Expression) (float64, bool) {
+	if e.Op != expr.Literal {
+		return 0, false
 	}
-
-	pf, err := strconv.ParseFloat(in, 64)
-	if err == nil && pf > 0 {
-		return float64(pf), nil
+	switch n := e.Left.(type) {
+	case int:
+		return float64(n), n > 0
+	case float64:
+		return n, n > 0
+	default:
+		return 0, false
 	}
+}
 
-	return f, fmt.Errorf("[%v] is not a positive float", in)
+// wholeNumber returns the value of a number literal with no fractional part,
+// such as 2 or 2.0. A quoted or escaped term like "2" is text, not a number.
+func wholeNumber(e *expr.Expression) (int, bool) {
+	if e.Op != expr.Literal {
+		return 0, false
+	}
+	switch n := e.Left.(type) {
+	case int:
+		return n, true
+	case float64:
+		if n != math.Trunc(n) || math.Abs(n) > math.MaxInt32 {
+			return 0, false
+		}
+		return int(n), true
+	default:
+		return 0, false
+	}
 }
 
 // wrapLiteral will wrap a literal expression in an equals expression for a defaultField.
