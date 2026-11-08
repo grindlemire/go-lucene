@@ -3,10 +3,13 @@ package expr
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 )
 
 type renderer func(e *Expression, verbose bool) string
@@ -50,6 +53,14 @@ func renderField(e *Expression, verbose bool) string {
 			return fmt.Sprintf("%#v:%#v", e.Left, e.Right)
 		}
 		return renderBasic(e, true)
+	}
+	// The drivers read a string literal on the right of a LIKE as a pattern,
+	// so it prints as a wildcard term. As a phrase it would parse back as an
+	// exact match.
+	if r, ok := e.Right.(*Expression); ok && e.Op == Like && r.Op == Literal {
+		if s, ok := r.Left.(string); ok {
+			return fmt.Sprintf("%s:%s", e.Left, wildcardTerm(s))
+		}
 	}
 	return fmt.Sprintf("%s:%s%s", e.Left, compareSymbols[e.Op], fieldValue(e.Right))
 }
@@ -250,15 +261,13 @@ func renderLiteral(e *Expression, verbose bool) string {
 
 	switch v := e.Left.(type) {
 	case string:
-		// The parser keeps a wildcard or regex as the text it read, with its
-		// escapes and slashes, so that text lexes back to the same term.
-		if e.Op == Wild || e.Op == Regexp {
-			return v
+		if e.Op == Wild {
+			return wildcardTerm(v)
 		}
-		if !isPlainTerm(v) || readsAsValue(v) {
-			return quotePhrase(v)
+		if e.Op == Regexp {
+			return regexpTerm(v)
 		}
-		return v
+		return literalTerm(v)
 	case Column:
 		// A field that looks like a number or null is still read as a
 		// column, so mostly the lexer decides whether it needs quotes. The
@@ -294,6 +303,95 @@ func formatFloat(f float64) string {
 		s += ".0"
 	}
 	return s
+}
+
+// literalTerm prints the string s as a term: bare when it lexes as one word
+// that the parser reads as s, and as a phrase otherwise.
+func literalTerm(s string) string {
+	if !isPlainTerm(s) || readsAsValue(s) {
+		return quotePhrase(s)
+	}
+	return s
+}
+
+// wildcardTerm prints a wildcard's value as a term that lexes back as one
+// word. The parser keeps a wildcard's text as written, with a backslash
+// before every character the lexer would split off or read differently, so
+// that text prints as it is. A wildcard built in code holds only its value,
+// so String() adds those backslashes. It keeps the escapes already there and
+// leaves the * and ? that are wildcards.
+//
+// A value with no wildcard left, such as fo\*, cannot be a wildcard term:
+// the parser reads it as a plain term. It prints as the text it matches.
+func wildcardTerm(s string) string {
+	chars := wildcard.Split(s)
+	if !slices.ContainsFunc(chars, wildcard.Char.IsWildcard) {
+		return literalTerm(wildcard.Unescape(s))
+	}
+	var b strings.Builder
+	for i, c := range chars {
+		if c.Escaped || (!c.IsWildcard() && !bareInWildcard(chars, i)) {
+			b.WriteByte('\\')
+		}
+		b.WriteString(c.Text)
+	}
+	return b.String()
+}
+
+// bareInWildcard reports whether the unescaped character chars[i] lexes as
+// part of a word, as lexVal and lexWord in internal/lex read it: letters,
+// digits, _ % @ # $ and the dot anywhere, a - after the first character, and
+// a - first only when a number follows, as in -5*. Anything else, such as a
+// space, a quote or a + (which the parser escapes), needs a backslash.
+func bareInWildcard(chars []wildcard.Char, i int) bool {
+	r, _ := utf8.DecodeRuneInString(chars[i].Text)
+	switch {
+	case r == '_' || r == '.' || unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("%@#$", r):
+		return true
+	case r == '-' && i > 0:
+		return true
+	case r == '-':
+		// The lexer reads a leading - as part of the word only when a digit,
+		// or a dot and a digit, follows.
+		next := chars[i+1:]
+		if len(next) > 0 && next[0].Text == "." && !next[0].Escaped {
+			next = next[1:]
+		}
+		if len(next) == 0 || next[0].Escaped {
+			return false
+		}
+		d, _ := utf8.DecodeRuneInString(next[0].Text)
+		return unicode.IsDigit(d)
+	}
+	return false
+}
+
+// regexpTerm prints a regex's value as a /.../ term. The parser keeps a regex
+// with its slashes and with every slash inside it escaped. A regex built in
+// code may have neither, so String() adds the slashes and escapes a slash
+// inside, along with a backslash at the end, which would escape the closing
+// slash.
+func regexpTerm(s string) string {
+	inner := s
+	if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
+		inner = s[1 : len(s)-1]
+	}
+	var b strings.Builder
+	b.WriteByte('/')
+	for i := 0; i < len(inner); i++ {
+		switch {
+		case inner[i] == '\\' && i+1 < len(inner):
+			b.WriteString(inner[i : i+2])
+			i++
+		case inner[i] == '\\' || inner[i] == '/':
+			b.WriteByte('\\')
+			b.WriteByte(inner[i])
+		default:
+			b.WriteByte(inner[i])
+		}
+	}
+	b.WriteByte('/')
+	return b.String()
 }
 
 // isPlainTerm reports whether s lexes as one word with no escapes: letters,

@@ -2,9 +2,12 @@ package fuzz
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/grindlemire/go-lucene"
+	"github.com/grindlemire/go-lucene/pkg/driver"
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
 // FuzzStringRoundTrip checks that String() prints a parsed query as text
@@ -55,6 +58,58 @@ func FuzzStringRoundTrip(f *testing.F) {
 		requireRoundTrip(t, in)
 		requireRoundTrip(t, in, lucene.WithDefaultField("default"))
 	})
+}
+
+// FuzzBuiltWildcardString checks String() on a wildcard built in code, which
+// holds only its value. The text must parse back to a wildcard that renders
+// the same SQL pattern.
+func FuzzBuiltWildcardString(f *testing.F) {
+	for _, tc := range []string{"foo bar*", `fo\*bar*`, "a:b?", "-5*", "-x*", `a*\`, "1e+5*", "é€*", `it's "x"*`, "/x*/"} {
+		f.Add(tc)
+	}
+	d := driver.NewPostgresDriver()
+	f.Fuzz(func(t *testing.T, pattern string) {
+		// A pattern with no * or ? prints as a plain term, and SIMILAR TO
+		// operators have no Lucene syntax, so String() cannot keep them.
+		if !hasWildcard(pattern) || strings.ContainsAny(pattern, "|()[]{}+") {
+			return
+		}
+		// A LIKE reads a literal on its right as a pattern too.
+		for _, built := range []*expr.Expression{
+			expr.LIKE("a", expr.WILD(pattern)),
+			expr.LIKE("a", expr.Lit(pattern)),
+		} {
+			rendered := built.String()
+			parsed, err := lucene.Parse(rendered)
+			if err != nil {
+				t.Fatalf("String() of %#v is %q, which does not parse: %v", built, rendered, err)
+			}
+			_, want, err := d.RenderParam(built)
+			if err != nil {
+				return
+			}
+			_, got, err := d.RenderParam(parsed)
+			if err != nil {
+				t.Fatalf("String() of %#v is %q, which does not render: %v", built, rendered, err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("String() of %#v is %q, which renders %#v instead of %#v", built, rendered, got, want)
+			}
+		}
+	})
+}
+
+// hasWildcard reports whether pattern has a * or ? that no backslash escapes.
+func hasWildcard(pattern string) bool {
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case '*', '?':
+			return true
+		}
+	}
+	return false
 }
 
 func requireRoundTrip(t *testing.T, in string, opts ...lucene.Opt) {

@@ -419,7 +419,9 @@ func TestRenderLiteralQuoteEscaping(t *testing.T) {
 	if got, want := Lit(`foo bar\`).String(), `"foo bar\\"`; got != want {
 		t.Fatalf("Lit(%q).String() = %q, want %q", `foo bar\`, got, want)
 	}
-	if got, want := WILD(`fo"o*`).String(), `fo"o*`; got != want {
+	// A wildcard is not quoted, since a phrase cannot hold a wildcard. The
+	// quote is escaped instead, so the lexer keeps it in the word.
+	if got, want := WILD(`fo"o*`).String(), `fo\"o*`; got != want {
 		t.Fatalf("WILD(%q).String() = %q, want %q", `fo"o*`, got, want)
 	}
 	if got, want := REGEXP(`/fo"o/`).String(), `/fo"o/`; got != want {
@@ -689,6 +691,45 @@ func TestLiteralJSONForm(t *testing.T) {
 			var got Expression
 			if err := json.Unmarshal([]byte(raw), &got); err == nil {
 				t.Fatalf("expected an error decoding %s, got %#v", raw, &got)
+			}
+		})
+	}
+}
+
+// TestBuiltTermJSONForm checks the JSON form of wildcards and regexes built
+// in code. One that a plain JSON string would decode as another kind of term
+// is written as {"wildcard": ...} or {"regexp": ...}.
+func TestBuiltTermJSONForm(t *testing.T) {
+	tcs := map[string]struct {
+		input *Expression
+		json  string
+	}{
+		"wildcard":             {WILD("foo bar*"), `"foo bar*"`},
+		"wildcard_escaped":     {WILD(`fo\*bar*`), `"fo\\*bar*"`},
+		"wildcard_no_star":     {WILD("foo"), `{"wildcard":"foo"}`},
+		"wildcard_slashes":     {WILD("/x*/"), `{"wildcard":"/x*/"}`},
+		"regexp":               {REGEXP("/fo+/"), `"/fo+/"`},
+		"regexp_no_slashes":    {REGEXP("fo+"), `{"regexp":"fo+"}`},
+		"regexp_star":          {REGEXP("fo*"), `{"regexp":"fo*"}`},
+		"like_wildcard":        {LIKE("a", WILD("foo")), `{"left":"a","operator":"LIKE","right":{"wildcard":"foo"}}`},
+		"like_regexp":          {LIKE("a", REGEXP("fo+")), `{"left":"a","operator":"LIKE","right":{"regexp":"fo+"}}`},
+		"range_wildcard_bound": {Rang("a", WILD("f"), Lit("z"), true), `{"left":"a","operator":"RANGE","right":{"min":{"wildcard":"f"},"max":"z","inclusive":true}}`},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.input)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(raw) != tc.json {
+				t.Fatalf(jsonErrTemplate, "json does not match", tc.json, raw)
+			}
+			var got Expression
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("unmarshal %s: %v", raw, err)
+			}
+			if !reflect.DeepEqual(tc.input, &got) {
+				t.Fatalf(errTemplate, "round trip changed the expression", tc.input, &got)
 			}
 		})
 	}
