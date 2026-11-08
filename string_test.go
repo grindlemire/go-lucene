@@ -403,6 +403,22 @@ func TestStringBuiltPatternOperators(t *testing.T) {
 	})
 }
 
+// TestStringBuiltRegexp checks String() on regexes built in code. A regex
+// without its slashes gets them, and a slash inside one is escaped, so the
+// text parses back to a regex.
+func TestStringBuiltRegexp(t *testing.T) {
+	runBuilt(t, map[string]builtCase{
+		"no_slashes":        {expr.LIKE("a", expr.REGEXP("fo+")), `a:/fo+/`, expr.LIKE("a", expr.REGEXP("/fo+/"))},
+		"inner_slash":       {expr.LIKE("a", expr.REGEXP("/x/y/")), `a:/x\/y/`, expr.LIKE("a", expr.REGEXP(`/x\/y/`))},
+		"escaped_slash":     {expr.LIKE("a", expr.REGEXP(`/x\/y/`)), `a:/x\/y/`, expr.LIKE("a", expr.REGEXP(`/x\/y/`))},
+		"trailing_escape":   {expr.LIKE("a", expr.REGEXP(`/x\/`)), `a:/x\\/`, expr.LIKE("a", expr.REGEXP(`/x\\/`))},
+		"only_slash":        {expr.LIKE("a", expr.REGEXP("/")), `a:/\//`, expr.LIKE("a", expr.REGEXP(`/\//`))},
+		"space":             {expr.LIKE("a", expr.REGEXP("/x y/")), `a:/x y/`, expr.LIKE("a", expr.REGEXP("/x y/"))},
+		"no_field":          {expr.REGEXP("x/y"), `/x\/y/`, expr.REGEXP(`/x\/y/`)},
+		"escaped_backslash": {expr.LIKE("a", expr.REGEXP(`/x\\/`)), `a:/x\\/`, expr.LIKE("a", expr.REGEXP(`/x\\/`))},
+	})
+}
+
 type builtCase struct {
 	input *expr.Expression
 	want  string
