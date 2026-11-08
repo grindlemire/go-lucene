@@ -111,6 +111,12 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `(a:1 OR b:2) AND c:3` | `(("a" = 1) OR ("b" = 2)) AND ("c" = 3)` | Grouping |
 | `field:(a AND -b)` | `("field" = 'a') AND (NOT("field" = 'b'))` | A field group applies its field to every term inside. A term with its own field keeps it |
 
+### Wildcards built in code
+
+`expr.LIKE` and `expr.WILD` take a pattern in Lucene wildcard syntax, as in a query: `*` and `?` are wildcards, and a backslash makes the next character literal. ``expr.LIKE("name", `fo\*bar*`)`` matches text that starts with `fo*bar`.
+
+`String()` prints the pattern as a query term, with a backslash before each character the parser would split the term on or read differently. `expr.LIKE("name", "foo bar*").String()` is `name:foo\ bar*`. On Postgres and MySQL a pattern built in code can also use the SIMILAR TO operators `|`, `()`, `[]`, `{}` and `+`. Lucene has no syntax for them, so `String()` escapes them too, and the printed query matches them as literal characters.
+
 ## Null handling
 
 `field:null` renders as `IS NULL` across every dialect. The keyword is case-insensitive, and the renderer also covers the cases where null appears inside a grouped expression, behind a `NOT`, or alongside other values in an OR-chain.
