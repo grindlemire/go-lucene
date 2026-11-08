@@ -83,9 +83,10 @@ func Lit(in any) *Expression {
 
 // NumberLit returns a literal for the number v, written as text in the query,
 // such as 1.0 or 02134. A driver that compares the number as text uses text,
-// and String prints it. text is kept only when it differs from how v prints,
-// so NumberLit(5, "5") equals Lit(5). It is also dropped when it is not a
-// plain decimal number equal to v, so it can never print as another query.
+// the SQL drivers write text in place of a float that rounds it, and String
+// prints it. text is kept only when it differs from how v prints, so
+// NumberLit(5, "5") equals Lit(5). It is also dropped when it is not a plain
+// decimal number equal to v, so it can never print as another query.
 func NumberLit(v any, text string) *Expression {
 	e := Lit(v)
 	if text != numberString(v) && spellsNumber(text, v) {
