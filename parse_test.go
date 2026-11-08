@@ -1851,6 +1851,11 @@ func TestParseEscapedWildcardChars(t *testing.T) {
 		`fo\*:x`:          expr.Eq("fo*", "x"),
 		`a:[fo\* TO z]`:   expr.Rang("a", expr.Lit("fo*"), "z", true),
 		`a:fo\* AND b:c*`: expr.AND(expr.Eq("a", expr.Lit("fo*")), expr.LIKE("b", expr.WILD("c*"))),
+		// An escaped backslash is one literal backslash. Both used to be
+		// dropped, so foo\\bar read as foobar.
+		`a:foo\\bar`: expr.Eq("a", expr.Lit(`foo\bar`)),
+		`a:\\`:       expr.Eq("a", expr.Lit(`\`)),
+		`a:\\\*`:     expr.Eq("a", expr.Lit(`\*`)),
 	}
 	for in, want := range tcs {
 		t.Run(in, func(t *testing.T) {

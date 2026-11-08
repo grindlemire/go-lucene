@@ -568,6 +568,7 @@ func TestMySQLIntegrationEscapedWildcards(t *testing.T) {
 		{name: "escaped_bracket", lucene: `name:a\[*`, wantIDs: []int{16}},
 		{name: "escaped_close_bracket", lucene: `name:a\]*`, wantIDs: []int{19}},
 		{name: "escaped_backslash", lucene: `name:a\\*`, wantIDs: []int{17}},
+		{name: "escaped_backslash_term", lucene: `name:a\\b`, wantIDs: []int{17}},
 		{name: "hash", lucene: `name:a#*`, wantIDs: []int{18}},
 		{name: "dot", lucene: `name:a.*`, wantIDs: []int{20}},
 		{name: "escaped_space", lucene: `name:a\ *`, wantIDs: []int{21}},

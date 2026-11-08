@@ -314,5 +314,6 @@ func TestStringEscapedWildcardChars(t *testing.T) {
 		"in_group":           {`a:(fo\* OR b?)`, `a:"fo*" OR a:b?`},
 		"range_bound":        {`a:[fo\* TO z]`, `a:["fo*" TO z]`},
 		"escaped_field":      {`fo\*:x`, `"fo*":x`},
+		"backslash_term":     {`a:foo\\bar`, `a:"foo\\bar"`},
 	})
 }

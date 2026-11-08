@@ -326,6 +326,7 @@ var escapedWildcardCases = []struct {
 	{"escaped_bracket", `name:a\[*`, []int{16}},
 	{"escaped_close_bracket", `name:a\]*`, []int{19}},
 	{"escaped_backslash", `name:a\\*`, []int{17}},
+	{"escaped_backslash_term", `name:a\\b`, []int{17}},
 	{"hash", `name:a#*`, []int{18}},
 	{"dot", `name:a.*`, []int{20}},
 	{"escaped_space", `name:a\ *`, []int{21}},
