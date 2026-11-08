@@ -419,7 +419,9 @@ func TestRenderLiteralQuoteEscaping(t *testing.T) {
 	if got, want := Lit(`foo bar\`).String(), `"foo bar\\"`; got != want {
 		t.Fatalf("Lit(%q).String() = %q, want %q", `foo bar\`, got, want)
 	}
-	if got, want := WILD(`fo"o*`).String(), `fo"o*`; got != want {
+	// A wildcard is not quoted, since a phrase cannot hold a wildcard. The
+	// quote is escaped instead, so the lexer keeps it in the word.
+	if got, want := WILD(`fo"o*`).String(), `fo\"o*`; got != want {
 		t.Fatalf("WILD(%q).String() = %q, want %q", `fo"o*`, got, want)
 	}
 	if got, want := REGEXP(`/fo"o/`).String(), `/fo"o/`; got != want {
