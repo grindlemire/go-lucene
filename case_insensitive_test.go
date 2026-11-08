@@ -151,6 +151,16 @@ func TestCaseInsensitiveFields(t *testing.T) {
 				"sqlite":   {`(LOWER("name") = LOWER('Foo') OR "name" IS NULL)`, `(LOWER("name") = LOWER(?) OR "name" IS NULL)`, []any{"Foo"}},
 			},
 		},
+		// A field group applies the field to each term, so each one folds.
+		"field_group_and": {
+			input: "name:(Foo AND Bar*)",
+			opts:  listed,
+			want: map[string]ciWant{
+				"postgres": {`(LOWER("name") = LOWER('Foo')) AND (LOWER("name") SIMILAR TO LOWER('Bar%'))`, `(LOWER("name") = LOWER($1)) AND (LOWER("name") SIMILAR TO LOWER($2))`, []any{"Foo", "Bar%"}},
+				"mysql":    {"(LOWER(`name`) = LOWER('Foo')) AND (LOWER(`name`) LIKE LOWER('Bar%') ESCAPE '#')", "(LOWER(`name`) = LOWER(?)) AND (LOWER(`name`) LIKE LOWER(?) ESCAPE '#')", []any{"Foo", "Bar%"}},
+				"sqlite":   {`(LOWER("name") = LOWER('Foo')) AND (LOWER("name") GLOB LOWER('Bar*'))`, `(LOWER("name") = LOWER(?)) AND (LOWER("name") GLOB LOWER(?))`, []any{"Foo", "Bar*"}},
+			},
+		},
 		// A mixed list splits: strings compare folded, numbers compare as
 		// before, so LOWER() never sees a number.
 		"mixed_in_list": {
@@ -334,6 +344,15 @@ func TestCaseInsensitiveFields(t *testing.T) {
 				"postgres": {`LOWER("name") = LOWER('Foo')`, `LOWER("name") = LOWER($1)`, []any{"Foo"}},
 				"mysql":    {"LOWER(`name`) = LOWER('Foo')", "LOWER(`name`) = LOWER(?)", []any{"Foo"}},
 				"sqlite":   {`LOWER("name") = LOWER('Foo')`, `LOWER("name") = LOWER(?)`, []any{"Foo"}},
+			},
+		},
+		"listed_default_field_wildcard": {
+			input: "x OR Foo*",
+			opts:  []Opt{WithDefaultField("name"), WithCaseInsensitiveFields("name")},
+			want: map[string]ciWant{
+				"postgres": {`(LOWER("name") = LOWER('x')) OR (LOWER("name") SIMILAR TO LOWER('Foo%'))`, `(LOWER("name") = LOWER($1)) OR (LOWER("name") SIMILAR TO LOWER($2))`, []any{"x", "Foo%"}},
+				"mysql":    {"(LOWER(`name`) = LOWER('x')) OR (LOWER(`name`) LIKE LOWER('Foo%') ESCAPE '#')", "(LOWER(`name`) = LOWER(?)) OR (LOWER(`name`) LIKE LOWER(?) ESCAPE '#')", []any{"x", "Foo%"}},
+				"sqlite":   {`(LOWER("name") = LOWER('x')) OR (LOWER("name") GLOB LOWER('Foo*'))`, `(LOWER("name") = LOWER(?)) OR (LOWER("name") GLOB LOWER(?))`, []any{"x", "Foo*"}},
 			},
 		},
 		"unlisted_default_field_unchanged": {

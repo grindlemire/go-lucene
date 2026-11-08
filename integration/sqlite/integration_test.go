@@ -176,6 +176,9 @@ func TestSQLiteIntegrationRendered(t *testing.T) {
 		{"minus_field_null_returns_non_null_rows", `-status:null`, []int{1, 2, 3, 4}},
 		{"or_with_null_returns_both", `status:(active OR null)`, []int{1, 2, 4, 5}},
 		{"in_list_with_null", `status:(active OR inactive OR null)`, []int{1, 2, 3, 4, 5}},
+		// A field group applies its field to every term inside it.
+		{"field_group_must_not", `name:(*an* -banana)`, []int{4, 5}},
+		{"field_group_ranges", `price:([1 TO 2] OR [5 TO *])`, []int{1, 4, 5}},
 	}
 
 	for _, tc := range cases {
@@ -210,6 +213,8 @@ func TestSQLiteIntegrationParameterized(t *testing.T) {
 		{"field_null", `status:null`, []int{5}},
 		{"not_field_null", `NOT status:null`, []int{1, 2, 3, 4}},
 		{"or_with_null", `status:(active OR null)`, []int{1, 2, 4, 5}},
+		{"field_group_must_not", `name:(*an* -banana)`, []int{4, 5}},
+		{"field_group_ranges", `price:([1 TO 2] OR [5 TO *])`, []int{1, 4, 5}},
 	}
 
 	for _, tc := range cases {

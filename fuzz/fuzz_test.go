@@ -36,6 +36,8 @@ func FuzzPostgresDriver(f *testing.F) {
 		`a:{"x y" TO *}`,
 		`a:inf OR b:[NaN TO 1]`,
 		`0:1 AND 1.5:>2 AND 007:[1 TO *]`,
+		// issue #77: a number used as a field with = or in parentheses
+		`1=1 OR (0):* OR ((007)):x OR -1=2`,
 		// null is rejected at render time in these positions
 		`a:[null TO 1]`,
 		`a:>null`,

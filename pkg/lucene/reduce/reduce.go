@@ -67,12 +67,7 @@ func equal(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 			),
 		}
 	} else {
-		elems = []any{
-			expr.Eq(
-				term,
-				value,
-			),
-		}
+		elems = []any{applyField(term, value)}
 	}
 	// we consumed one terminal, the =
 	return elems, drop(nonTerminals, 1), true
@@ -229,8 +224,8 @@ func and(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []l
 	// we have a valid AND clause. Replace it in the stack
 	elems = []any{
 		expr.AND(
-			wrapLiteral(left, defaultField),
-			wrapLiteral(right, defaultField),
+			WrapDefaultField(left, defaultField),
+			WrapDefaultField(right, defaultField),
 		),
 	}
 	// we consumed one terminal, the AND
@@ -262,8 +257,8 @@ func or(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []le
 	// we have a valid OR clause. Replace it in the stack
 	elems = []any{
 		expr.OR(
-			wrapLiteral(left, defaultField),
-			wrapLiteral(right, defaultField),
+			WrapDefaultField(left, defaultField),
+			WrapDefaultField(right, defaultField),
 		),
 	}
 	// we consumed one terminal, the OR
@@ -290,7 +285,7 @@ func not(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []l
 	elems = elems[:len(elems)-2]
 	elems = append(elems,
 		expr.NOT(
-			wrapLiteral(negated, defaultField),
+			WrapDefaultField(negated, defaultField),
 		),
 	)
 	// we consumed one terminal, the NOT
@@ -333,7 +328,7 @@ func must(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []
 	}
 
 	// we consumed 1 terminal, the +
-	return []any{expr.MUST(wrapLiteral(rest, defaultField))}, drop(nonTerminals, 1), true
+	return []any{expr.MUST(WrapDefaultField(rest, defaultField))}, drop(nonTerminals, 1), true
 }
 
 func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
@@ -351,7 +346,7 @@ func mustNot(elems []any, nonTerminals []lex.Token, defaultField string) ([]any,
 		return elems, nonTerminals, false
 	}
 	// we consumed one terminal, the -
-	return []any{expr.MUSTNOT(wrapLiteral(rest, defaultField))}, drop(nonTerminals, 1), true
+	return []any{expr.MUSTNOT(WrapDefaultField(rest, defaultField))}, drop(nonTerminals, 1), true
 }
 
 func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
@@ -426,51 +421,44 @@ func boost(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 	return result, drop(nonTerminals, 1), true
 }
 
+// rangeop reduces [begin TO end] to a range with no field yet. The equal
+// reducer gives it one, so a:[1 TO 5] and a:(x OR [1 TO 5]) both get field
+// a. A range that never gets a field fails validation.
 func rangeop(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, []lex.Token, bool) {
-	// we need a term, :, [, begin, TO, end, ] to have a range operator which is 7 elems
-	if len(elems) != 7 {
+	// we need a [, begin, TO, end, ] to have a range operator which is 5 elems
+	if len(elems) != 5 {
 		return elems, nonTerminals, false
 	}
 
-	colon, ok := elems[1].(lex.Token)
-	if !ok || colon.Typ != lex.TColon {
-		return elems, nonTerminals, false
-	}
-
-	open, ok := elems[2].(lex.Token)
+	open, ok := elems[0].(lex.Token)
 	if !ok || (open.Typ != lex.TLSquare && open.Typ != lex.TLCurly) {
 		return elems, nonTerminals, false
 	}
 
-	closed, ok := elems[6].(lex.Token)
+	closed, ok := elems[4].(lex.Token)
 	if !ok || (closed.Typ != lex.TRSquare && closed.Typ != lex.TRCurly) {
 		return elems, nonTerminals, false
 	}
 
-	to, ok := elems[4].(lex.Token)
+	to, ok := elems[2].(lex.Token)
 	if !ok || to.Typ != lex.TTO {
 		return elems, nonTerminals, false
 	}
 
-	term, ok := elems[0].(*expr.Expression)
+	start, ok := elems[1].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
-	start, ok := elems[3].(*expr.Expression)
+	end, ok := elems[3].(*expr.Expression)
 	if !ok {
 		return elems, nonTerminals, false
 	}
 
-	end, ok := elems[5].(*expr.Expression)
-	if !ok {
-		return elems, nonTerminals, false
-	}
-
-	// we consumed four terminals, the :, [, TO, and ]
+	// we consumed three terminals, the [, TO, and ]
 	return []any{expr.Rang(
-		term, start, end, (open.Typ == lex.TLSquare && closed.Typ == lex.TRSquare),
-	)}, drop(nonTerminals, 4), true
+		nil, start, end, (open.Typ == lex.TLSquare && closed.Typ == lex.TRSquare),
+	)}, drop(nonTerminals, 3), true
 }
 
 func drop[T any](stack []T, i int) []T {
@@ -513,12 +501,62 @@ func wholeNumber(e *expr.Expression) (int, bool) {
 	}
 }
 
-// wrapLiteral will wrap a literal expression in an equals expression for a defaultField.
-// we need this because we want to support lucene expressions like a:b AND "c" which needs a default
-// field to compare "c" against to be valid.
-func wrapLiteral(lit *expr.Expression, field string) *expr.Expression {
-	if lit.Op == expr.Literal && field != "" {
-		return expr.Eq(expr.Column(field), lit)
+// WrapDefaultField gives a term with no field the default field, so that
+// a:b AND "c" compares "c" against the default field. A term is a word,
+// phrase, number, wildcard, regex, null or range, and the term under a boost
+// or fuzzy, whose reducers don't wrap it. AND, OR, NOT, + and - wrap their
+// own operands when they are reduced, so they come back as they are, and so
+// does a term that has a field. An empty field or a nil e changes nothing.
+//
+// It is exported for the parser in the lucene package, which calls it on the
+// whole query once parsing is done. It is not meant to apply a default field
+// to an expression built some other way: an OR of terms, for example, comes
+// back unchanged.
+func WrapDefaultField(e *expr.Expression, field string) *expr.Expression {
+	if field == "" || e == nil {
+		return e
 	}
-	return lit
+	switch e.Op {
+	case expr.Literal, expr.Wild, expr.Regexp, expr.Null, expr.Range, expr.Boost, expr.Fuzzy:
+		return applyField(expr.Lit(expr.Column(field)), e)
+	default:
+		return e
+	}
+}
+
+// applyField applies field to every term in e that has no field of its own,
+// the way Lucene reads a field group: a:(x AND -y) is a:x AND -a:y. A term
+// that has its own field keeps it, so a:(b:c OR d) is b:c OR a:d.
+func applyField(field, e *expr.Expression) *expr.Expression {
+	switch e.Op {
+	case expr.Literal, expr.Wild, expr.Regexp, expr.Null:
+		f := *field
+		return expr.Eq(&f, e)
+	case expr.Range:
+		boundary, ok := e.Right.(*expr.RangeBoundary)
+		if e.Left != nil || !ok {
+			return e
+		}
+		f := *field
+		return expr.Rang(&f, boundary.Min, boundary.Max, boundary.Inclusive)
+	case expr.And, expr.Or:
+		left, lok := e.Left.(*expr.Expression)
+		right, rok := e.Right.(*expr.Expression)
+		if !lok || !rok {
+			return e
+		}
+		return expr.Expr(applyField(field, left), e.Op, applyField(field, right))
+	case expr.Not, expr.Must, expr.MustNot, expr.Boost, expr.Fuzzy:
+		inner, ok := e.Left.(*expr.Expression)
+		if !ok {
+			return e
+		}
+		// copy e so a boost power or fuzzy distance carries over
+		wrapped := *e
+		wrapped.Left = applyField(field, inner)
+		return &wrapped
+	default:
+		// EQUALS, LIKE, IN and comparisons already have a field.
+		return e
+	}
 }

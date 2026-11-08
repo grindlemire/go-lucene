@@ -426,6 +426,9 @@ var renderedCases = []integrationCase{
 	// Reserved-word column name: exercises always-backtick policy.
 	// `rank` is a reserved word in MySQL 8.0.
 	{name: "reserved_word_column", lucene: `rank:>=50`, wantIDs: []int{5, 6, 7}},
+	// A field group applies its field to every term inside it.
+	{name: "field_group_must_not", lucene: `name:(*an* -banana)`, wantIDs: []int{4, 5}},
+	{name: "field_group_ranges", lucene: `price:([1 TO 2] OR [5 TO *])`, wantIDs: []int{1, 4, 5}},
 }
 
 var parameterizedCases = []integrationCase{
@@ -436,6 +439,9 @@ var parameterizedCases = []integrationCase{
 	{name: "standalone_star", lucene: `status:*`, wantIDs: []int{1, 2, 3, 4, 6, 7}},
 	{name: "regexp_literal", lucene: `name:/^[ab].*/`, wantIDs: []int{1, 2}},
 	{name: "reserved_word_column", lucene: `rank:>=50`, wantIDs: []int{5, 6, 7}},
+	// A field group applies its field to every term inside it.
+	{name: "field_group_must_not", lucene: `name:(*an* -banana)`, wantIDs: []int{4, 5}},
+	{name: "field_group_ranges", lucene: `price:([1 TO 2] OR [5 TO *])`, wantIDs: []int{1, 4, 5}},
 }
 
 func TestMySQLIntegrationRendered(t *testing.T) {

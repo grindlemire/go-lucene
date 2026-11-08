@@ -2,6 +2,7 @@ package expr
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -423,6 +424,23 @@ func TestRenderLiteralQuoteEscaping(t *testing.T) {
 	}
 	if got, want := REGEXP(`/fo"o/`).String(), `/fo"o/`; got != want {
 		t.Fatalf("REGEXP(%q).String() = %q, want %q", `/fo"o/`, got, want)
+	}
+}
+
+// TestRenderRangeWithoutField checks that a range the parser has not given a
+// field yet prints as a bare range. It shows up in parse error messages.
+func TestRenderRangeWithoutField(t *testing.T) {
+	if got, want := Rang(nil, 1, 5, true).String(), `[1 TO 5]`; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if got, want := Rang(nil, 1, 5, false).String(), `{1 TO 5}`; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if got, want := Rang("a", 1, 5, true).String(), `a:[1 TO 5]`; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if got, want := fmt.Sprintf("%#v", Rang(nil, 1, 5, true)), `[LITERAL(1) TO LITERAL(5)]`; got != want {
+		t.Fatalf("GoString() = %q, want %q", got, want)
 	}
 }
 

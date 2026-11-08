@@ -77,14 +77,6 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 	}{
 		// An escaped \* is meant to match a literal *, but becomes \%.
 		"escaped_star_in_wildcard": {input: `a:\*x*`, render: "postgres", want: `"a" SIMILAR TO '\%x%'`},
-		// A field group compares the column to a boolean expression.
-		"field_group_and": {input: `a:("x' OR 1=1 --" AND c)`, render: "postgres", want: `"a" = ('x'' OR 1=1 --' AND 'c')`},
-		"field_group_gt":  {input: `a:>("x' OR 1=1 --" OR c)`, render: "postgres", want: `"a" > ('x'' OR 1=1 --' OR 'c')`},
-		// The default field only reaches a bare wildcard, regex or null when
-		// it is the whole query, so here the wildcard stands alone...
-		"default_field_skips_wildcard": {input: `x OR foo*`, defaultField: "default", render: "postgres", want: `("default" = 'x') OR 'foo*'`},
-		// ...and the null fails to render.
-		"default_field_skips_null": {input: `x OR null`, defaultField: "default", render: "postgres", wantErr: true},
 	}
 
 	for name, tc := range tcs {
@@ -107,6 +99,93 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 				t.Fatalf("\nwant %s\ngot  %s", tc.want, got)
 			}
 		})
+	}
+}
+
+// TestDefaultFieldReachesEveryTerm is the end-to-end check for the default
+// field part of issue #77. With a default field, x OR null used to fail with
+// "null cannot be rendered as a standalone value", x OR foo* rendered
+// ("default" = 'x') OR 'foo*', and "fo*" parsed as a wildcard.
+func TestDefaultFieldReachesEveryTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  map[string]string
+	}{
+		"or_null": {
+			input: `x OR null`,
+			want: map[string]string{
+				"postgres":       `("default" = 'x') OR ("default" IS NULL)`,
+				"mysql":          "(`default` = 'x') OR (`default` IS NULL)",
+				"mariadb":        "(`default` = 'x') OR (`default` IS NULL)",
+				"sqlite":         `("default" = 'x') OR ("default" IS NULL)`,
+				"param_postgres": `("default" = $1) OR ("default" IS NULL)`,
+				"param_mysql":    "(`default` = ?) OR (`default` IS NULL)",
+				"param_mariadb":  "(`default` = ?) OR (`default` IS NULL)",
+				"param_sqlite":   `("default" = ?) OR ("default" IS NULL)`,
+			},
+		},
+		"not_null": {
+			input: `x -null`,
+			want: map[string]string{
+				"postgres":       `("default" = 'x') AND ("default" IS NOT NULL)`,
+				"mysql":          "(`default` = 'x') AND (`default` IS NOT NULL)",
+				"sqlite":         `("default" = 'x') AND ("default" IS NOT NULL)`,
+				"param_postgres": `("default" = $1) AND ("default" IS NOT NULL)`,
+			},
+		},
+		"or_wildcard": {
+			input: `x OR foo*`,
+			want: map[string]string{
+				"postgres": `("default" = 'x') OR ("default" SIMILAR TO 'foo%')`,
+				"mysql":    "(`default` = 'x') OR (`default` LIKE 'foo%' ESCAPE '#')",
+				"mariadb":  "(`default` = 'x') OR (`default` LIKE 'foo%' ESCAPE '#')",
+				"sqlite":   `("default" = 'x') OR ("default" GLOB 'foo*')`,
+			},
+		},
+		"wildcard": {
+			input: `foo*`,
+			want: map[string]string{
+				"postgres": `"default" SIMILAR TO 'foo%'`,
+				"mysql":    "`default` LIKE 'foo%' ESCAPE '#'",
+				"sqlite":   `"default" GLOB 'foo*'`,
+			},
+		},
+		"range": {
+			input: `x OR [1 TO 5]`,
+			want: map[string]string{
+				"postgres":       `("default" = 'x') OR ("default" >= 1 AND "default" <= 5)`,
+				"mysql":          "(`default` = 'x') OR (`default` >= 1 AND `default` <= 5)",
+				"sqlite":         `("default" = 'x') OR ("default" >= 1 AND "default" <= 5)`,
+				"param_postgres": `("default" = $1) OR ("default" >= $2 AND "default" <= $3)`,
+				"param_mysql":    "(`default` = ?) OR (`default` >= ? AND `default` <= ?)",
+				"param_sqlite":   `("default" = ?) OR ("default" >= ? AND "default" <= ?)`,
+			},
+		},
+		"quoted_star": {
+			input: `"fo*"`,
+			want: map[string]string{
+				"postgres":       `"default" = 'fo*'`,
+				"mysql":          "`default` = 'fo*'",
+				"sqlite":         `"default" = 'fo*'`,
+				"param_postgres": `"default" = $1`,
+				"param_mysql":    "`default` = ?",
+				"param_sqlite":   `"default" = ?`,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input, WithDefaultField("default"))
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
 	}
 }
 
@@ -204,6 +283,120 @@ func TestDefaultFieldInsideFieldGroup(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestFieldGroupAppliesFieldToEachTerm is the end-to-end check for the field
+// group part of issue #77. Only a plain OR of terms used to get the group's
+// field, so a:(x AND y) rendered as "a" = ('x' AND 'y'), and
+// a:(x OR [1 TO 5]) failed to parse.
+func TestFieldGroupAppliesFieldToEachTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  map[string]string
+	}{
+		"and": {
+			input: `a:(x AND y)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') AND ("a" = 'y')`,
+				"mysql":          "(`a` = 'x') AND (`a` = 'y')",
+				"mariadb":        "(`a` = 'x') AND (`a` = 'y')",
+				"sqlite":         `("a" = 'x') AND ("a" = 'y')`,
+				"param_postgres": `("a" = $1) AND ("a" = $2)`,
+				"param_mysql":    "(`a` = ?) AND (`a` = ?)",
+				"param_mariadb":  "(`a` = ?) AND (`a` = ?)",
+				"param_sqlite":   `("a" = ?) AND ("a" = ?)`,
+			},
+		},
+		"must_not": {
+			input: `a:(x -y)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') AND (NOT("a" = 'y'))`,
+				"mysql":          "(`a` = 'x') AND (NOT(`a` = 'y'))",
+				"sqlite":         `("a" = 'x') AND (NOT("a" = 'y'))`,
+				"param_postgres": `("a" = $1) AND (NOT("a" = $2))`,
+				"param_mysql":    "(`a` = ?) AND (NOT(`a` = ?))",
+				"param_sqlite":   `("a" = ?) AND (NOT("a" = ?))`,
+			},
+		},
+		"wildcard": {
+			input: `a:(x OR foo*)`,
+			want: map[string]string{
+				"postgres": `("a" = 'x') OR ("a" SIMILAR TO 'foo%')`,
+				"mysql":    "(`a` = 'x') OR (`a` LIKE 'foo%' ESCAPE '#')",
+				"sqlite":   `("a" = 'x') OR ("a" GLOB 'foo*')`,
+			},
+		},
+		"range": {
+			input: `a:(x OR [1 TO 5])`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') OR ("a" >= 1 AND "a" <= 5)`,
+				"mysql":          "(`a` = 'x') OR (`a` >= 1 AND `a` <= 5)",
+				"mariadb":        "(`a` = 'x') OR (`a` >= 1 AND `a` <= 5)",
+				"sqlite":         `("a" = 'x') OR ("a" >= 1 AND "a" <= 5)`,
+				"param_postgres": `("a" = $1) OR ("a" >= $2 AND "a" <= $3)`,
+				"param_mysql":    "(`a` = ?) OR (`a` >= ? AND `a` <= ?)",
+				"param_sqlite":   `("a" = ?) OR ("a" >= ? AND "a" <= ?)`,
+			},
+		},
+		"null": {
+			input: `a:(x AND null)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') AND ("a" IS NULL)`,
+				"mysql":          "(`a` = 'x') AND (`a` IS NULL)",
+				"sqlite":         `("a" = 'x') AND ("a" IS NULL)`,
+				"param_postgres": `("a" = $1) AND ("a" IS NULL)`,
+			},
+		},
+		"quote_in_term": {
+			input: `a:("x' OR 1=1 --" AND c)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x'' OR 1=1 --') AND ("a" = 'c')`,
+				"mysql":          "(`a` = 'x'' OR 1=1 --') AND (`a` = 'c')",
+				"sqlite":         `("a" = 'x'' OR 1=1 --') AND ("a" = 'c')`,
+				"param_postgres": `("a" = $1) AND ("a" = $2)`,
+			},
+		},
+		// Unchanged: a plain OR of terms is still an IN list.
+		"or_of_terms": {
+			input: `a:(x OR y)`,
+			want: map[string]string{
+				"postgres":       `"a" IN ('x', 'y')`,
+				"param_postgres": `"a" IN ($1, $2)`,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
+				t.Run(name+"/"+rname+"/"+variant, func(t *testing.T) {
+					got, err := renderers[rname](tc.input, opts...)
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					if got != want {
+						t.Fatalf("\nwant %s\ngot  %s", want, got)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestCompareGroupRenderError checks that every renderer refuses a
+// comparison on a group. a:>(x OR y) used to render "a" > ('x' OR 'y').
+func TestCompareGroupRenderError(t *testing.T) {
+	for rname, render := range renderers {
+		t.Run(rname, func(t *testing.T) {
+			got, err := render(`a:>("x' OR 1=1 --" OR c)`)
+			if err == nil {
+				t.Fatalf("expected an error, got SQL %q", got)
+			}
+			if !strings.Contains(err.Error(), "must be a single term") {
+				t.Fatalf("expected a single-term error, got: %v", err)
+			}
+		})
 	}
 }
 
@@ -341,6 +534,40 @@ func TestNumericFieldRendersAsColumn(t *testing.T) {
 				"param_postgres": `("0" = $1) AND ("df" = $2)`,
 			},
 		},
+		// 1=1 used to render 1 = 1, which matches every row.
+		"numeric_field_equals_sign": {
+			input: `1=1`,
+			want: map[string]string{
+				"postgres":       `"1" = 1`,
+				"mysql":          "`1` = 1",
+				"mariadb":        "`1` = 1",
+				"sqlite":         `"1" = 1`,
+				"param_postgres": `"1" = $1`,
+				"param_mysql":    "`1` = ?",
+				"param_mariadb":  "`1` = ?",
+				"param_sqlite":   `"1" = ?`,
+			},
+		},
+		"numeric_field_in_parens": {
+			input: `(0):*`,
+			want: map[string]string{
+				"postgres":       `"0" SIMILAR TO '%'`,
+				"mysql":          "`0` IS NOT NULL",
+				"sqlite":         `"0" IS NOT NULL`,
+				"param_postgres": `"0" SIMILAR TO '%'`,
+				"param_mysql":    "`0` IS NOT NULL",
+				"param_sqlite":   `"0" IS NOT NULL`,
+			},
+		},
+		"numeric_field_equals_or": {
+			input: `a:x OR 1=1`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') OR ("1" = 1)`,
+				"mysql":          "(`a` = 'x') OR (`1` = 1)",
+				"sqlite":         `("a" = 'x') OR ("1" = 1)`,
+				"param_postgres": `("a" = $1) OR ("1" = $2)`,
+			},
+		},
 	}
 	for name, tc := range tcs {
 		for rname, want := range tc.want {
@@ -361,12 +588,73 @@ func TestNumericFieldRendersAsColumn(t *testing.T) {
 	}
 
 	// The field name must never travel as a bind value.
-	_, params, err := ToParameterizedPostgres(`0:[1 TO 2] AND 7:>3`)
+	_, params, err := ToParameterizedPostgres(`0:[1 TO 2] AND 7:>3 AND 8=4 AND (9):5`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := []any{1, 2, 3}; !reflect.DeepEqual(params, want) {
+	if want := []any{1, 2, 3, 4, 5}; !reflect.DeepEqual(params, want) {
 		t.Fatalf("want params %#v, got %#v", want, params)
+	}
+}
+
+// TestNumberSpellingsRender is the end-to-end check for the lexer part of
+// issue #77. a:1E+3 used to render ("a" = '1E') AND (3), and a:.5 failed to
+// parse.
+func TestNumberSpellingsRender(t *testing.T) {
+	tcs := map[string]struct {
+		input  string
+		want   map[string]string
+		params []any
+	}{
+		"exponent_plus": {
+			input: `a:1E+3`,
+			want: map[string]string{
+				"postgres":       `"a" = 1000`,
+				"mysql":          "`a` = 1000",
+				"mariadb":        "`a` = 1000",
+				"sqlite":         `"a" = 1000`,
+				"param_postgres": `"a" = $1`,
+				"param_mysql":    "`a` = ?",
+				"param_mariadb":  "`a` = ?",
+				"param_sqlite":   `"a" = ?`,
+			},
+			params: []any{1000.0},
+		},
+		"leading_dot_range": {
+			input: `a:[-.5 TO .5]`,
+			want: map[string]string{
+				"postgres":       `"a" >= -0.5 AND "a" <= 0.5`,
+				"mysql":          "`a` >= -0.5 AND `a` <= 0.5",
+				"sqlite":         `"a" >= -0.5 AND "a" <= 0.5`,
+				"param_postgres": `"a" >= $1 AND "a" <= $2`,
+				"param_mysql":    "`a` >= ? AND `a` <= ?",
+				"param_sqlite":   `"a" >= ? AND "a" <= ?`,
+			},
+			params: []any{-0.5, 0.5},
+		},
+	}
+
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+		t.Run(name+"/params", func(t *testing.T) {
+			_, params, err := ToParameterizedPostgres(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(params, tc.params) {
+				t.Fatalf("want params %#v, got %#v", tc.params, params)
+			}
+		})
 	}
 }
 

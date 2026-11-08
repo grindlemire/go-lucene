@@ -885,6 +885,83 @@ func TestParseLuceneWithDefaultField(t *testing.T) {
 	}
 }
 
+// TestParseDefaultFieldReachesEveryTerm checks that the default field reaches
+// every term with no field, not only words, phrases and numbers. A wildcard,
+// regex, null, range, or a term under a boost or fuzzy only got it, if at
+// all, when it was the whole query. x OR null failed to render and
+// x OR foo* rendered the wildcard as a standalone string.
+func TestParseDefaultFieldReachesEveryTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"or_null":     {`x OR null`, expr.OR(expr.Eq("default", "x"), expr.Eq("default", expr.NULL()))},
+		"and_null":    {`null AND x`, expr.AND(expr.Eq("default", expr.NULL()), expr.Eq("default", "x"))},
+		"not_null":    {`NOT null`, expr.NOT(expr.Eq("default", expr.NULL()))},
+		"or_wildcard": {`x OR foo*`, expr.OR(expr.Eq("default", "x"), expr.LIKE("default", expr.WILD("foo*")))},
+		"wildcard":    {`foo*`, expr.LIKE("default", expr.WILD("foo*"))},
+		"must_not":    {`x -foo*`, expr.AND(expr.Eq("default", "x"), expr.MUSTNOT(expr.LIKE("default", expr.WILD("foo*"))))},
+		"must":        {`+/re/`, expr.MUST(expr.LIKE("default", expr.REGEXP("/re/")))},
+		"regexp":      {`/re/`, expr.LIKE("default", expr.REGEXP("/re/"))},
+		"or_regexp":   {`x OR /re/`, expr.OR(expr.Eq("default", "x"), expr.LIKE("default", expr.REGEXP("/re/")))},
+		"range":       {`[1 TO 5]`, expr.Rang("default", 1, 5, true)},
+		"or_range":    {`x OR {1 TO 5}`, expr.OR(expr.Eq("default", "x"), expr.Rang("default", 1, 5, false))},
+		"and_range":   {`x [1 TO *]`, expr.AND(expr.Eq("default", "x"), expr.Rang("default", 1, "*", true))},
+		"boost":       {`x^2`, expr.BOOST(expr.Eq("default", "x"), 2.0)},
+		"or_boost":    {`x^2 OR y`, expr.OR(expr.BOOST(expr.Eq("default", "x"), 2.0), expr.Eq("default", "y"))},
+		"fuzzy":       {`foo~`, expr.FUZZY(expr.Eq("default", "foo"), 1)},
+		"and_fuzzy":   {`x AND foo~2`, expr.AND(expr.Eq("default", "x"), expr.FUZZY(expr.Eq("default", "foo"), 2))},
+		"group":       {`(foo*)`, expr.LIKE("default", expr.WILD("foo*"))},
+		"next_to_field": {
+			`a:b OR foo*`,
+			expr.OR(expr.Eq("a", "b"), expr.LIKE("default", expr.WILD("foo*"))),
+		},
+		// A quoted term is a phrase, even when it is the whole query and
+		// holds * or /. It used to be read again as a wildcard or regex.
+		"quoted_star":   {`"fo*"`, expr.Eq("default", expr.Lit("fo*"))},
+		"quoted_slash":  {`"/re/"`, expr.Eq("default", expr.Lit("/re/"))},
+		"quoted_or":     {`"fo*" OR x`, expr.OR(expr.Eq("default", expr.Lit("fo*")), expr.Eq("default", "x"))},
+		"quoted_number": {`"5"`, expr.Eq("default", expr.Lit("5"))},
+		// Unchanged.
+		"word":      {`x`, expr.Eq("default", "x")},
+		"or_words":  {`x OR y`, expr.OR(expr.Eq("default", "x"), expr.Eq("default", "y"))},
+		"null":      {`null`, expr.Eq("default", expr.NULL())},
+		"field_ok":  {`a:foo*`, expr.LIKE("a", expr.WILD("foo*"))},
+		"field_grp": {`a:(x OR foo*)`, expr.OR(expr.Eq("a", "x"), expr.LIKE("a", expr.WILD("foo*")))},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input, WithDefaultField("default"))
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+
+	// Without a default field the terms stay bare, as before.
+	noDefault := map[string]*expr.Expression{
+		`x OR foo*`: expr.OR(expr.Lit("x"), expr.WILD("foo*")),
+		`x OR null`: expr.OR(expr.Lit("x"), expr.NULL()),
+		`"fo*"`:     expr.Lit("fo*"),
+		`foo~`:      expr.FUZZY(expr.Lit("foo"), 1),
+	}
+	for input, want := range noDefault {
+		t.Run("no_default/"+input, func(t *testing.T) {
+			got, err := Parse(input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", want, got)
+			}
+		})
+	}
+}
+
 // TestParseDefaultFieldInsideFieldGroup checks that a field group like
 // a:(x OR y) keeps its terms on field a when a default field is set. The
 // default field used to be applied to them, so a:(x OR null) parsed as
@@ -964,7 +1041,7 @@ func TestParseFieldGroupIgnoresDefaultField(t *testing.T) {
 		"range_in_group":        `a:(x OR b:[1 TO 5])`,
 		"boost_in_group":        `a:(x^2 OR y)`,
 		"fuzzy_in_group":        `a:(x~ OR y)`,
-		"compare_group":         `a:>(x OR y)`,
+		"bare_range_in_group":   `a:(x OR [1 TO 5])`,
 		"boosted_group":         `a:(x OR y)^2`,
 		"fuzzy_group":           `a:(x OR y)~`,
 		"must_group":            `+a:(x OR null)`,
@@ -986,6 +1063,240 @@ func TestParseFieldGroupIgnoresDefaultField(t *testing.T) {
 			}
 			if !reflect.DeepEqual(want, got) {
 				t.Fatalf(errTemplate, "default field changed the parse", want, got)
+			}
+		})
+	}
+}
+
+// TestParseFieldGroupAppliesFieldToEachTerm checks that a field group applies
+// its field to every term inside it, as Lucene does. Only a plain OR of terms
+// used to get the field: a:(x AND y) parsed as a:((x AND y)), comparing the
+// column to a boolean expression, and a:(x OR [1 TO 5]) failed to parse. A
+// term with its own field keeps it, so a:(b:c) is b:c.
+func TestParseFieldGroupAppliesFieldToEachTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"and":          {`a:(x AND y)`, expr.AND(expr.Eq("a", "x"), expr.Eq("a", "y"))},
+		"implicit_and": {`a:(x y)`, expr.AND(expr.Eq("a", "x"), expr.Eq("a", "y"))},
+		"must_not":     {`a:(x -y)`, expr.AND(expr.Eq("a", "x"), expr.MUSTNOT(expr.Eq("a", "y")))},
+		"must":         {`a:(+x OR y)`, expr.OR(expr.MUST(expr.Eq("a", "x")), expr.Eq("a", "y"))},
+		"not":          {`a:(x OR NOT y)`, expr.OR(expr.Eq("a", "x"), expr.NOT(expr.Eq("a", "y")))},
+		"only_not":     {`a:(NOT x)`, expr.NOT(expr.Eq("a", "x"))},
+		"wildcard":     {`a:(x OR foo*)`, expr.OR(expr.Eq("a", "x"), expr.LIKE("a", expr.WILD("foo*")))},
+		"regexp":       {`a:(x OR /re/)`, expr.OR(expr.Eq("a", "x"), expr.LIKE("a", expr.REGEXP("/re/")))},
+		"null_and":     {`a:(x AND null)`, expr.AND(expr.Eq("a", "x"), expr.Eq("a", expr.NULL()))},
+		"phrase":       {`a:("x y" AND z)`, expr.AND(expr.Eq("a", "x y"), expr.Eq("a", "z"))},
+		"range":        {`a:(x OR [1 TO 5])`, expr.OR(expr.Eq("a", "x"), expr.Rang("a", 1, 5, true))},
+		"exclusive":    {`a:(x OR {1 TO 5})`, expr.OR(expr.Eq("a", "x"), expr.Rang("a", 1, 5, false))},
+		"only_range":   {`a:([1 TO *])`, expr.Rang("a", 1, "*", true)},
+		"nested_or": {
+			`a:(x OR (y AND z))`,
+			expr.OR(expr.Eq("a", "x"), expr.AND(expr.Eq("a", "y"), expr.Eq("a", "z"))),
+		},
+		"nested_and": {
+			`a:((x OR y) AND z)`,
+			expr.AND(expr.OR(expr.Eq("a", "x"), expr.Eq("a", "y")), expr.Eq("a", "z")),
+		},
+		"nested_group": {
+			`a:(x AND (y OR (z -w)))`,
+			expr.AND(
+				expr.Eq("a", "x"),
+				expr.OR(expr.Eq("a", "y"), expr.AND(expr.Eq("a", "z"), expr.MUSTNOT(expr.Eq("a", "w")))),
+			),
+		},
+		"boost":        {`a:(x^2 OR y)`, expr.OR(expr.BOOST(expr.Eq("a", "x"), 2.0), expr.Eq("a", "y"))},
+		"fuzzy":        {`a:(x~2 AND y)`, expr.AND(expr.FUZZY(expr.Eq("a", "x"), 2), expr.Eq("a", "y"))},
+		"own_field":    {`a:(b:c OR d)`, expr.OR(expr.Eq("b", "c"), expr.Eq("a", "d"))},
+		"only_field":   {`a:(b:c)`, expr.Eq("b", "c")},
+		"own_range":    {`a:(x OR b:[1 TO 5])`, expr.OR(expr.Eq("a", "x"), expr.Rang("b", 1, 5, true))},
+		"own_group":    {`a:(x AND b:(y OR z))`, expr.AND(expr.Eq("a", "x"), expr.IN("b", expr.LIST(expr.Lit("y"), expr.Lit("z"))))},
+		"equals_sign":  {`a=(x AND y)`, expr.AND(expr.Eq("a", "x"), expr.Eq("a", "y"))},
+		"equals_range": {`a=[1 TO 5]`, expr.Rang("a", 1, 5, true)},
+		"two_ranges": {
+			`a:([1 TO 5] OR [7 TO 9])`,
+			expr.OR(expr.Rang("a", 1, 5, true), expr.Rang("a", 7, 9, true)),
+		},
+		"implicit_and_range": {
+			`a:(x [1 TO 5])`,
+			expr.AND(expr.Eq("a", "x"), expr.Rang("a", 1, 5, true)),
+		},
+		"implicit_and_ranges": {
+			`a:([1 TO 5] {7 TO 9})`,
+			expr.AND(expr.Rang("a", 1, 5, true), expr.Rang("a", 7, 9, false)),
+		},
+		"numeric": {`0:(x AND y)`, expr.AND(expr.Eq("0", "x"), expr.Eq("0", "y"))},
+		"must_not_group": {
+			`-a:(x AND y)`,
+			expr.MUSTNOT(expr.AND(expr.Eq("a", "x"), expr.Eq("a", "y"))),
+		},
+		"boosted_group": {
+			`a:(x AND y)^2`,
+			expr.BOOST(expr.AND(expr.Eq("a", "x"), expr.Eq("a", "y")), 2.0),
+		},
+		"next_to_term": {
+			`a:(x AND y) OR b:z`,
+			expr.OR(expr.AND(expr.Eq("a", "x"), expr.Eq("a", "y")), expr.Eq("b", "z")),
+		},
+		// Unchanged: a single term, and a plain OR of terms, which is an IN.
+		"single_term":   {`a:(x)`, expr.Eq("a", "x")},
+		"single_wild":   {`a:(foo*)`, expr.LIKE("a", expr.WILD("foo*"))},
+		"or_of_terms":   {`a:(x OR y)`, expr.IN("a", expr.LIST(expr.Lit("x"), expr.Lit("y")))},
+		"double_parens": {`a:((x OR y))`, expr.IN("a", expr.LIST(expr.Lit("x"), expr.Lit("y")))},
+		"plain_range":   {`a:[1 TO 5]`, expr.Rang("a", 1, 5, true)},
+		"mixed_range":   {`a:{1 TO 5]`, expr.Rang("a", 1, 5, false)},
+	}
+
+	for name, tc := range tcs {
+		for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
+			t.Run(name+"/"+variant, func(t *testing.T) {
+				got, err := Parse(tc.input, opts...)
+				if err != nil {
+					t.Fatalf("unexpected parse error: %v", err)
+				}
+				if !reflect.DeepEqual(got, tc.want) {
+					t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+				}
+			})
+		}
+	}
+}
+
+// TestParseCompareGroupIsError checks that a comparison takes a single term.
+// a:>(x OR y) used to parse as a comparison against a boolean expression.
+// Lucene has no comparison syntax, and Elasticsearch's query_string only reads
+// a:>5 as one term with a > in front, so neither gives a meaning to a
+// comparison on a group or a range.
+func TestParseCompareGroupIsError(t *testing.T) {
+	inputs := map[string]string{
+		"or":         `a:>(x OR y)`,
+		"and":        `a:>=(x AND y)`,
+		"must_not":   `a:<(x -y)`,
+		"less_eq":    `a:<=(x OR y)`,
+		"field":      `a:>(b:c)`,
+		"range":      `a:>[1 TO 5]`,
+		"group_rang": `a:>([1 TO 5])`,
+	}
+	for name, input := range inputs {
+		for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
+			t.Run(name+"/"+variant, func(t *testing.T) {
+				got, err := Parse(input, opts...)
+				if err == nil {
+					t.Fatalf("expected an error, got %#v", got)
+				}
+				if !strings.Contains(err.Error(), "must be a single term") {
+					t.Fatalf("expected a single-term error, got: %v", err)
+				}
+			})
+		}
+	}
+
+	// A single term in parentheses is still a comparison.
+	got, err := Parse(`a:>(5)`)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	if want := expr.GREATER("a", 5); !reflect.DeepEqual(got, want) {
+		t.Fatalf(errTemplate, "parsed expression does not match", want, got)
+	}
+}
+
+// TestParseRangeNeedsField checks that a range outside a field group, with no
+// default field, is still an error, now with a message that says why.
+func TestParseRangeNeedsField(t *testing.T) {
+	for _, input := range []string{`[1 TO 5]`, `x OR [1 TO 5]`, `a:x AND {1 TO 5}`, `a:x [1 TO 5]`} {
+		t.Run(input, func(t *testing.T) {
+			got, err := Parse(input)
+			if err == nil {
+				t.Fatalf("expected an error, got %#v", got)
+			}
+			if !strings.Contains(err.Error(), "range needs a field") {
+				t.Fatalf("expected a range field error, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestParseNumberSpellings checks numbers written with a + in the exponent or
+// a leading dot. a:1E+3 used to parse as a:1E AND +3, and a:.5 and a:-.5
+// failed to parse.
+func TestParseNumberSpellings(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"exponent_plus":       {`a:1E+3`, expr.Eq("a", 1000.0)},
+		"exponent_plus_lower": {`a:1e+3`, expr.Eq("a", 1000.0)},
+		"negative_exponent":   {`a:-2.5e+2`, expr.Eq("a", -250.0)},
+		"exponent_in_range":   {`a:[1e+2 TO 1E+3]`, expr.Rang("a", 100.0, 1000.0, true)},
+		"exponent_compare":    {`a:>=1e+3`, expr.GREATEREQ("a", 1000.0)},
+		"exponent_in_list":    {`a:(1e+3 OR 2)`, expr.IN("a", expr.LIST(expr.Lit(1000.0), expr.Lit(2)))},
+		"exponent_boost":      {`a:b^1e+1`, expr.BOOST(expr.Eq("a", "b"), 10.0)},
+		"leading_dot":         {`a:.5`, expr.Eq("a", 0.5)},
+		"negative_dot":        {`a:-.5`, expr.Eq("a", -0.5)},
+		"dot_range":           {`a:[-.5 TO .5]`, expr.Rang("a", -0.5, 0.5, true)},
+		"dot_exponent":        {`a:.5e+1`, expr.Eq("a", 5.0)},
+		"dot_word":            {`a:.foo`, expr.Eq("a", ".foo")},
+		"dot_field":           {`.5:x`, expr.Eq(".5", "x")},
+		"minus_dot_word":      {`-.foo`, expr.MUSTNOT(expr.Lit(".foo"))},
+		// Unchanged: + outside an exponent still means MUST.
+		"plus_after_word": {`a:be+3`, expr.AND(expr.Eq("a", "be"), expr.MUST(expr.Lit(3)))},
+		"exponent_minus":  {`a:1e-3`, expr.Eq("a", 0.001)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+
+	// A term can't start with +, so a:+5 stays an error, as in Lucene and
+	// like a:-x. Escape it to search for the text: a:\+5.
+	// A + with no digit after it is not an exponent sign, even at the end
+	// of the query, so a:1e+ fails like a:1e+ with a trailing space.
+	for _, input := range []string{`a:+5`, `a:+.5`, `a:1e+`, `a:1e+ `, `1e+`} {
+		t.Run("error/"+input, func(t *testing.T) {
+			if got, err := Parse(input); err == nil {
+				t.Fatalf("expected an error, got %#v", got)
+			}
+		})
+	}
+}
+
+// TestParseReportsLexerError checks that a query the lexer rejects fails
+// with the lexer's message. The parser used to drop it and report "no items
+// left to reduce" instead.
+func TestParseReportsLexerError(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"unterminated_quote":  {`a:"abc`, "unterminated quote"},
+		"unterminated_regexp": {`a:/re`, "unterminated regexp"},
+		"unknown_character":   {`a:b & c`, "error parsing token [&]"},
+		"after_a_term":        {`a:b OR "c`, "unterminated quote"},
+		// A trailing backslash used to stay in the term: a*\ was the
+		// wildcard a*\ and a:\ compared a to the empty string.
+		"trailing_backslash":       {`a*\`, "term can not end with an escape character"},
+		"trailing_backslash_value": {`a:\`, "term can not end with an escape character"},
+		"lone_backslash":           {`\`, "term can not end with an escape character"},
+		"backslash_in_group":       {`a:(b OR c\`, "term can not end with an escape character"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err == nil {
+				t.Fatalf("expected an error, got %#v", got)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected an error containing %q, got: %v", tc.want, err)
 			}
 		})
 	}
@@ -1267,12 +1578,37 @@ func TestParseNumericFieldIsColumn(t *testing.T) {
 		"greater":        {input: `0:>1`, want: expr.GREATER("0", 1)},
 		"less_eq":        {input: `0:<=1`, want: expr.LESSEQ("0", 1)},
 		"in_group":       {input: `0:(1 OR 2)`, want: expr.IN("0", expr.LIST(expr.Lit(1), expr.Lit(2)))},
+		// = works like :, and a field in parentheses is still a field. Both
+		// used to leave the number a number, so 1=1 rendered 1 = 1.
+		"equals_sign":         {input: `1=1`, want: expr.Eq("1", 1)},
+		"equals_spaced":       {input: `1 = 1`, want: expr.Eq("1", 1)},
+		"equals_leading_zero": {input: `007=x`, want: expr.Eq("007", "x")},
+		"equals_float":        {input: `1.50=x`, want: expr.Eq("1.50", "x")},
+		"equals_negative":     {input: `-1=x`, want: expr.Eq("-1", "x")},
+		"equals_group":        {input: `1=(x OR y)`, want: expr.IN("1", expr.LIST(expr.Lit("x"), expr.Lit("y")))},
+		"equals_range":        {input: `1=[1 TO 2]`, want: expr.Rang("1", 1, 2, true)},
+		"paren_wildcard":      {input: `(0):*`, want: expr.LIKE("0", expr.WILD("*"))},
+		"paren_value":         {input: `(0):1`, want: expr.Eq("0", 1)},
+		"paren_leading_zero":  {input: `(007):x`, want: expr.Eq("007", "x")},
+		"paren_exponent":      {input: `(1e3):x`, want: expr.Eq("1e3", "x")},
+		"double_paren":        {input: `((0)):1`, want: expr.Eq("0", 1)},
+		"paren_range":         {input: `(0):[1 TO 2]`, want: expr.Rang("0", 1, 2, true)},
+		"paren_greater":       {input: `(0):>1`, want: expr.GREATER("0", 1)},
+		"paren_equals":        {input: `(1)=1`, want: expr.Eq("1", 1)},
+		"in_and": {
+			input: `a:x AND 1=1`,
+			want:  expr.AND(expr.Eq("a", "x"), expr.Eq("1", 1)),
+		},
 		"wildcard_value": {input: `0:1*`, want: expr.LIKE("0", expr.WILD("1*"))},
 		"null_value":     {input: `0:null`, want: expr.Eq("0", expr.NULL())},
 		"negated":        {input: `NOT 0:1`, want: expr.NOT(expr.Eq("0", 1))},
-		// Numbers that are not followed by a colon stay numbers.
+		// Numbers that are not used as a field stay numbers.
 		"value_stays_number": {input: `a:0`, want: expr.Eq("a", 0)},
+		"equals_value":       {input: `a=0`, want: expr.Eq("a", 0)},
+		"paren_number_value": {input: `a:(0)`, want: expr.Eq("a", 0)},
+		"compare_value":      {input: `a:>=0`, want: expr.GREATEREQ("a", 0)},
 		"bare_number":        {input: `1`, want: expr.Lit(1)},
+		"paren_number":       {input: `(1)`, want: expr.Lit(1)},
 		"bare_number_and_field": {
 			input: `1 AND 0:1`,
 			want:  expr.AND(expr.Lit(1), expr.Eq("0", 1)),
@@ -1451,9 +1787,9 @@ func TestGroupingRoundTrip(t *testing.T) {
 		"or_inside_or_right":   {`a:1 OR (b:2 OR c:3)`, `a:1 OR (b:2 OR c:3)`},
 		"flat_and_chain":       {`a:1 AND b:2 AND c:3`, `a:1 AND b:2 AND c:3`},
 		"flat_or_chain":        {`a:1 OR b:2 OR c:3`, `a:1 OR b:2 OR c:3`},
-		"field_group_and":      {`a:(b AND c)`, `a:(b AND c)`},
-		"field_group_must_not": {`a:(-b)`, `a:(-b)`},
-		"field_group_boost":    {`a:(b^2)`, `a:(b^2.0)`},
+		"field_group_and":      {`a:(b AND c)`, `a:b AND a:c`},
+		"field_group_must_not": {`a:(-b)`, `-a:b`},
+		"field_group_boost":    {`a:(b^2)`, `a:b^2.0`},
 		"boost_of_must_not":    {`-a:1^2`, `-a:1^2.0`},
 		"must_not_of_boost":    {`-(a:1^2)`, `-(a:1^2.0)`},
 		"must_not_group":       {`-(a:1 OR b:2)`, `-(a:1 OR b:2)`},

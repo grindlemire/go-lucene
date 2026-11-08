@@ -73,6 +73,7 @@ func parseWithOptions(input string, opts ...Opt) (e *expr.Expression, p *parser,
 		lex:          lex.Lex(input),
 		stack:        []any{},
 		nonTerminals: []lex.Token{{Typ: lex.TStart}},
+		numberText:   map[*expr.Expression]string{},
 	}
 
 	for _, opt := range opts {
@@ -103,6 +104,10 @@ type parser struct {
 	lex          *lex.Lexer
 	stack        []any
 	nonTerminals []lex.Token
+
+	// numberText holds the text of each number literal as written, for
+	// numberFieldToColumn.
+	numberText map[*expr.Expression]string
 
 	defaultField string
 	jsonFields   map[string]bool
@@ -157,6 +162,9 @@ func (p *parser) checkJSONField(tok lex.Token) error {
 func (p *parser) parse() (e *expr.Expression, err error) {
 	for {
 		next := p.lex.Peek()
+		if next.Typ == lex.TErr {
+			return e, fmt.Errorf("error parsing: %s", next.Val)
+		}
 		if p.shouldAccept(next) {
 			if len(p.stack) != 1 {
 				return e, fmt.Errorf("multiple expressions left after parsing: %v", p.stack)
@@ -170,16 +178,9 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				)
 			}
 
-			// edge case for a single literal in the expression and a default field specified
-			if final.Op == expr.Literal && p.defaultField != "" {
-				final = expr.Eq(p.defaultField, final)
-			}
-
-			if final.Op == expr.Null && p.defaultField != "" {
-				final = expr.Eq(p.defaultField, final)
-			}
-
-			return final, nil
+			// A query that is a single term, like x, foo* or [1 TO 5], has no
+			// operator to give it the default field, so give it one here.
+			return reduce.WrapDefaultField(final, p.defaultField), nil
 		}
 
 		if p.shouldShift(next) {
@@ -191,11 +192,9 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 					return e, err
 				}
 
-				// The left side of field:value is always a column, even when it
-				// looks like a number. Keep the text as written so 007:x stays
-				// "007" rather than becoming the number 7.
-				if isNumberLiteral(lit) && p.lex.Peek().Typ == lex.TColon {
-					lit = expr.Lit(tok.Val)
+				// Keep a number's text in case it turns out to be a field.
+				if isNumberLiteral(lit) {
+					p.numberText[lit.(*expr.Expression)] = tok.Val
 				}
 				if p.lex.Peek().Typ == lex.TColon {
 					if err := p.checkJSONField(tok); err != nil {
@@ -229,9 +228,10 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				continue
 			}
 
-			// Prefix operators (-, +, NOT) and "(" start a new subexpression. Inject an implicit AND
-			// when the top of the stack is an expression, so "-a:b -c:d" and "a:b (c:d)" both get an AND.
-			if len(p.stack) > 0 && (isPrefixOperator(tok) || tok.Typ == lex.TLParen) {
+			// Prefix operators (-, +, NOT), "(" and the start of a range start a new subexpression.
+			// Inject an implicit AND when the top of the stack is an expression, so "-a:b -c:d",
+			// "a:b (c:d)" and "a:(x [1 TO 5])" all get an AND.
+			if len(p.stack) > 0 && (isPrefixOperator(tok) || tok.Typ == lex.TLParen || isRangeStart(tok)) {
 				_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 				if !isTopToken {
 					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
@@ -244,6 +244,10 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 					p.stack = append(p.stack, implAnd)
 					p.pushNonTerminal(implAnd)
 				}
+			}
+
+			if tok.Typ == lex.TColon || tok.Typ == lex.TEqual {
+				p.numberFieldToColumn()
 			}
 
 			// push the token on the stack
@@ -327,6 +331,29 @@ func endingRangeSubExpr(next lex.Token) bool {
 // These need implicit AND injection when they follow an expression.
 func isPrefixOperator(tok lex.Token) bool {
 	return tok.Typ == lex.TMinus || tok.Typ == lex.TPlus || tok.Typ == lex.TNot
+}
+
+// numberFieldToColumn is called before a ':' or '=' is shifted. The left side
+// of field:value is always a column, even when it looks like a number, as in
+// 0:1, 1=1 or (0):*. So a number on top of the stack becomes a column, with
+// its text as written: 007:x is "007", not 7.
+func (p *parser) numberFieldToColumn() {
+	top := len(p.stack) - 1
+	if top < 0 {
+		return
+	}
+	lit, ok := p.stack[top].(*expr.Expression)
+	if !ok {
+		return
+	}
+	if text, ok := p.numberText[lit]; ok {
+		p.stack[top] = expr.Lit(text)
+	}
+}
+
+// isRangeStart returns true for the brackets that open a range.
+func isRangeStart(tok lex.Token) bool {
+	return tok.Typ == lex.TLSquare || tok.Typ == lex.TLCurly
 }
 
 func (p *parser) shouldAccept(next lex.Token) bool {
