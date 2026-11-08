@@ -2,6 +2,7 @@ package lucene
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -469,13 +470,29 @@ func TestNumberKeepsWrittenTextOnlyWhenItDiffers(t *testing.T) {
 		{"x", "1"},
 		// 1e-400 parses to 0 only because a float64 can't hold it.
 		{0.0, "1e-400"},
+		// An integer compares exactly, not through a float64, which reads
+		// 9007199254740993 as 9007199254740992.
+		{9007199254740992, "9007199254740993"},
+		{int64(9007199254740992), "9007199254740993"},
+		{uint64(9007199254740992), "9007199254740993.0"},
+		{int64(math.MaxInt64), "9223372036854775808"},
 	} {
 		if text := expr.NumberLit(tc.v, tc.text).NumberText(); text != "" {
 			t.Errorf("NumberLit(%#v, %q): want no text, got %q", tc.v, tc.text, text)
 		}
 	}
-	if text := expr.NumberLit(int64(5), "05").NumberText(); text != "05" {
-		t.Errorf(`NumberLit(int64(5), "05"): want text "05", got %q`, text)
+	for _, tc := range []struct {
+		v    any
+		text string
+	}{
+		{int64(5), "05"},
+		{int64(9007199254740993), "09007199254740993"},
+		{uint64(math.MaxUint64), "18446744073709551615.0"},
+		{1000, "1e3"},
+	} {
+		if text := expr.NumberLit(tc.v, tc.text).NumberText(); text != tc.text {
+			t.Errorf("NumberLit(%#v, %q): want text %q, got %q", tc.v, tc.text, tc.text, text)
+		}
 	}
 }
 
@@ -582,6 +599,7 @@ func TestJSONPathJSONRejectsMalformedLeaf(t *testing.T) {
 		"number_injection":   `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"1 OR b:c"}}}`,
 		"number_mismatch":    `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"2.0"}}}`,
 		"number_underflow":   `{"left":"a","operator":"EQUALS","right":{"number":{"value":0,"text":"1e-400"}}}`,
+		"number_int_rounds":  `{"left":"a","operator":"EQUALS","right":{"number":{"value":9007199254740992,"text":"9007199254740993"}}}`,
 		"number_range_bound": `{"left":"a","operator":"RANGE","right":{"min":{"number":{"value":1}},"max":2,"inclusive":true}}`,
 	}
 	for name, raw := range tcs {
