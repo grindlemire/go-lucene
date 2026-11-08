@@ -366,7 +366,7 @@ func (p JSONPath) Validate() error {
 	for _, seg := range p.Path {
 		switch {
 		case seg == "":
-			return fmt.Errorf("json path has an empty segment: %q", p.String())
+			return fmt.Errorf("json path has an empty segment: %q", string(p.Column)+"."+strings.Join(p.Path, "."))
 		case !utf8.ValidString(seg):
 			return fmt.Errorf("json path segment is not valid UTF-8: %q", seg)
 		case strings.ContainsAny(seg, `"\`):

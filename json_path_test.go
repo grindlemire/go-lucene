@@ -566,6 +566,15 @@ func TestJSONPathFoldsCaseByDottedName(t *testing.T) {
 	}
 }
 
+// TestJSONPathEmptySegmentErrorNamesPlainPath checks that the empty segment
+// error prints the path's plain dotted name once, not the quoted String().
+func TestJSONPathEmptySegmentErrorNamesPlainPath(t *testing.T) {
+	err := expr.JSONPath{Column: "labels", Path: []string{"a b", ""}}.Validate()
+	if want := `json path has an empty segment: "labels.a b."`; err == nil || err.Error() != want {
+		t.Fatalf("\n got: %v\nwant: %s", err, want)
+	}
+}
+
 // TestJSONPathFoldsCaseByDottedNameWithSpecialKey checks that a key with a
 // space or a colon is listed by its plain dotted name, with no quotes, even
 // though String() quotes the field.
