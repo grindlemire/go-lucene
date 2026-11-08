@@ -885,6 +885,68 @@ func TestParseLuceneWithDefaultField(t *testing.T) {
 	}
 }
 
+// TestParseDefaultFieldInsideFieldGroup checks that a field group like
+// a:(x OR y) keeps its terms on field a when a default field is set. The
+// default field used to be applied to them, so a:(x OR null) parsed as
+// a:(default:x OR null). Terms outside any field group still get it.
+func TestParseDefaultFieldInsideFieldGroup(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"null_in_group": {
+			input: `a:(x OR null)`,
+			want:  expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.NULL())),
+		},
+		"terms_in_group": {
+			input: `a:(x OR y)`,
+			want:  expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"))),
+		},
+		"phrase_in_group": {
+			input: `a:("foo bar" OR baz)`,
+			want:  expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("foo bar"), expr.Lit("baz"))),
+		},
+		"equals_sign_group": {
+			input: `a=(x OR null)`,
+			want:  expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.NULL())),
+		},
+		"default_applies_after_group": {
+			input: `a:(x OR y) AND z`,
+			want: expr.AND(
+				expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"))),
+				expr.Eq("default", "z"),
+			),
+		},
+		"default_applies_before_group": {
+			input: `z a:(x OR y)`,
+			want: expr.AND(
+				expr.Eq("default", "z"),
+				expr.IN(expr.Lit("a"), expr.LIST(expr.Lit("x"), expr.Lit("y"))),
+			),
+		},
+		"bare_group_gets_default": {
+			input: `(x OR y)`,
+			want:  expr.OR(expr.Eq("default", "x"), expr.Eq("default", "y")),
+		},
+		"default_applies_inside_bare_group_after_field_term": {
+			input: `(a:x OR y)`,
+			want:  expr.OR(expr.Eq("a", "x"), expr.Eq("default", "y")),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input, WithDefaultField("default"))
+			if err != nil {
+				t.Fatalf("wanted no error, got: %v", err)
+			}
+			if !reflect.DeepEqual(tc.want, got) {
+				t.Fatalf(errTemplate, "parsed expression doesn't match", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestParseFailure(t *testing.T) {
 	type tc struct {
 		input string

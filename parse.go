@@ -258,6 +258,15 @@ func (p *parser) shouldAccept(next lex.Token) bool {
 }
 
 func (p *parser) reduce() (err error) {
+	// The terms in a field group like a:(x OR y) belong to field a, so they
+	// must not get the default field. The ':' stays on the nonterminal stack
+	// until the group is reduced into a:(...), so while it is there we are
+	// reducing a field's value.
+	defaultField := p.defaultField
+	if p.inFieldValue() {
+		defaultField = ""
+	}
+
 	top := []any{}
 	for {
 		if len(p.stack) == 0 {
@@ -273,7 +282,7 @@ func (p *parser) reduce() (err error) {
 
 		// try to reduce with all our reducers
 		var reduced bool
-		top, p.nonTerminals, reduced = reduce.Reduce(top, p.nonTerminals, p.defaultField)
+		top, p.nonTerminals, reduced = reduce.Reduce(top, p.nonTerminals, defaultField)
 
 		// if we consumed some non terminals during the reduce it means we successfully reduced
 		if reduced {
@@ -298,6 +307,17 @@ func (p *parser) reduce() (err error) {
 			return nil
 		}
 	}
+}
+
+// inFieldValue reports whether a field operator (the ':' of field:value or
+// the '=' of field=value) is still waiting for its value to be reduced.
+func (p *parser) inFieldValue() bool {
+	for _, tok := range p.nonTerminals {
+		if tok.Typ == lex.TColon || tok.Typ == lex.TEqual {
+			return true
+		}
+	}
+	return false
 }
 
 func parseLiteral(token lex.Token) (e any, err error) {

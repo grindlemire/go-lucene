@@ -82,11 +82,6 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 		// A field group compares the column to a boolean expression.
 		"field_group_and": {input: `a:("x' OR 1=1 --" AND c)`, render: "postgres", want: `"a" = ('x'' OR 1=1 --' AND 'c')`},
 		"field_group_gt":  {input: `a:>("x' OR 1=1 --" OR c)`, render: "postgres", want: `"a" > ('x'' OR 1=1 --' OR 'c')`},
-		// With a default field, terms inside a field group get the default
-		// field instead of the group's field.
-		"field_group_default_field": {input: `a:(b OR c)`, defaultField: "df", render: "postgres", want: `"a" = (("df" = 'b') OR ("df" = 'c'))`},
-		// ...and a null inside one fails to render.
-		"field_group_null_default_field": {input: `a:(1 OR null)`, defaultField: "df", render: "postgres", wantErr: true},
 	}
 
 	for name, tc := range tcs {
@@ -109,6 +104,103 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 				t.Fatalf("\nwant %s\ngot  %s", tc.want, got)
 			}
 		})
+	}
+}
+
+// TestDefaultFieldInsideFieldGroup is the end-to-end check for issue #67. A
+// field group like a:(x OR y) binds field a to every bare term inside the
+// parentheses, so the default field must not be applied to those terms. With
+// a default field, a:(x OR null) used to fail with "null cannot be rendered
+// as a standalone value", and a:(x OR y) rendered as
+// "a" = (("default" = 'x') OR ("default" = 'y')).
+func TestDefaultFieldInsideFieldGroup(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  map[string]string
+	}{
+		"group_with_null": {
+			input: `a:(x OR null)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x' OR "a" IS NULL)`,
+				"mysql":          "(`a` = 'x' OR `a` IS NULL)",
+				"mariadb":        "(`a` = 'x' OR `a` IS NULL)",
+				"sqlite":         `("a" = 'x' OR "a" IS NULL)`,
+				"param_postgres": `("a" = $1 OR "a" IS NULL)`,
+				"param_mysql":    "(`a` = ? OR `a` IS NULL)",
+				"param_mariadb":  "(`a` = ? OR `a` IS NULL)",
+				"param_sqlite":   `("a" = ? OR "a" IS NULL)`,
+			},
+		},
+		"group_of_terms": {
+			input: `a:(x OR y)`,
+			want: map[string]string{
+				"postgres":       `"a" IN ('x', 'y')`,
+				"mysql":          "`a` IN ('x', 'y')",
+				"sqlite":         `"a" IN ('x', 'y')`,
+				"param_postgres": `"a" IN ($1, $2)`,
+				"param_mysql":    "`a` IN (?, ?)",
+				"param_sqlite":   `"a" IN (?, ?)`,
+			},
+		},
+		"group_with_phrase": {
+			input: `a:("foo bar" OR baz)`,
+			want: map[string]string{
+				"postgres":       `"a" IN ('foo bar', 'baz')`,
+				"mysql":          "`a` IN ('foo bar', 'baz')",
+				"sqlite":         `"a" IN ('foo bar', 'baz')`,
+				"param_postgres": `"a" IN ($1, $2)`,
+			},
+		},
+		"default_still_applies_outside_group": {
+			input: `a:(x OR null) AND z`,
+			want: map[string]string{
+				"postgres":       `(("a" = 'x' OR "a" IS NULL)) AND ("default" = 'z')`,
+				"mysql":          "((`a` = 'x' OR `a` IS NULL)) AND (`default` = 'z')",
+				"sqlite":         `(("a" = 'x' OR "a" IS NULL)) AND ("default" = 'z')`,
+				"param_postgres": `(("a" = $1 OR "a" IS NULL)) AND ("default" = $2)`,
+				"param_mysql":    "((`a` = ? OR `a` IS NULL)) AND (`default` = ?)",
+			},
+		},
+		"bare_group_gets_default": {
+			input: `(x OR y)`,
+			want: map[string]string{
+				"postgres":       `("default" = 'x') OR ("default" = 'y')`,
+				"mysql":          "(`default` = 'x') OR (`default` = 'y')",
+				"sqlite":         `("default" = 'x') OR ("default" = 'y')`,
+				"param_postgres": `("default" = $1) OR ("default" = $2)`,
+			},
+		},
+		"must_not_group": {
+			input: `-a:(x OR y)`,
+			want: map[string]string{
+				"postgres":       `NOT("a" IN ('x', 'y'))`,
+				"mysql":          "NOT(`a` IN ('x', 'y'))",
+				"sqlite":         `NOT("a" IN ('x', 'y'))`,
+				"param_postgres": `NOT("a" IN ($1, $2))`,
+			},
+		},
+		"must_group": {
+			input: `+a:(x OR null)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x' OR "a" IS NULL)`,
+				"mysql":          "(`a` = 'x' OR `a` IS NULL)",
+				"param_postgres": `("a" = $1 OR "a" IS NULL)`,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input, WithDefaultField("default"))
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
 	}
 }
 
