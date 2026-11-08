@@ -147,17 +147,21 @@ func renderFuzzy(e *Expression, verbose bool) string {
 
 func renderRange(e *Expression, verbose bool) string {
 	boundary := e.Right.(*RangeBoundary)
-	if verbose {
-		if boundary.Inclusive {
-			return fmt.Sprintf("%#v:[%#v TO %#v]", e.Left, boundary.Min, boundary.Max)
-		}
-
-		return fmt.Sprintf("%#v:{%#v TO %#v}", e.Left, boundary.Min, boundary.Max)
-	}
 
 	// The parser builds a range before it knows the field, so a parse error
 	// can print one without a field.
 	field := ""
+	if verbose {
+		if e.Left != nil {
+			field = fmt.Sprintf("%#v:", e.Left)
+		}
+		if boundary.Inclusive {
+			return fmt.Sprintf("%s[%#v TO %#v]", field, boundary.Min, boundary.Max)
+		}
+
+		return fmt.Sprintf("%s{%#v TO %#v}", field, boundary.Min, boundary.Max)
+	}
+
 	if e.Left != nil {
 		field = fmt.Sprintf("%s:", e.Left)
 	}
