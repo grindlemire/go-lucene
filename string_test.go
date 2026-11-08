@@ -204,6 +204,10 @@ func TestParseBoostAndFuzzyParams(t *testing.T) {
 		"boost_quoted":   {`a^"2"`, expr.BOOST(expr.Lit("a"), 2.0)},
 		"boost_quoted_f": {`a^"0.5"`, expr.BOOST(expr.Lit("a"), 0.5)},
 		"boost_float":    {`a^2.5`, expr.BOOST(expr.Lit("a"), 2.5)},
+		// A negated group is not a distance. This used to parse as a fuzzy
+		// distance of -2, read through MUST_NOT(2).String().
+		"fuzzy_negated_group": {`a~-(2)`, expr.AND(expr.FUZZY(expr.Lit("a"), 1), expr.MUSTNOT(expr.Lit(2)))},
+		"boost_negated_group": {`a^-(2)`, expr.AND(expr.BOOST(expr.Lit("a"), 1.0), expr.MUSTNOT(expr.Lit(2)))},
 	}
 
 	for name, tc := range tcs {
