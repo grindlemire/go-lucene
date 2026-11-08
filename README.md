@@ -109,6 +109,8 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `(a:1 OR b:2) AND c:3` | `(("a" = 1) OR ("b" = 2)) AND ("c" = 3)` | Grouping |
 | `field:(a AND -b)` | `("field" = 'a') AND (NOT("field" = 'b'))` | A field group applies its field to every term inside. A term with its own field keeps it |
 
+An expression built in code or read from JSON renders the same way: `expr.Eq("field", expr.AND("a", expr.MUSTNOT(expr.Lit("b"))))` renders as `field:(a AND -b)` does. A group where a single value belongs is an error, as `field:>(a OR b)` is for the parser: the value of a comparison, an `IN` list item, a `LIKE` pattern, or the field itself.
+
 ## Null handling
 
 `field:null` renders as `IS NULL` across every dialect. The keyword is case-insensitive, and the renderer also covers the cases where null appears inside a grouped expression, behind a `NOT`, or alongside other values in an OR-chain.
