@@ -297,14 +297,14 @@ func formatFloat(f float64) string {
 }
 
 // isPlainTerm reports whether s lexes as one word with no escapes: letters,
-// digits, _ % @ # and $, and also . and - after the first character. This
+// digits, _ % @ # and $, and also ., - and + after the first character. This
 // follows lexWord in internal/lex. * and ? are left out because they would
 // make the word a wildcard.
 func isPlainTerm(s string) bool {
 	for i, r := range s {
 		switch {
 		case r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("%@#$", r):
-		case i > 0 && (r == '.' || r == '-'):
+		case i > 0 && (r == '.' || r == '-' || r == '+'):
 		default:
 			return false
 		}
