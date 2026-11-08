@@ -156,9 +156,10 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				continue
 			}
 
-			// Prefix operators (-, +, NOT) and "(" start a new subexpression. Inject an implicit AND
-			// when the top of the stack is an expression, so "-a:b -c:d" and "a:b (c:d)" both get an AND.
-			if len(p.stack) > 0 && (isPrefixOperator(tok) || tok.Typ == lex.TLParen) {
+			// Prefix operators (-, +, NOT), "(" and the start of a range start a new subexpression.
+			// Inject an implicit AND when the top of the stack is an expression, so "-a:b -c:d",
+			// "a:b (c:d)" and "a:(x [1 TO 5])" all get an AND.
+			if len(p.stack) > 0 && (isPrefixOperator(tok) || tok.Typ == lex.TLParen || isRangeStart(tok)) {
 				_, isTopToken := p.stack[len(p.stack)-1].(lex.Token)
 				if !isTopToken {
 					implAnd := lex.Token{Typ: lex.TAnd, Val: "AND"}
@@ -254,6 +255,11 @@ func endingRangeSubExpr(next lex.Token) bool {
 // These need implicit AND injection when they follow an expression.
 func isPrefixOperator(tok lex.Token) bool {
 	return tok.Typ == lex.TMinus || tok.Typ == lex.TPlus || tok.Typ == lex.TNot
+}
+
+// isRangeStart returns true for the brackets that open a range.
+func isRangeStart(tok lex.Token) bool {
+	return tok.Typ == lex.TLSquare || tok.Typ == lex.TLCurly
 }
 
 func (p *parser) shouldAccept(next lex.Token) bool {

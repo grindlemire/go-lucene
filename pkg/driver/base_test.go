@@ -663,8 +663,9 @@ func TestRenderSafeValueBoundary(t *testing.T) {
 			input: expr.LIKE("a", expr.REGEXP(`/x'\d/`)),
 			want:  want{`"a" ~ 'x''\d'`, "`a` REGEXP 'x''\\\\d'", `"a" REGEXP 'x''\d'`},
 		},
-		// a:("x' --" AND y) renders as an equality against a boolean
-		// expression. The SQL is wrong but every term is still escaped.
+		// A hand-built EQUALS whose value is an AND renders as an equality
+		// against a boolean expression. The parser no longer builds one,
+		// but the SQL for it is still escaped.
 		"compound_equals_right": {
 			input: expr.Eq("a", expr.AND(expr.Lit(`x' OR 1=1 --`), expr.Lit("y"))),
 			want: want{

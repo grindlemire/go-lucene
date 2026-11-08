@@ -79,9 +79,6 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 		"question_mark_in_column": {input: `a?b:c`, render: "param_postgres", want: `"a$1b" = $2`},
 		// An escaped \* is meant to match a literal *, but becomes \%.
 		"escaped_star_in_wildcard": {input: `a:\*x*`, render: "postgres", want: `"a" SIMILAR TO '\%x%'`},
-		// A field group compares the column to a boolean expression.
-		"field_group_and": {input: `a:("x' OR 1=1 --" AND c)`, render: "postgres", want: `"a" = ('x'' OR 1=1 --' AND 'c')`},
-		"field_group_gt":  {input: `a:>("x' OR 1=1 --" OR c)`, render: "postgres", want: `"a" > ('x'' OR 1=1 --' OR 'c')`},
 		// The default field only reaches a bare wildcard, regex or null when
 		// it is the whole query, so here the wildcard stands alone...
 		"default_field_skips_wildcard": {input: `x OR foo*`, defaultField: "default", render: "postgres", want: `("default" = 'x') OR 'foo*'`},
@@ -206,6 +203,120 @@ func TestDefaultFieldInsideFieldGroup(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestFieldGroupAppliesFieldToEachTerm is the end-to-end check for the field
+// group part of issue #77. Only a plain OR of terms used to get the group's
+// field, so a:(x AND y) rendered as "a" = ('x' AND 'y'), and
+// a:(x OR [1 TO 5]) failed to parse.
+func TestFieldGroupAppliesFieldToEachTerm(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  map[string]string
+	}{
+		"and": {
+			input: `a:(x AND y)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') AND ("a" = 'y')`,
+				"mysql":          "(`a` = 'x') AND (`a` = 'y')",
+				"mariadb":        "(`a` = 'x') AND (`a` = 'y')",
+				"sqlite":         `("a" = 'x') AND ("a" = 'y')`,
+				"param_postgres": `("a" = $1) AND ("a" = $2)`,
+				"param_mysql":    "(`a` = ?) AND (`a` = ?)",
+				"param_mariadb":  "(`a` = ?) AND (`a` = ?)",
+				"param_sqlite":   `("a" = ?) AND ("a" = ?)`,
+			},
+		},
+		"must_not": {
+			input: `a:(x -y)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') AND (NOT("a" = 'y'))`,
+				"mysql":          "(`a` = 'x') AND (NOT(`a` = 'y'))",
+				"sqlite":         `("a" = 'x') AND (NOT("a" = 'y'))`,
+				"param_postgres": `("a" = $1) AND (NOT("a" = $2))`,
+				"param_mysql":    "(`a` = ?) AND (NOT(`a` = ?))",
+				"param_sqlite":   `("a" = ?) AND (NOT("a" = ?))`,
+			},
+		},
+		"wildcard": {
+			input: `a:(x OR foo*)`,
+			want: map[string]string{
+				"postgres": `("a" = 'x') OR ("a" SIMILAR TO 'foo%')`,
+				"mysql":    "(`a` = 'x') OR (`a` LIKE 'foo%' ESCAPE '#')",
+				"sqlite":   `("a" = 'x') OR ("a" GLOB 'foo*')`,
+			},
+		},
+		"range": {
+			input: `a:(x OR [1 TO 5])`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') OR ("a" >= 1 AND "a" <= 5)`,
+				"mysql":          "(`a` = 'x') OR (`a` >= 1 AND `a` <= 5)",
+				"mariadb":        "(`a` = 'x') OR (`a` >= 1 AND `a` <= 5)",
+				"sqlite":         `("a" = 'x') OR ("a" >= 1 AND "a" <= 5)`,
+				"param_postgres": `("a" = $1) OR ("a" >= $2 AND "a" <= $3)`,
+				"param_mysql":    "(`a` = ?) OR (`a` >= ? AND `a` <= ?)",
+				"param_sqlite":   `("a" = ?) OR ("a" >= ? AND "a" <= ?)`,
+			},
+		},
+		"null": {
+			input: `a:(x AND null)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x') AND ("a" IS NULL)`,
+				"mysql":          "(`a` = 'x') AND (`a` IS NULL)",
+				"sqlite":         `("a" = 'x') AND ("a" IS NULL)`,
+				"param_postgres": `("a" = $1) AND ("a" IS NULL)`,
+			},
+		},
+		"quote_in_term": {
+			input: `a:("x' OR 1=1 --" AND c)`,
+			want: map[string]string{
+				"postgres":       `("a" = 'x'' OR 1=1 --') AND ("a" = 'c')`,
+				"mysql":          "(`a` = 'x'' OR 1=1 --') AND (`a` = 'c')",
+				"sqlite":         `("a" = 'x'' OR 1=1 --') AND ("a" = 'c')`,
+				"param_postgres": `("a" = $1) AND ("a" = $2)`,
+			},
+		},
+		// Unchanged: a plain OR of terms is still an IN list.
+		"or_of_terms": {
+			input: `a:(x OR y)`,
+			want: map[string]string{
+				"postgres":       `"a" IN ('x', 'y')`,
+				"param_postgres": `"a" IN ($1, $2)`,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			for variant, opts := range map[string][]Opt{"no_default": nil, "default_field": {WithDefaultField("default")}} {
+				t.Run(name+"/"+rname+"/"+variant, func(t *testing.T) {
+					got, err := renderers[rname](tc.input, opts...)
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					if got != want {
+						t.Fatalf("\nwant %s\ngot  %s", want, got)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestCompareGroupRenderError checks that every renderer refuses a
+// comparison on a group. a:>(x OR y) used to render "a" > ('x' OR 'y').
+func TestCompareGroupRenderError(t *testing.T) {
+	for rname, render := range renderers {
+		t.Run(rname, func(t *testing.T) {
+			got, err := render(`a:>("x' OR 1=1 --" OR c)`)
+			if err == nil {
+				t.Fatalf("expected an error, got SQL %q", got)
+			}
+			if !strings.Contains(err.Error(), "must be a single term") {
+				t.Fatalf("expected a single-term error, got: %v", err)
+			}
+		})
 	}
 }
 

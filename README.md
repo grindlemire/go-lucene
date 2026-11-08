@@ -104,6 +104,7 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `field:(a OR b OR null)` | `("field" IN ('a', 'b') OR "field" IS NULL)` | Multi-value with null |
 | `field:/regex/` | `"field" ~ 'regex'` | Regular expression |
 | `(a:1 OR b:2) AND c:3` | `(("a" = 1) OR ("b" = 2)) AND ("c" = 3)` | Grouping |
+| `field:(a AND -b)` | `("field" = 'a') AND (NOT("field" = 'b'))` | A field group applies its field to every term inside. A term with its own field keeps it |
 
 ## Null handling
 
