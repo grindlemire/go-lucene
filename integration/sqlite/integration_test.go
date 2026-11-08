@@ -309,6 +309,71 @@ func TestSQLiteIntegrationCaseInsensitiveFields(t *testing.T) {
 	})
 }
 
+// escapedWildcardCases match rows whose names hold the characters a wildcard
+// pattern gives a meaning to. An escaped character must match only itself.
+var escapedWildcardCases = []struct {
+	name    string
+	lucene  string
+	wantIDs []int
+}{
+	{"escaped_star_term", `name:a\*b`, []int{11}},
+	{"escaped_star", `name:a\**`, []int{11}},
+	{"escaped_star_inside", `name:*\*b`, []int{11}},
+	{"escaped_question_term", `name:a\?b`, []int{13}},
+	{"escaped_question", `name:a\?*`, []int{13}},
+	{"percent", `name:a%*`, []int{14}},
+	{"underscore", `name:a_*`, []int{15}},
+	{"escaped_bracket", `name:a\[*`, []int{16}},
+	{"escaped_close_bracket", `name:a\]*`, []int{19}},
+	{"escaped_backslash", `name:a\\*`, []int{17}},
+	{"hash", `name:a#*`, []int{18}},
+	{"dot", `name:a.*`, []int{20}},
+	{"escaped_space", `name:a\ *`, []int{21}},
+	{"escaped_paren", `name:a\(*`, []int{22}},
+	{"escaped_pipe", `name:a\|*`, []int{23}},
+	{"escaped_plus", `name:a\+*`, []int{24}},
+	{"escaped_brace", `name:a\{*`, []int{25}},
+	{"single_char", `name:a?b`, []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}},
+}
+
+func TestSQLiteIntegrationEscapedWildcards(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const rows = `
+        INSERT INTO items (id, name) VALUES
+            (11, 'a*b'), (12, 'axb'), (13, 'a?b'), (14, 'a%b'), (15, 'a_b'),
+            (16, 'a[b'), (17, 'a\b'), (18, 'a#b'), (19, 'a]b'), (20, 'a.b'),
+            (21, 'a b'), (22, 'a(b'), (23, 'a|b'), (24, 'a+b'), (25, 'a{b'),
+            (26, 'ab');
+    `
+	if _, err := db.Exec(rows); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	for _, tc := range escapedWildcardCases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToSQLite(tc.lucene)
+			if err != nil {
+				t.Fatalf("ToSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedSQLite(tc.lucene)
+			if err != nil {
+				t.Fatalf("ToParameterizedSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}
+
 func TestSQLiteIntegrationJSONPath(t *testing.T) {
 	requireIntegration(t)
 	db := openTestDB(t)

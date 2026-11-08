@@ -486,8 +486,8 @@ func TestMySQLIntegrationParameterized(t *testing.T) {
 // (pkg/driver/mysql.go:luceneWildcardToRegex) against a real MySQL. We
 // bypass the Lucene parser here because no clean Lucene syntax produces
 // a value containing the fallback-triggering metacharacters (`|`, `[]`,
-// `()`, `{}`, `+`) — they're reserved, and escaped forms keep the
-// backslash in the parsed value. Constructing the expression directly
+// `()`, `{}`, `+`) — they're reserved, and an escaped one is a literal
+// character, which stays on the LIKE path. Constructing the expression directly
 // via pkg/driver lets us verify the anchored ^(...)$ form actually runs
 // on both 8.0 (ICU) and 5.7 (Henry Spencer POSIX) regex engines.
 func TestMySQLIntegrationFallbackPath(t *testing.T) {
@@ -530,6 +530,106 @@ func TestMySQLIntegrationFallbackPath(t *testing.T) {
 			}
 			got := queryIDs(t, db, where, params...)
 			if !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s params=%v\n  want ids %v\n  got  ids %v",
+					tc.pattern, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}
+
+// TestMySQLIntegrationEscapedWildcards matches rows whose names hold the
+// characters a wildcard pattern gives a meaning to. An escaped character
+// must match only itself, on the LIKE path and on the REGEXP fallback.
+func TestMySQLIntegrationEscapedWildcards(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	// MySQL reads a backslash in a string literal as an escape, so 'a\\b'
+	// is the three characters a\b.
+	const rows = `
+		INSERT INTO items (id, name) VALUES
+			(11, 'a*b'), (12, 'axb'), (13, 'a?b'), (14, 'a%b'), (15, 'a_b'),
+			(16, 'a[b'), (17, 'a\\b'), (18, 'a#b'), (19, 'a]b'), (20, 'a.b'),
+			(21, 'a b'), (22, 'a(b'), (23, 'a|b'), (24, 'a+b'), (25, 'a{b'),
+			(26, 'ab');
+	`
+	if _, err := db.Exec(rows); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	cases := []integrationCase{
+		{name: "escaped_star_term", lucene: `name:a\*b`, wantIDs: []int{11}},
+		{name: "escaped_star", lucene: `name:a\**`, wantIDs: []int{11}},
+		{name: "escaped_star_inside", lucene: `name:*\*b`, wantIDs: []int{11}},
+		{name: "escaped_question_term", lucene: `name:a\?b`, wantIDs: []int{13}},
+		{name: "escaped_question", lucene: `name:a\?*`, wantIDs: []int{13}},
+		{name: "percent", lucene: `name:a%*`, wantIDs: []int{14}},
+		{name: "underscore", lucene: `name:a_*`, wantIDs: []int{15}},
+		{name: "escaped_bracket", lucene: `name:a\[*`, wantIDs: []int{16}},
+		{name: "escaped_close_bracket", lucene: `name:a\]*`, wantIDs: []int{19}},
+		{name: "escaped_backslash", lucene: `name:a\\*`, wantIDs: []int{17}},
+		{name: "hash", lucene: `name:a#*`, wantIDs: []int{18}},
+		{name: "dot", lucene: `name:a.*`, wantIDs: []int{20}},
+		{name: "escaped_space", lucene: `name:a\ *`, wantIDs: []int{21}},
+		{name: "escaped_paren", lucene: `name:a\(*`, wantIDs: []int{22}},
+		{name: "escaped_pipe", lucene: `name:a\|*`, wantIDs: []int{23}},
+		{name: "escaped_plus", lucene: `name:a\+*`, wantIDs: []int{24}},
+		{name: "escaped_brace", lucene: `name:a\{*`, wantIDs: []int{25}},
+		{name: "single_char", lucene: `name:a?b`, wantIDs: []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToMySQL(tc.lucene)
+			if err != nil {
+				t.Fatalf("ToMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedMySQL(tc.lucene)
+			if err != nil {
+				t.Fatalf("ToParameterizedMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	// The | below sends these patterns down the REGEXP fallback. The
+	// escaped characters next to it must still match only themselves.
+	drv := driver.NewMySQLDriver()
+	fallback := []struct {
+		name    string
+		pattern string
+		wantIDs []int
+	}{
+		{name: "fallback_escaped_star", pattern: `(a\*|zz)b`, wantIDs: []int{11}},
+		{name: "fallback_escaped_question", pattern: `(a\?|zz)b`, wantIDs: []int{13}},
+		{name: "fallback_escaped_backslash", pattern: `(a\\|zz)b`, wantIDs: []int{17}},
+		{name: "fallback_escaped_pipe", pattern: `(a\||zz)b`, wantIDs: []int{23}},
+		{name: "fallback_escaped_bracket", pattern: `(a\[|zz)b`, wantIDs: []int{16}},
+		{name: "fallback_dot", pattern: `(a.|zz)b`, wantIDs: []int{20}},
+	}
+	for _, tc := range fallback {
+		t.Run(tc.name, func(t *testing.T) {
+			e := expr.LIKE("name", tc.pattern)
+			where, err := drv.Render(e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s\n  want ids %v\n  got  ids %v",
+					tc.pattern, where, tc.wantIDs, got)
+			}
+			where, params, err := drv.RenderParam(e)
+			if err != nil {
+				t.Fatalf("render param: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
 				t.Fatalf("pattern=%q where=%s params=%v\n  want ids %v\n  got  ids %v",
 					tc.pattern, where, params, tc.wantIDs, got)
 			}

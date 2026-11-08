@@ -299,3 +299,20 @@ func TestStringBoostAndFuzzyParams(t *testing.T) {
 		"fuzzy_wild_boost": {`(a:b*~0)^0.5`, `(a:b*~0)^0.5`},
 	})
 }
+
+// TestStringEscapedWildcardChars checks that String() keeps an escaped * or ?
+// literal. A term with only escaped ones prints as a phrase, and a wildcard
+// keeps its escapes.
+func TestStringEscapedWildcardChars(t *testing.T) {
+	runStringCases(t, map[string]stringCase{
+		"only_escaped_star":  {`a:fo\*`, `a:"fo*"`},
+		"only_escaped_quest": {`a:fo\?`, `a:"fo?"`},
+		"escaped_star_first": {`a:\*x*`, `a:\*x*`},
+		"escaped_then_wild":  {`a:fo\*bar*`, `a:fo\*bar*`},
+		"escaped_backslash":  {`a:fo\\*`, `a:fo\\*`},
+		"escaped_space":      {`a:foo\ bar*`, `a:foo\ bar*`},
+		"in_group":           {`a:(fo\* OR b?)`, `a:"fo*" OR a:b?`},
+		"range_bound":        {`a:[fo\* TO z]`, `a:["fo*" TO z]`},
+		"escaped_field":      {`fo\*:x`, `"fo*":x`},
+	})
+}
