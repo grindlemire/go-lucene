@@ -10,6 +10,7 @@ package integration
 import (
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -374,6 +375,36 @@ func TestSQLiteIntegrationEscapedWildcards(t *testing.T) {
 		})
 	}
 
+	// expr.EscapeWildcard turns any text into a pattern that matches only
+	// that text, and only text that starts with it once a * follows.
+	for id, name := range seededNames(t, db) {
+		t.Run(fmt.Sprintf("escape_wildcard_%d", id), func(t *testing.T) {
+			for _, tc := range []struct {
+				pattern string
+				want    []int
+			}{
+				{expr.EscapeWildcard(name), []int{id}},
+				{expr.EscapeWildcard(name) + "*", []int{id}},
+			} {
+				e := expr.LIKE("name", tc.pattern)
+				where, params, err := lucenedriver.NewSQLiteDriver().RenderParam(e)
+				if err != nil {
+					t.Fatalf("render param: %v", err)
+				}
+				if got := queryIDs(t, db, where, params...); !equalInts(got, tc.want) {
+					t.Fatalf("name=%q where=%s params=%v\n  want ids %v\n  got  ids %v", name, where, params, tc.want, got)
+				}
+				where, err = lucenedriver.NewSQLiteDriver().Render(e)
+				if err != nil {
+					t.Fatalf("render: %v", err)
+				}
+				if got := queryIDs(t, db, where); !equalInts(got, tc.want) {
+					t.Fatalf("name=%q where=%s\n  want ids %v\n  got  ids %v", name, where, tc.want, got)
+				}
+			}
+		})
+	}
+
 	// A pattern built in code can hold a GLOB bracket expression. Inside it
 	// * ? [ and \ are members of the set, escaped or not.
 	drv := lucenedriver.NewSQLiteDriver()
@@ -406,6 +437,30 @@ func TestSQLiteIntegrationEscapedWildcards(t *testing.T) {
 			}
 		})
 	}
+}
+
+// seededNames returns the names of the rows TestSQLiteIntegrationEscapedWildcards
+// adds, by id.
+func seededNames(t *testing.T, db *sql.DB) map[int]string {
+	t.Helper()
+	rows, err := db.Query("SELECT id, name FROM items WHERE id >= 11")
+	if err != nil {
+		t.Fatalf("query names: %v", err)
+	}
+	defer rows.Close()
+	names := map[int]string{}
+	for rows.Next() {
+		var id int
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	return names
 }
 
 func TestSQLiteIntegrationJSONPath(t *testing.T) {

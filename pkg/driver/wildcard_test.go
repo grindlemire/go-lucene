@@ -116,6 +116,38 @@ func TestWildcardEscapesInRenderedSQL(t *testing.T) {
 	}
 }
 
+// TestEscapeWildcardMatchesItself checks that text passed through
+// expr.EscapeWildcard reaches each dialect with every character literal: the
+// pattern has no wildcard or operator left, and a * appended to it is the
+// only wildcard.
+func TestEscapeWildcardMatchesItself(t *testing.T) {
+	text := `a\b*c?d%e_f#g[h]i(j)k|l{m}n+o^p-q.r$s'u"v`
+	want := map[string]string{
+		"postgres": `a\\b\*c\?d\%e\_f#g\[h\]i\(j\)k\|l\{m\}n\+o^p-q.r$s'u"v`,
+		"mysql":    `a\b*c?d#%e#_f##g[h]i(j)k|l{m}n+o^p-q.r$s'u"v`,
+		"sqlite":   `a\b[*]c[?]d%e_f#g[[]h]i(j)k|l{m}n+o^p-q.r$s'u"v`,
+	}
+	wildcard := map[string]string{"postgres": "%", "mysql": "%", "sqlite": "*"}
+	for dname, d := range allDrivers {
+		t.Run(dname, func(t *testing.T) {
+			_, params, err := d.RenderParam(expr.LIKE("a", expr.WILD(expr.EscapeWildcard(text))))
+			if err != nil {
+				t.Fatalf("RenderParam: unexpected error: %v", err)
+			}
+			if len(params) != 1 || params[0] != want[dname] {
+				t.Fatalf("want params [%q], got %#v", want[dname], params)
+			}
+			_, params, err = d.RenderParam(expr.LIKE("a", expr.EscapeWildcard(text)+"*"))
+			if err != nil {
+				t.Fatalf("RenderParam: unexpected error: %v", err)
+			}
+			if len(params) != 1 || params[0] != want[dname]+wildcard[dname] {
+				t.Fatalf("want params [%q], got %#v", want[dname]+wildcard[dname], params)
+			}
+		})
+	}
+}
+
 // TestWildcardBracketExpression checks a bracket expression in a pattern
 // built in code. Inside the brackets every character is a member of the set,
 // so * and ? are not translated, and an escaped ^, -, ], [ or \ keeps its

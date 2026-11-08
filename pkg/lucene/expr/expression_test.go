@@ -623,6 +623,26 @@ func TestRangeBoundErrorMessage(t *testing.T) {
 	}
 }
 
+// TestEscapeWildcard checks that EscapeWildcard puts a backslash before each
+// character a pattern built in code gives a meaning to.
+func TestEscapeWildcard(t *testing.T) {
+	tcs := map[string]string{
+		"plain":     "plain",
+		`C:\Users*`: `C:\\Users\*`,
+		"f?o":       `f\?o`,
+		"(a|b)":     `\(a\|b\)`,
+		"[x]{2}+":   `\[x\]\{2\}\+`,
+		"50%_ok":    "50%_ok",
+		"é ü":       "é ü",
+		"":          "",
+	}
+	for in, want := range tcs {
+		if got := EscapeWildcard(in); got != want {
+			t.Errorf("EscapeWildcard(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestLiteralJSONForm checks the JSON form of a string literal. A literal
 // that a plain JSON string would decode as a wildcard or a regex is written
 // as {"literal": ...}, so it decodes back as a literal.
