@@ -230,6 +230,12 @@ func renderLiteral(e *Expression, verbose bool) string {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
+	// A number keeps the text it was written as. The lexer read that text as
+	// one token, so it parses back to the same number and text.
+	if e.numberText != "" {
+		return e.numberText
+	}
+
 	switch v := e.Left.(type) {
 	case string:
 		// The parser keeps a wildcard or regex as the text it read, with its
@@ -252,7 +258,13 @@ func renderLiteral(e *Expression, verbose bool) string {
 		}
 		return s
 	case float64:
-		return formatFloat(v)
+		// The parser keeps no text for a float written as its plain digits,
+		// so print those digits, with .0 if they would read back as an int.
+		d := strconv.FormatFloat(v, 'f', -1, 64)
+		if _, err := strconv.Atoi(d); err == nil {
+			d += ".0"
+		}
+		return d
 	}
 
 	return fmt.Sprintf("%v", e.Left)
