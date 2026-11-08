@@ -45,6 +45,8 @@ func FuzzPostgresDriver(f *testing.F) {
 		// issue #57: case-insensitive fields
 		`a:(Foo OR 5 OR null) AND A:F?o*`,
 		`-a:"O'Brien" OR default:(x OR y)`,
+		// + inside a term is part of it
+		`a:c++ OR a+b:1+2 OR (x)+y:[a+ TO b+c] OR -1+2`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
