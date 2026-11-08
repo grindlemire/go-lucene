@@ -476,9 +476,9 @@ func parseLiteral(token lex.Token) (e any, err error) {
 		return expr.WILD(token.Val), nil
 	}
 
-	// if it contains an escape string then strip it out now
+	// Drop the escapes. An escaped backslash stays: foo\\bar is foo\bar.
 	if strings.Contains(token.Val, `\`) {
-		return expr.Lit(strings.ReplaceAll(token.Val, `\`, "")), nil
+		return expr.Lit(wildcard.Unescape(token.Val)), nil
 	}
 
 	return expr.Lit(token.Val), nil
