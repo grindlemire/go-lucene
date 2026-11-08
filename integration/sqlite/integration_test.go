@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -374,6 +375,159 @@ func TestSQLiteIntegrationCaseInsensitiveFields(t *testing.T) {
 			t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, want, got)
 		}
 	})
+}
+
+// escapedWildcardCases match rows whose names hold the characters a wildcard
+// pattern gives a meaning to. An escaped character must match only itself.
+var escapedWildcardCases = []struct {
+	name    string
+	lucene  string
+	wantIDs []int
+}{
+	{"escaped_star_term", `name:a\*b`, []int{11}},
+	{"escaped_star", `name:a\**`, []int{11}},
+	{"escaped_star_inside", `name:*\*b`, []int{11}},
+	{"escaped_question_term", `name:a\?b`, []int{13}},
+	{"escaped_question", `name:a\?*`, []int{13}},
+	{"percent", `name:a%*`, []int{14}},
+	{"underscore", `name:a_*`, []int{15}},
+	{"escaped_bracket", `name:a\[*`, []int{16}},
+	{"escaped_close_bracket", `name:a\]*`, []int{19}},
+	{"escaped_backslash", `name:a\\*`, []int{17}},
+	{"escaped_backslash_term", `name:a\\b`, []int{17}},
+	{"hash", `name:a#*`, []int{18}},
+	{"dot", `name:a.*`, []int{20}},
+	{"escaped_space", `name:a\ *`, []int{21}},
+	{"escaped_paren", `name:a\(*`, []int{22}},
+	{"escaped_pipe", `name:a\|*`, []int{23}},
+	{"escaped_plus", `name:a\+*`, []int{24}},
+	{"escaped_brace", `name:a\{*`, []int{25}},
+	{"single_char", `name:a?b`, []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28}},
+}
+
+func TestSQLiteIntegrationEscapedWildcards(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const rows = `
+        INSERT INTO items (id, name) VALUES
+            (11, 'a*b'), (12, 'axb'), (13, 'a?b'), (14, 'a%b'), (15, 'a_b'),
+            (16, 'a[b'), (17, 'a\b'), (18, 'a#b'), (19, 'a]b'), (20, 'a.b'),
+            (21, 'a b'), (22, 'a(b'), (23, 'a|b'), (24, 'a+b'), (25, 'a{b'),
+            (26, 'ab'), (27, 'a^b'), (28, 'a-b');
+    `
+	if _, err := db.Exec(rows); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	for _, tc := range escapedWildcardCases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToSQLite(tc.lucene)
+			if err != nil {
+				t.Fatalf("ToSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedSQLite(tc.lucene)
+			if err != nil {
+				t.Fatalf("ToParameterizedSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	// expr.EscapeWildcard turns any text into a pattern that matches only
+	// that text, and only text that starts with it once a * follows.
+	for id, name := range seededNames(t, db) {
+		t.Run(fmt.Sprintf("escape_wildcard_%d", id), func(t *testing.T) {
+			for _, tc := range []struct {
+				pattern string
+				want    []int
+			}{
+				{expr.EscapeWildcard(name), []int{id}},
+				{expr.EscapeWildcard(name) + "*", []int{id}},
+			} {
+				e := expr.LIKE("name", tc.pattern)
+				where, params, err := lucenedriver.NewSQLiteDriver().RenderParam(e)
+				if err != nil {
+					t.Fatalf("render param: %v", err)
+				}
+				if got := queryIDs(t, db, where, params...); !equalInts(got, tc.want) {
+					t.Fatalf("name=%q where=%s params=%v\n  want ids %v\n  got  ids %v", name, where, params, tc.want, got)
+				}
+				where, err = lucenedriver.NewSQLiteDriver().Render(e)
+				if err != nil {
+					t.Fatalf("render: %v", err)
+				}
+				if got := queryIDs(t, db, where); !equalInts(got, tc.want) {
+					t.Fatalf("name=%q where=%s\n  want ids %v\n  got  ids %v", name, where, tc.want, got)
+				}
+			}
+		})
+	}
+
+	// A pattern built in code can hold a GLOB bracket expression. Inside it
+	// * ? [ and \ are members of the set, escaped or not.
+	drv := lucenedriver.NewSQLiteDriver()
+	brackets := []struct {
+		name    string
+		pattern string
+		wantIDs []int
+	}{
+		{"bracket_wildcard_chars", `a[*?]b`, []int{11, 13}},
+		{"bracket_escaped_wildcard_chars", `a[\*\?]b`, []int{11, 13}},
+		{"bracket_escaped_open", `a[\[x]b`, []int{12, 16}},
+		{"bracket_escaped_backslash", `a[\\x]b`, []int{12, 17}},
+	}
+	for _, tc := range brackets {
+		t.Run(tc.name, func(t *testing.T) {
+			e := expr.LIKE("name", tc.pattern)
+			where, err := drv.Render(e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s\n  want ids %v\n  got  ids %v", tc.pattern, where, tc.wantIDs, got)
+			}
+			where, params, err := drv.RenderParam(e)
+			if err != nil {
+				t.Fatalf("render param: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("pattern=%q where=%s params=%v\n  want ids %v\n  got  ids %v", tc.pattern, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}
+
+// seededNames returns the names of the rows TestSQLiteIntegrationEscapedWildcards
+// adds, by id.
+func seededNames(t *testing.T, db *sql.DB) map[int]string {
+	t.Helper()
+	rows, err := db.Query("SELECT id, name FROM items WHERE id >= 11")
+	if err != nil {
+		t.Fatalf("query names: %v", err)
+	}
+	defer rows.Close()
+	names := map[int]string{}
+	for rows.Next() {
+		var id int
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	return names
 }
 
 func TestSQLiteIntegrationJSONPath(t *testing.T) {

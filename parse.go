@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/grindlemire/go-lucene/internal/lex"
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
@@ -462,29 +463,57 @@ func parseLiteral(token lex.Token) (e any, err error) {
 
 	// attempt to parse it as a float. ParseFloat also accepts inf, NaN, hex
 	// floats like 0x1p3 and digit separators like 1_000; those stay terms
-	// because only a plain decimal number is a number.
+	// because only a plain decimal number is a number. A number too big for a
+	// float64 fails to parse and stays a term, and so does one too small,
+	// which ParseFloat rounds to 0.
 	fval, err := strconv.ParseFloat(token.Val, 64)
-	if err == nil && decimalNumber.MatchString(token.Val) {
+	if err == nil && decimalNumber.MatchString(token.Val) && !underflows(token.Val, fval) {
 		return expr.NumberLit(fval, token.Val), nil
 	}
 
-	// if it contains unescaped wildcards then it is a wildcard string
-	if strings.ContainsAny(token.Val, "*?") {
-		return expr.WILD(token.Val), nil
+	// A term with an unescaped * or ? is a wildcard. It keeps its escapes,
+	// which mark the characters it matches literally, as in fo\*bar*. A term
+	// whose only * and ? are escaped, like fo\*, is a plain term.
+	if wildcard.HasWildcard(token.Val) {
+		return expr.WILD(escapePlus(token.Val)), nil
 	}
 
-	// if it contains an escape string then strip it out now
+	// Drop the escapes. An escaped backslash stays: foo\\bar is foo\bar.
 	if strings.Contains(token.Val, `\`) {
-		return expr.Lit(strings.ReplaceAll(token.Val, `\`, "")), nil
+		return expr.Lit(wildcard.Unescape(token.Val)), nil
 	}
 
 	return expr.Lit(token.Val), nil
+}
+
+// escapePlus escapes each unescaped + in a wildcard's text. The lexer keeps a
+// + after the first character of a word, as in c++* or 1e+5*, and a + there
+// is a literal character. In a pattern built in code, an unescaped + is a SIMILAR TO
+// operator, so the parser's must be escaped to stay literal.
+func escapePlus(text string) string {
+	chars := wildcard.Split(text)
+	for i, c := range chars {
+		if c.Text == "+" {
+			chars[i].Escaped = true
+		}
+	}
+	return wildcard.Join(chars)
 }
 
 // decimalNumber matches a plain decimal number: an optional sign, digits with
 // an optional fraction, and an optional exponent, such as 5, -1.5, 5., .5 or
 // 1e-3. This is SQL's numeric literal syntax.
 var decimalNumber = regexp.MustCompile(`^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+
+// underflows reports whether the decimal number text is not zero but parsed
+// to f == 0, because it is too small for a float64, such as 1e-400.
+func underflows(text string, f float64) bool {
+	if f != 0 {
+		return false
+	}
+	mantissa, _, _ := strings.Cut(strings.ToLower(text), "e")
+	return strings.ContainsAny(mantissa, "123456789")
+}
 
 // isNumberLiteral reports whether parseLiteral turned a token into a number.
 func isNumberLiteral(in any) bool {

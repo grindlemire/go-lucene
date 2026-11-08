@@ -240,6 +240,102 @@ func TestRenderParamPassesThroughBindValues(t *testing.T) {
 	}
 }
 
+// TestNumberThatLosesDigitsIsWritten checks hand-built and JSON-decoded
+// number literals whose float value rounds their text. Both render modes write
+// the text into the SQL; one whose float holds its text exactly renders and
+// binds the float as before.
+func TestNumberThatLosesDigitsIsWritten(t *testing.T) {
+	big := expr.NumberLit(9223372036854775808.0, "9223372036854775808")
+	// changed returns that literal with its value replaced after NumberLit
+	// checked the text. The text no longer spells the value, so the driver
+	// renders the value.
+	changed := func(v any) *expr.Expression {
+		lit := expr.NumberLit(9223372036854775808.0, "9223372036854775808")
+		lit.Left = v
+		return lit
+	}
+	tcs := map[string]struct {
+		input      *expr.Expression
+		want       string
+		wantParam  string
+		wantParams []any
+	}{
+		"float64": {
+			input:     expr.Eq("a", big),
+			want:      `"a" = 9223372036854775808`,
+			wantParam: `"a" = 9223372036854775808`,
+		},
+		"float32": {
+			input:     expr.Eq("a", expr.NumberLit(float32(16777217), "16777217")),
+			want:      `"a" = 16777217`,
+			wantParam: `"a" = 16777217`,
+		},
+		"json": {
+			input:     mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":{"number":{"value":9223372036854775808,"text":"9223372036854775808"}}}`),
+			want:      `"a" = 9223372036854775808`,
+			wantParam: `"a" = 9223372036854775808`,
+		},
+		"range_bound": {
+			input:      rangeOf(big, 5),
+			want:       `"a" >= 9223372036854775808 AND "a" <= 5`,
+			wantParam:  `"a" >= 9223372036854775808 AND "a" <= $1`,
+			wantParams: []any{5},
+		},
+		"exact": {
+			input:      expr.Eq("a", expr.NumberLit(1000.0, "1e3")),
+			want:       `"a" = 1000`,
+			wantParam:  `"a" = $1`,
+			wantParams: []any{1000.0},
+		},
+		"value_changed": {
+			input:      expr.Eq("a", changed(5.0)),
+			want:       `"a" = 5`,
+			wantParam:  `"a" = $1`,
+			wantParams: []any{5.0},
+		},
+		"value_changed_to_float32": {
+			input:      expr.Eq("a", changed(float32(1.5))),
+			want:       `"a" = 1.5`,
+			wantParam:  `"a" = $1`,
+			wantParams: []any{float32(1.5)},
+		},
+		"value_changed_to_int": {
+			input:      expr.Eq("a", changed(7)),
+			want:       `"a" = 7`,
+			wantParam:  `"a" = $1`,
+			wantParams: []any{7},
+		},
+		"bound_value_changed": {
+			input:      rangeOf(changed(1e19), 5),
+			want:       `"a" >= 10000000000000000000 AND "a" <= 5`,
+			wantParam:  `"a" >= $1 AND "a" <= $2`,
+			wantParams: []any{1e19, 5},
+		},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			d := NewPostgresDriver()
+			got, err := d.Render(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf(errTemplate, "generated sql does not match", tc.want, got)
+			}
+			got, params, err := d.RenderParam(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.wantParam {
+				t.Fatalf(errTemplate, "generated sql does not match", tc.wantParam, got)
+			}
+			if len(params) != len(tc.wantParams) || (len(params) > 0 && !reflect.DeepEqual(params, tc.wantParams)) {
+				t.Fatalf("want params %#v, got %#v", tc.wantParams, params)
+			}
+		})
+	}
+}
+
 // TestNamedNumericType pins how a named integer type is handled. Render only
 // writes the built-in numeric types as SQL numbers, so it rejects one rather
 // than guessing at a format; RenderParam binds the value unchanged and leaves
@@ -467,7 +563,7 @@ func TestMySQLRegexFallbackEscaping(t *testing.T) {
 		"dot":       {`a.b|(c)*`, `'^(a\\.b|(c).*)$'`, `^(a\.b|(c).*)$`},
 		"caret":     {`^a|(b)`, `'^(\\^a|(b))$'`, `^(\^a|(b))$`},
 		"dollar":    {`a$|(b)`, `'^(a\\$|(b))$'`, `^(a\$|(b))$`},
-		"backslash": {`a\b|(c)`, `'^(a\\\\b|(c))$'`, `^(a\\b|(c))$`},
+		"backslash": {`a\\b|(c)`, `'^(a\\\\b|(c))$'`, `^(a\\b|(c))$`},
 		"quote":     {`it's|(x)`, `'^(it''s|(x))$'`, `^(it's|(x))$`},
 	}
 	d := NewMySQLDriver()
@@ -633,17 +729,17 @@ func TestRenderSafeValueBoundary(t *testing.T) {
 			want:  want{`"a" > 'x'' OR 1=1 --'`, "`a` > 'x'' OR 1=1 --'", `"a" > 'x'' OR 1=1 --'`},
 		},
 		"quote_in_wildcard": {
-			input: expr.LIKE("a", `x'_\*`),
+			input: expr.LIKE("a", `x'_\\*`),
 			want: want{
-				`"a" SIMILAR TO 'x''\_\%'`,
+				`"a" SIMILAR TO 'x''\_\\%'`,
 				"`a` LIKE 'x''#_\\\\%' ESCAPE '#'",
 				`"a" GLOB 'x''_\*'`,
 			},
 		},
 		"quote_in_mysql_regex_fallback": {
-			input: expr.LIKE("a", `x'\(y)*`),
+			input: expr.LIKE("a", `x'\\(y)*`),
 			want: want{
-				`"a" SIMILAR TO 'x''\(y)%'`,
+				`"a" SIMILAR TO 'x''\\(y)%'`,
 				"`a` REGEXP '^(x''\\\\\\\\(y).*)$'",
 				`"a" GLOB 'x''\(y)*'`,
 			},

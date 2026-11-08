@@ -63,42 +63,85 @@ func TestRangeBoundInjectionErrors(t *testing.T) {
 	}
 }
 
-// TestRenderKnownQuirksStaySafe pins inputs that render wrong SQL but keep
-// every user-supplied term escaped or bound. They are separate bugs from
-// issue #68 and are not fixed here; the pins show where the boundary is and
-// should be updated when those bugs are fixed.
-func TestRenderKnownQuirksStaySafe(t *testing.T) {
+// TestRenderEscapedWildcardChars is the end-to-end check for escaped
+// wildcard characters (issue #77). An escaped \* used to stay a wildcard:
+// a:\*x* rendered "a" SIMILAR TO '\%x%' and a:fo\* rendered a LIKE.
+func TestRenderEscapedWildcardChars(t *testing.T) {
 	tcs := map[string]struct {
-		input        string
-		defaultField string
-		render       string
-		want         string
-		wantErr      bool
+		input string
+		want  map[string]string
 	}{
-		// An escaped \* is meant to match a literal *, but becomes \%.
-		"escaped_star_in_wildcard": {input: `a:\*x*`, render: "postgres", want: `"a" SIMILAR TO '\%x%'`},
+		"only_escaped_star": {
+			input: `a:fo\*`,
+			want: map[string]string{
+				"postgres": `"a" = 'fo*'`,
+				"mysql":    "`a` = 'fo*'",
+				"sqlite":   `"a" = 'fo*'`,
+			},
+		},
+		"only_escaped_question": {
+			input: `a:fo\?`,
+			want: map[string]string{
+				"postgres": `"a" = 'fo?'`,
+				"mysql":    "`a` = 'fo?'",
+				"sqlite":   `"a" = 'fo?'`,
+			},
+		},
+		"escaped_star_in_wildcard": {
+			input: `a:\*x*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO '\*x%'`,
+				"mysql":    "`a` LIKE '*x%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB '[*]x*'`,
+			},
+		},
+		"escaped_question_in_wildcard": {
+			input: `a:x\?*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO 'x\?%'`,
+				"mysql":    "`a` LIKE 'x?%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB 'x[?]*'`,
+			},
+		},
+		"escaped_bracket_in_wildcard": {
+			input: `a:x\[*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO 'x\[%'`,
+				"mysql":    "`a` LIKE 'x[%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB 'x[[]*'`,
+			},
+		},
+		// The + of an exponent is a literal +. It used to reach SIMILAR TO
+		// bare, where it means "one or more", and sent MySQL to REGEXP.
+		"exponent_plus_in_wildcard": {
+			input: `a:1e+5*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO '1e\+5%'`,
+				"mysql":    "`a` LIKE '1e+5%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB '1e+5*'`,
+			},
+		},
+		"escaped_space_in_wildcard": {
+			input: `a:foo\ bar*`,
+			want: map[string]string{
+				"postgres": `"a" SIMILAR TO 'foo bar%'`,
+				"mysql":    "`a` LIKE 'foo bar%' ESCAPE '#'",
+				"sqlite":   `"a" GLOB 'foo bar*'`,
+			},
+		},
 	}
-
 	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			var opts []Opt
-			if tc.defaultField != "" {
-				opts = append(opts, WithDefaultField(tc.defaultField))
-			}
-			got, err := renderers[tc.render](tc.input, opts...)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected an error, got SQL %q", got)
+		for dname, want := range tc.want {
+			t.Run(name+"/"+dname, func(t *testing.T) {
+				got, err := renderers[dname](tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("\nwant %s\ngot  %s", tc.want, got)
-			}
-		})
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
 	}
 }
 
@@ -706,6 +749,126 @@ func TestNonFiniteWordsRenderAsStrings(t *testing.T) {
 	}
 }
 
+// TestNumbersThatLoseDigitsRenderAsWritten is the end-to-end check for numbers
+// that a float64 can't hold, from issue #77. a:9223372036854775808 used to
+// render "a" = 9.223372036854776e+18 and bind that float64, so the database
+// compared against 9223372036854776000. Such a number now reaches the SQL as
+// written, in both modes. No Go value the drivers bind holds it, so
+// RenderParam writes it into the SQL rather than binding it.
+func TestNumbersThatLoseDigitsRenderAsWritten(t *testing.T) {
+	tcs := map[string]struct {
+		input  string
+		want   map[string]string
+		params []any
+	}{
+		"int_overflow": {
+			input: `a:9223372036854775808`,
+			want:  inlineSQL(`"a" = 9223372036854775808`),
+		},
+		"negative_int_overflow": {
+			input: `a:-9223372036854775809`,
+			want:  inlineSQL(`"a" = -9223372036854775809`),
+		},
+		"too_many_digits": {
+			input: `a:0.1000000000000000055511151231257827`,
+			want:  inlineSQL(`"a" = 0.1000000000000000055511151231257827`),
+		},
+		"comparison": {
+			input: `a:>=12345678901234567891`,
+			want:  inlineSQL(`"a" >= 12345678901234567891`),
+		},
+		"range": {
+			input: `a:[9223372036854775808 TO 12345678901234567891]`,
+			want:  inlineSQL(`"a" >= 9223372036854775808 AND "a" <= 12345678901234567891`),
+		},
+		"open_range": {
+			input: `a:{* TO 9223372036854775808}`,
+			want:  inlineSQL(`"a" < 9223372036854775808`),
+		},
+		"range_with_param": {
+			input: `a:[1 TO 9223372036854775808]`,
+			want: map[string]string{
+				"postgres":       `"a" >= 1 AND "a" <= 9223372036854775808`,
+				"sqlite":         `"a" >= 1 AND "a" <= 9223372036854775808`,
+				"mysql":          "`a` >= 1 AND `a` <= 9223372036854775808",
+				"param_postgres": `"a" >= $1 AND "a" <= 9223372036854775808`,
+				"param_sqlite":   `"a" >= ? AND "a" <= 9223372036854775808`,
+				"param_mysql":    "`a` >= ? AND `a` <= 9223372036854775808",
+			},
+			params: []any{1},
+		},
+		"in_list": {
+			input: `a:(9223372036854775808 OR 2)`,
+			want: map[string]string{
+				"postgres":       `"a" IN (9223372036854775808, 2)`,
+				"sqlite":         `"a" IN (9223372036854775808, 2)`,
+				"mysql":          "`a` IN (9223372036854775808, 2)",
+				"param_postgres": `"a" IN (9223372036854775808, $1)`,
+				"param_sqlite":   `"a" IN (9223372036854775808, ?)`,
+				"param_mysql":    "`a` IN (9223372036854775808, ?)",
+			},
+			params: []any{2},
+		},
+		"placeholders_stay_numbered": {
+			input: `a:1 AND b:9223372036854775808 AND c:2`,
+			want: map[string]string{
+				"postgres":       `(("a" = 1) AND ("b" = 9223372036854775808)) AND ("c" = 2)`,
+				"param_postgres": `(("a" = $1) AND ("b" = 9223372036854775808)) AND ("c" = $2)`,
+			},
+			params: []any{1, 2},
+		},
+		// 1e20 is exactly a float64, so it binds as before.
+		"exact_float_bound": {
+			input: `a:[9223372036854775808 TO 1e20]`,
+			want: map[string]string{
+				"postgres":       `"a" >= 9223372036854775808 AND "a" <= 100000000000000000000`,
+				"param_postgres": `"a" >= 9223372036854775808 AND "a" <= $1`,
+			},
+			params: []any{1e20},
+		},
+		"default_field": {
+			input: `9223372036854775808`,
+			want:  inlineSQL(`"f" = 9223372036854775808`),
+		},
+	}
+	for name, tc := range tcs {
+		opts := []Opt{WithDefaultField("f")}
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input, opts...)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+		for rname, render := range paramRenderers {
+			t.Run(name+"/"+rname+"_params", func(t *testing.T) {
+				_, params, err := render(tc.input, opts...)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(params) != len(tc.params) || (len(params) > 0 && !reflect.DeepEqual(params, tc.params)) {
+					t.Fatalf("want params %#v, got %#v", tc.params, params)
+				}
+			})
+		}
+	}
+}
+
+// inlineSQL gives the same SQL for every renderer in both modes, for SQL with
+// no bind parameters where MySQL and MariaDB differ only in quoting columns
+// with backticks.
+func inlineSQL(postgres string) map[string]string {
+	want := sameSQL(postgres)
+	for name, sql := range sameSQL(postgres) {
+		want["param_"+name] = sql
+	}
+	return want
+}
+
 // paramRenderers lists the parameterized render entry points with their
 // bind parameters.
 var paramRenderers = map[string]func(string, ...Opt) (string, []any, error){
@@ -783,12 +946,165 @@ func TestNonDecimalNumbersRenderAsStrings(t *testing.T) {
 	})
 }
 
+// TestPlusInsideTermRenders checks that a + inside a term stays in it. a:be+3
+// used to parse as a:be AND +3 and render ("a" = 'be') AND (3), and a:c++
+// failed to parse. 1+2 is text, not a number.
+func TestPlusInsideTermRenders(t *testing.T) {
+	tcs := map[string]struct {
+		input      string
+		want       map[string]string
+		wantParams []any
+	}{
+		"after_word":   {`a:be+3`, sameSQL(`"a" = 'be+3'`), []any{"be+3"}},
+		"after_number": {`a:1+2`, sameSQL(`"a" = '1+2'`), []any{"1+2"}},
+		"at_end":       {`a:c++`, sameSQL(`"a" = 'c++'`), []any{"c++"}},
+		"in_field":     {`a+b:c`, sameSQL(`"a+b" = 'c'`), []any{"c"}},
+		"leading_plus": {`a:b +c:d`, sameSQL(`("a" = 'b') AND ("c" = 'd')`), []any{"b", "d"}},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			checkNumberRendering(t, tc.input, tc.want, tc.wantParams)
+		})
+	}
+}
+
+// TestPlusInsideWildcardIsLiteral checks that a + inside a wildcard term
+// matches a +. The lexer keeps it in the term, and the parser escapes it, so
+// Postgres SIMILAR TO and MySQL don't read it as "one or more". Before the
+// parser escaped it, a:c++* rendered "a" SIMILAR TO 'c++%', which Postgres
+// rejects, and MySQL sent the pattern to REGEXP.
+func TestPlusInsideWildcardIsLiteral(t *testing.T) {
+	tcs := map[string]struct {
+		input  string
+		want   map[string]string
+		params map[string][]any
+	}{
+		"star_after_plus": {
+			input: `a:c++*`,
+			want: map[string]string{
+				"postgres":       `"a" SIMILAR TO 'c\+\+%'`,
+				"mysql":          "`a` LIKE 'c++%' ESCAPE '#'",
+				"mariadb":        "`a` LIKE 'c++%' ESCAPE '#'",
+				"sqlite":         `"a" GLOB 'c++*'`,
+				"param_postgres": `"a" SIMILAR TO $1`,
+				"param_mysql":    "`a` LIKE ? ESCAPE '#'",
+				"param_mariadb":  "`a` LIKE ? ESCAPE '#'",
+				"param_sqlite":   `"a" GLOB ?`,
+			},
+			params: map[string][]any{
+				"param_postgres": {`c\+\+%`},
+				"param_mysql":    {"c++%"},
+				"param_mariadb":  {"c++%"},
+				"param_sqlite":   {"c++*"},
+			},
+		},
+		"question_after_plus": {
+			input: `a:a+b?`,
+			want: map[string]string{
+				"postgres":       `"a" SIMILAR TO 'a\+b_'`,
+				"mysql":          "`a` LIKE 'a+b_' ESCAPE '#'",
+				"mariadb":        "`a` LIKE 'a+b_' ESCAPE '#'",
+				"sqlite":         `"a" GLOB 'a+b?'`,
+				"param_postgres": `"a" SIMILAR TO $1`,
+				"param_mysql":    "`a` LIKE ? ESCAPE '#'",
+				"param_mariadb":  "`a` LIKE ? ESCAPE '#'",
+				"param_sqlite":   `"a" GLOB ?`,
+			},
+			params: map[string][]any{
+				"param_postgres": {`a\+b_`},
+				"param_mysql":    {"a+b_"},
+				"param_mariadb":  {"a+b_"},
+				"param_sqlite":   {"a+b?"},
+			},
+		},
+		"plus_between_stars": {
+			input: `a:*+*`,
+			want: map[string]string{
+				"postgres":       `"a" SIMILAR TO '%\+%'`,
+				"mysql":          "`a` LIKE '%+%' ESCAPE '#'",
+				"mariadb":        "`a` LIKE '%+%' ESCAPE '#'",
+				"sqlite":         `"a" GLOB '*+*'`,
+				"param_postgres": `"a" SIMILAR TO $1`,
+				"param_mysql":    "`a` LIKE ? ESCAPE '#'",
+				"param_mariadb":  "`a` LIKE ? ESCAPE '#'",
+				"param_sqlite":   `"a" GLOB ?`,
+			},
+			params: map[string][]any{
+				"param_postgres": {`%\+%`},
+				"param_mysql":    {"%+%"},
+				"param_mariadb":  {"%+%"},
+				"param_sqlite":   {"*+*"},
+			},
+		},
+	}
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+		for rname, render := range paramRenderers {
+			t.Run(name+"/"+rname+"_params", func(t *testing.T) {
+				_, params, err := render(tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !reflect.DeepEqual(params, tc.params[rname]) {
+					t.Fatalf("want params %#v, got %#v", tc.params[rname], params)
+				}
+			})
+		}
+	}
+
+	// JSON paths and case-insensitive fields render the same pattern.
+	for name, tc := range map[string]struct {
+		input string
+		opt   Opt
+		want  map[string]string
+	}{
+		"json_path": {
+			input: `labels.v:c++*`,
+			opt:   WithJSONFields("labels"),
+			want: map[string]string{
+				"postgres": `"labels"->>'v' SIMILAR TO 'c\+\+%'`,
+				"mysql":    "CASE WHEN JSON_TYPE(JSON_EXTRACT(`labels`, '$.v')) <> 'NULL' THEN JSON_UNQUOTE(JSON_EXTRACT(`labels`, '$.v')) END LIKE 'c++%' ESCAPE '#'",
+				"sqlite":   `CASE json_type("labels", '$.v') WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(json_extract("labels", '$.v') AS TEXT) END GLOB 'c++*'`,
+			},
+		},
+		"case_insensitive": {
+			input: `a:C++*`,
+			opt:   WithCaseInsensitiveFields("a"),
+			want: map[string]string{
+				"postgres": `LOWER("a") SIMILAR TO LOWER('C\+\+%')`,
+				"mysql":    "LOWER(`a`) LIKE LOWER('C++%') ESCAPE '#'",
+				"sqlite":   `LOWER("a") GLOB LOWER('C++*')`,
+			},
+		},
+	} {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input, tc.opt)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+	}
+}
+
 // TestDecimalNumberFormsRender pins the SQL for each spelling of a plain
 // decimal number, in both render modes. Leading zeros are dropped, an exponent
-// is folded into the value.
-//
-// int_overflow pins a known limit, not a design choice: an integer too big
-// for an int renders as the nearest float64, which loses its low digits.
+// is folded into the value. A number that a float64 can't hold keeps its
+// written text instead; TestNumbersThatLoseDigitsRenderAsWritten covers it.
 func TestDecimalNumberFormsRender(t *testing.T) {
 	tcs := map[string]struct {
 		input      string
@@ -801,11 +1117,14 @@ func TestDecimalNumberFormsRender(t *testing.T) {
 		"exponent":       {`a:1e3`, sameSQL(`"a" = 1000`), []any{1000.0}},
 		"upper_exponent": {`a:1E3`, sameSQL(`"a" = 1000`), []any{1000.0}},
 		"fraction":       {`a:1.5e-3`, sameSQL(`"a" = 0.0015`), []any{0.0015}},
-		"int_overflow":   {`a:9223372036854775808`, sameSQL(`"a" = 9.223372036854776e+18`), []any{9223372036854775808.0}},
 		"float_overflow": {`a:1e400`, sameSQL(`"a" = '1e400'`), []any{"1e400"}},
 		"hex_int":        {`sku:0x1F`, sameSQL(`"sku" = '0x1F'`), []any{"0x1F"}},
 		"escaped_digits": {`a:\007`, sameSQL(`"a" = '007'`), []any{"007"}},
 		"range":          {`a:[007 TO 1e3]`, sameSQL(`"a" >= 7 AND "a" <= 1000`), []any{7, 1000.0}},
+
+		// A nonzero number too small for a float64 used to render as 0.
+		"float_underflow": {`a:1e-400`, sameSQL(`"a" = '1e-400'`), []any{"1e-400"}},
+		"zero_exponent":   {`a:0e-400`, sameSQL(`"a" = 0`), []any{0.0}},
 	}
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {

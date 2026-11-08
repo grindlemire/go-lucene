@@ -59,6 +59,8 @@ sql, params, err := lucene.ToParameterizedMySQL(`color:red AND type:"gala"`)
 // params: ["red", "gala"]
 ```
 
+A number with more digits than a float64 holds, like `9223372036854775808` or `0.1000000000000000055511151231257827`, goes into the SQL instead of being bound. A float64 would round it, a string would compare as text against a JSON value in MySQL and SQLite, and Postgres rejects a string past the range of a `bigint` column, so the database reads it from the SQL as written: `id:9223372036854775808` gives `"id" = 9223372036854775808` and no parameter. It is always a plain decimal number, so it can't change the query. SQLite reads an integer past int64 as a REAL, so there it still compares as the nearest double.
+
 ### Inline values
 
 If you don't need parameter binding (for example, when generating SQL for inspection), `ToPostgres`, `ToSQLite`, and `ToMySQL` embed values directly into the string:
@@ -87,11 +89,12 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 |---|---|---|
 | `field:value` | `"field" = 'value'` | Exact match |
 | `field:"phrase with spaces"` | `"field" = 'phrase with spaces'` | Quoted phrase |
-| `field:1.5` | `"field" = 1.5` | A plain decimal number like `5`, `-1.5` or `1e3` is a number. Anything else, like `0x1p3`, `1_000` or `inf`, is a string. Quote it (`"007"`) to keep a number's text |
+| `field:1.5` | `"field" = 1.5` | A plain decimal number like `5`, `-1.5` or `1e3` is a number. Anything else, like `0x1p3`, `1_000` or `inf`, is a string, and so is a number too big or too small for a float64, like `1e400` or `1e-400`. Quote it (`"007"`) to keep a number's text. A number that a float64 rounds, like `9223372036854775808`, is written into the SQL as written in both forms (see [Parameterized queries](#parameterized-queries-recommended)) |
 | `a:1 AND b:2` | `("a" = 1) AND ("b" = 2)` | Boolean AND |
 | `a:1 OR b:2` | `("a" = 1) OR ("b" = 2)` | Boolean OR |
 | `NOT field:value` | `NOT("field" = 'value')` | Negation |
 | `+field:value` | `"field" = 'value'` | Required term (same as no prefix) |
+| `field:c++` | `"field" = 'c++'` | A `+` or `-` after the first character of a term is part of the term, as in Lucene, so `a+b` and `1+2` are single terms. Only a `+` or `-` at the start of a term is an operator. In a wildcard such as `c++*` the `+` matches a literal `+` |
 | `-field:value` | `NOT("field" = 'value')` | Prohibited term |
 | `field:[min TO max]` | `"field" >= min AND "field" <= max` | Inclusive range |
 | `field:{min TO max}` | `"field" > min AND "field" < max` | Exclusive range |
@@ -100,6 +103,8 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `field:*` | `"field" SIMILAR TO '%'` | Match anything non-null |
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | Wildcard suffix |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | Single-character wildcard |
+| `field:pat\*` | `"field" = 'pat*'` | An escaped `*` or `?` is a literal character, so a term with no other wildcard is an exact match |
+| `field:pat\**` | `"field" SIMILAR TO 'pat\*%'` | In a wildcard, an escaped character matches only itself |
 | `field:null` | `"field" IS NULL` | Null check (case-insensitive) |
 | `NOT field:null` | `"field" IS NOT NULL` | Negated null check |
 | `-field:null` | `"field" IS NOT NULL` | Same as `NOT field:null` |
@@ -110,6 +115,21 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `field:(a AND -b)` | `("field" = 'a') AND (NOT("field" = 'b'))` | A field group applies its field to every term inside. A term with its own field keeps it |
 
 An expression built in code or read from JSON renders the same way. `expr.Eq("field", expr.AND("a", expr.MUSTNOT(expr.Lit("b"))))` renders as `field:(a AND -b)` does, and `expr.Eq("field", expr.Eq("other", 1))` renders as `field:(other:1)` does, which is `"other" = 1`. The value of a comparison, an `IN` list item, a `LIKE` pattern and the field itself must each be a single term, and anything else is an error, as `field:>(a OR b)` is for the parser. A field operator with no field is an error too.
+
+### Wildcards built in code
+
+`expr.LIKE` and `expr.WILD` take a pattern in Lucene wildcard syntax, as in a query: `*` and `?` are wildcards, and a backslash makes the next character literal. ``expr.LIKE("name", `fo\*bar*`)`` matches text that starts with `fo*bar`, and a literal backslash is written `\\`. The same goes for a pattern read from JSON.
+
+Earlier versions passed a backslash in a pattern built in code to MySQL and SQLite as a literal backslash. Code that puts text such as `C:\Users\` into a pattern now needs to escape it, and `expr.EscapeWildcard` turns any text into a pattern that matches only that text:
+
+```go
+// Names that start with the user's text, whatever characters it holds.
+e := expr.LIKE("name", expr.EscapeWildcard(userText)+"*")
+```
+
+It escapes the backslash, `*` and `?`, and also `|`, `()`, `[]`, `{}` and `+`. In a pattern built in code those keep their SIMILAR TO meaning on Postgres and MySQL (MySQL falls back to `REGEXP` for them), and `[...]` is a character set on SQLite too. Inside a set, an escaped `^`, `-`, `]`, `[` or `\` is a member of the set on Postgres and on MySQL 8.0 and MariaDB 10.5+. MySQL 5.7 and older MariaDB also add the backslash to the set, and GLOB has no way to escape `^`, `-` or `]` inside one.
+
+`String()` prints the pattern as a query term, with a backslash before each character the parser would split the term on or read differently. `expr.LIKE("name", "foo bar*").String()` is `name:foo\ bar*`. Lucene has no syntax for the SIMILAR TO operators, so `String()` escapes them too, and the printed query matches them as literal characters.
 
 ## Null handling
 
@@ -212,6 +232,7 @@ SQLite lacks direct equivalents for a few Postgres operators, so the SQLite driv
 | `field:*` | `"field" SIMILAR TO '%'` | `"field" IS NOT NULL` |
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | `"field" GLOB 'pat*'` |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | `"field" GLOB 'pat?'` |
+| `field:pat\**` | `"field" SIMILAR TO 'pat\*%'` | `"field" GLOB 'pat[*]*'` |
 | `field:/regex/` | `"field" ~ 'regex'` | `"field" REGEXP 'regex'` |
 | parameters | `$1, $2, ...` | `?` |
 
@@ -219,7 +240,7 @@ SQLite lacks direct equivalents for a few Postgres operators, so the SQLite driv
 
 **GLOB is case-sensitive** and uses Unix glob syntax. Lucene's `*` and `?` map cleanly onto GLOB's `*` and `?`. To ignore case on a field, see [Case-insensitive fields](#case-insensitive-fields).
 
-**GLOB has no escape character.** To match a literal `*` or `?`, use the regex form `field:/.../`.
+**GLOB has no escape character.** An escaped `\*`, `\?` or `\[` in a wildcard is written as a bracket expression that holds only that character: `[*]`, `[?]` or `[[]`.
 
 **GLOB has no alternation.** A pattern like `field:*(a|b)*` matches the literal characters `(a|b)`, not "a or b". Use `field:/.*(a|b).*/` if you need alternation in SQLite.
 
@@ -275,6 +296,7 @@ MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL
 | `field:pat*` | `"field" SIMILAR TO 'pat%'` | `` `field` LIKE 'pat%' ESCAPE '#' `` |
 | `field:pat?` | `"field" SIMILAR TO 'pat_'` | `` `field` LIKE 'pat_' ESCAPE '#' `` |
 | `field:100%*` (literal `%`) | `"field" SIMILAR TO '100\%%'` | `` `field` LIKE '100#%%' ESCAPE '#' `` |
+| `field:pat\**` (literal `*`) | `"field" SIMILAR TO 'pat\*%'` | `` `field` LIKE 'pat*%' ESCAPE '#' `` |
 | `field:*(a\|b)*` (passed via `expr.LIKE`, see note) | `"field" SIMILAR TO '%(a\|b)%'` | `` `field` REGEXP '^(.*(a\|b).*)$' `` |
 | `field:/regex/` | `"field" ~ 'regex'` | `` `field` REGEXP 'regex' `` |
 | bool literal `true` | `true` | `TRUE` |
@@ -284,7 +306,7 @@ MySQL uses backticks for identifiers and doesn't have `SIMILAR TO`, so the MySQL
 
 **Identifiers always quote with backticks.** Column names containing a backtick are rejected at render time. The always-quote policy handles MySQL 8.0's expanded reserved-word list (`RANK`, `LEAD`, `WINDOW`, `ROWS`, etc.) automatically.
 
-**`LIKE` vs `REGEXP` is decided by pattern content.** Simple Lucene wildcards (`*`, `?`) stay on the index-friendly `LIKE` path. Patterns containing `|`, `()`, `[]`, `{}`, or `+` fall back to `REGEXP` with an anchored `^(...)$` translation so the match semantics line up with Postgres `SIMILAR TO`. A plain capturing group is used rather than `(?:...)` because the non-capturing form is a Perl extension that POSIX ERE (MySQL 5.7 / MariaDB 10.0-10.4) does not guarantee.
+**`LIKE` vs `REGEXP` is decided by pattern content.** Simple Lucene wildcards (`*`, `?`) stay on the index-friendly `LIKE` path. Patterns containing an unescaped `|`, `()`, `[]`, `{}`, or `+` fall back to `REGEXP` with an anchored `^(...)$` translation so the match semantics line up with Postgres `SIMILAR TO`. A plain capturing group is used rather than `(?:...)` because the non-capturing form is a Perl extension that POSIX ERE (MySQL 5.7 / MariaDB 10.0-10.4) does not guarantee.
 
 **The `ESCAPE '#'` clause is intentional.** Using `#` instead of the default backslash keeps the rendered SQL portable across `sql_mode` settings. Under `NO_BACKSLASH_ESCAPES`, a `\` escape clause would be reinterpreted and break the LIKE pattern.
 
@@ -365,12 +387,31 @@ func (sqlServerDialect) RenderStandaloneWild(left string) (string, error) {
 }
 
 func (sqlServerDialect) PrepareLikePattern(pattern string) (string, bool) {
-    // SQL Server LIKE uses % and _ like SIMILAR TO; escape literals with [].
-    pattern = strings.ReplaceAll(pattern, "%", "[%]")
-    pattern = strings.ReplaceAll(pattern, "_", "[_]")
-    pattern = strings.ReplaceAll(pattern, "*", "%")
-    pattern = strings.ReplaceAll(pattern, "?", "_")
-    return pattern, false
+    // In the pattern, * and ? are wildcards and a backslash makes the next
+    // character literal. SQL Server LIKE uses % and _ for wildcards and []
+    // for character sets, so a literal %, _ or [ goes inside brackets.
+    var b strings.Builder
+    escaped := false
+    for _, r := range pattern {
+        switch {
+        case r == '\\' && !escaped:
+            escaped = true
+            continue
+        case r == '*' && !escaped:
+            b.WriteString("%")
+        case r == '?' && !escaped:
+            b.WriteString("_")
+        case r == '%' || r == '_' || r == '[':
+            b.WriteString("[" + string(r) + "]")
+        default:
+            b.WriteRune(r)
+        }
+        escaped = false
+    }
+    if escaped {
+        b.WriteString(`\`) // a backslash at the end is a literal backslash
+    }
+    return b.String(), false
 }
 
 func (sqlServerDialect) EscapeStringLiteral(s string) string {
@@ -414,3 +455,5 @@ To render [JSON fields](#json-fields), a dialect also implements `driver.JSONPat
 The `Dialect` interface evolved across releases: `EscapeLikePattern` was replaced by `PrepareLikePattern` (which additionally returns a `useRegex` flag so dialects can route alternation/grouping patterns to a regex path), and `EscapeStringLiteral` was added so dialects can control string-literal quoting (MySQL needs this to double backslashes under default `sql_mode`).
 
 `PrepareLikePattern` now receives the raw, unescaped pattern, and in the non-parameterized path its result is escaped with `EscapeStringLiteral` afterwards. A dialect that escaped its own output for SQL string literals should stop, or the escaping is applied twice.
+
+The pattern is in Lucene wildcard syntax: an unescaped `*` or `?` is a wildcard, and a backslash makes the next character literal. A query such as `name:fo\*bar*` reaches `PrepareLikePattern` as `fo\*bar*`, where only the last `*` is a wildcard. A dialect that turned every `*` into its own wildcard should skip the escaped ones and drop the backslash.

@@ -18,6 +18,11 @@ type Dialect interface {
 	// dialect's pattern syntax and reports whether the resulting expression
 	// should be rendered via the regex path (REGEXP / ~) instead of the
 	// wildcard path (LIKE / SIMILAR TO / GLOB). Replaces EscapeLikePattern.
+	//
+	// In the pattern, an unescaped * matches any run of characters and an
+	// unescaped ? matches one character. A backslash makes the next
+	// character literal, so fo\*bar* matches text that starts with fo*bar.
+	// A backslash at the end of the pattern is a literal backslash.
 	PrepareLikePattern(pattern string) (transformed string, useRegex bool)
 
 	// EscapeStringLiteral escapes a string for safe embedding in a SQL
