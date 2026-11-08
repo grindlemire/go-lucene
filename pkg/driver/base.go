@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -621,35 +622,53 @@ func formatNumber(v any, floatFmt byte) (s string, ok bool, err error) {
 }
 
 // numberText is the text a number was written as, for a number that its Go
-// value does not hold. It is always a plain decimal number, so it is safe to
-// write into the SQL.
+// value does not hold. lostDigits only returns one that is a plain decimal
+// number, so it is safe to write into the SQL.
 type numberText string
+
+// plainDecimal matches a plain decimal number, with an optional minus, digits
+// with an optional dot or a dot and digits, and an optional exponent, such as
+// -1.5 or 9223372036854775808. That is SQL's numeric literal syntax, so text
+// that matches it reads as one number in the SQL.
+var plainDecimal = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
 
 // lostDigits returns the text that e, a number literal, was written as when
 // its float value is a different number. A float64 holds
 // 9223372036854775808 as 9223372036854776000, for example, and
 // 0.1000000000000000055511151231257827 as 0.1. Such a number has to reach
 // the database as its text for the database to compare it as written.
+//
+// The text goes into the SQL unquoted, so lostDigits checks it here rather
+// than relying on NumberLit: it must be a plain decimal number, and it must
+// still parse to the value, which a caller can change after NumberLit
+// checked it.
 func lostDigits(e *expr.Expression) (numberText, bool) {
 	text := e.NumberText()
-	if e.Op != expr.Literal || text == "" {
+	if e.Op != expr.Literal || text == "" || !plainDecimal.MatchString(text) {
 		return "", false
 	}
 	var held string
 	switch f := e.Left.(type) {
 	case float64:
+		parsed, err := strconv.ParseFloat(text, 64)
+		if err != nil || parsed != f || f == 0 {
+			return "", false
+		}
 		held = strconv.FormatFloat(f, 'g', -1, 64)
 	case float32:
+		parsed, err := strconv.ParseFloat(text, 32)
+		if err != nil || float32(parsed) != f || f == 0 {
+			return "", false
+		}
 		held = strconv.FormatFloat(float64(f), 'g', -1, 32)
 	default:
-		// NumberLit keeps text only for a value equal to it, and an integer
-		// type holds every integer it equals.
+		// An integer renders as its own digits, so its text never reaches
+		// the SQL.
 		return "", false
 	}
-	// NumberLit keeps only a decimal number that parses to the value, and
-	// not one that underflows to 0, so the text's magnitude is within a
-	// float64's range. Parsing it exactly then costs time in proportion to
-	// its length.
+	// The text parsed to a float that is neither 0 nor infinite, so its
+	// magnitude is within a float's range, and parsing it exactly costs time
+	// in proportion to its length.
 	written, ok := new(big.Rat).SetString(text)
 	if !ok {
 		return "", false
