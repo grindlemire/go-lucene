@@ -3,6 +3,8 @@ package lucene
 import (
 	"reflect"
 	"testing"
+
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
 type stringCase struct {
@@ -104,5 +106,116 @@ func TestStringOperatorsDefaultField(t *testing.T) {
 		"bare_term":   {`x AND a:>5`, `default:x AND a:>5`},
 		"bare_phrase": {`"x y" OR a:fo*`, `default:"x y" OR a:fo*`},
 	}, WithDefaultField("default"))
+}
+
+// TestStringTerms checks that each value prints so it lexes back as the same
+// term. A value that would not is printed as a phrase, with " and \ escaped.
+// Wildcards and regexes print as written.
+func TestStringTerms(t *testing.T) {
+	runStringCases(t, map[string]stringCase{
+		"wildcard_space":   {`a:fo\ o*`, `a:fo\ o*`},
+		"regex_space":      {`a:/foo bar/`, `a:/foo bar/`},
+		"regex_quote":      {`a:/b "[c]/`, `a:/b "[c]/`},
+		"regex_bare_space": {`/b [c]/`, `/b [c]/`},
+		"in_quoted_num":    {`a:("5" OR x)`, `a:("5" OR x)`},
+		"in_quoted_phrase": {`a:("a\"b" OR "")`, `a:("a\"b" OR "")`},
+
+		"quoted_int":        {`a:"5"`, `a:"5"`},
+		"quoted_negative":   {`a:"-5"`, `a:"-5"`},
+		"quoted_float":      {`a:"1.5"`, `a:"1.5"`},
+		"quoted_exponent":   {`a:"1e3"`, `a:"1e3"`},
+		"quoted_null":       {`a:"null"`, `a:"null"`},
+		"quoted_null_upper": {`a:"NULL"`, `a:"NULL"`},
+		"quoted_and":        {`a:"AND"`, `a:"AND"`},
+		"quoted_or":         {`a:"or"`, `a:"or"`},
+		"quoted_not":        {`a:"Not"`, `a:"Not"`},
+		"quoted_to":         {`a:"to"`, `a:"to"`},
+		"quoted_star":       {`a:"fo*"`, `a:"fo*"`},
+		"quoted_question":   {`a:"f?o"`, `a:"f?o"`},
+		"quoted_empty":      {`a:""`, `a:""`},
+		"bare_empty":        {`""`, `""`},
+		"bare_and":          {`"AND"`, `"AND"`},
+		"quoted_colon":      {`a:"a:b"`, `a:"a:b"`},
+		"escaped_colon":     {`x:a\:b`, `x:"a:b"`},
+		"escaped_parens":    {`a:\(1\+1\)\:2`, `a:"(1+1):2"`},
+		"quoted_parens":     {`a:"(x)"`, `a:"(x)"`},
+		"quoted_leading":    {`a:"-x"`, `a:"-x"`},
+		"quoted_bang":       {`a:"x!"`, `a:"x!"`},
+		"windows_path":      {`a:"C:\temp"`, `a:"C:\\temp"`},
+		"backslash":         {`a:"foo\\bar"`, `a:"foo\\bar"`},
+		"trailing_slash":    {`a:"foo\\"`, `a:"foo\\"`},
+		"single_quoted":     {`a:'it\'s'`, `a:"it's"`},
+		"escaped_quotes":    {`a:"say \"hi\""`, `a:"say \"hi\""`},
+		"phrase":            {`a:"x y"`, `a:"x y"`},
+		"tab":               {"a:\"x\ty\"", "a:\"x\ty\""},
+		"inf":               {`a:inf`, `a:"inf"`},
+
+		"word":         {`a:foo`, `a:foo`},
+		"unicode":      {`a:héllo`, `a:héllo`},
+		"email":        {`a:foo@bar.com`, `a:foo@bar.com`},
+		"hash":         {`a:#tag`, `a:#tag`},
+		"percent":      {`a:50%`, `a:50%`},
+		"dotted":       {`a:a.b`, `a:a.b`},
+		"dashed":       {`a:a-b`, `a:a-b`},
+		"underscore":   {`a:_x`, `a:_x`},
+		"digit_prefix": {`a:5a`, `a:5a`},
+
+		"range_quoted":  {`a:["5" TO "TO"]`, `a:["5" TO "TO"]`},
+		"range_colon":   {`a:{"a:b" TO c}`, `a:{"a:b" TO c}`},
+		"range_escaped": {`a:[a\:b TO c]`, `a:["a:b" TO c]`},
+	})
+}
+
+// TestStringQuotesFields checks that a field name that would not lex back as
+// one term is printed as a phrase.
+func TestStringQuotesFields(t *testing.T) {
+	runStringCases(t, map[string]stringCase{
+		"space":         {`"foo bar":x`, `"foo bar":x`},
+		"escaped_space": {`foo\ bar:x`, `"foo bar":x`},
+		"keyword":       {`"AND":x`, `"AND":x`},
+		"colon":         {`"a:b":c`, `"a:b":c`},
+		"quote":         {`"a\"b":c`, `"a\"b":c`},
+		"empty":         {`"":x`, `"":x`},
+		"range":         {`"a b":[1 TO 2]`, `"a b":[1 TO 2]`},
+		"compare":       {`"a b":>5`, `"a b":>5`},
+		"in":            {`"a b":(x OR y)`, `"a b":(x OR y)`},
+		"wildcard":      {`"a b":fo*`, `"a b":fo*`},
+
+		// A field that looks like a number or null is still a column, so it
+		// needs no quotes.
+		"number": {`5:x`, `5:x`},
+		"float":  {`1.50:x`, `1.50:x`},
+		"null":   {`null:x`, `null:x`},
+		"quoted": {`"5":x`, `5:x`},
+	})
+}
+
+// TestParseBoostAndFuzzyParams pins how the parser reads a boost power or
+// fuzzy distance written as a quoted or float literal. The reducers used to
+// read it through String(), so a change to how literals print must not
+// change what these parse to.
+func TestParseBoostAndFuzzyParams(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"fuzzy_quoted":   {`a~"2"`, expr.FUZZY(expr.Lit("a"), 2)},
+		"fuzzy_float":    {`a~2.0`, expr.FUZZY(expr.Lit("a"), 2)},
+		"boost_quoted":   {`a^"2"`, expr.BOOST(expr.Lit("a"), 2.0)},
+		"boost_quoted_f": {`a^"0.5"`, expr.BOOST(expr.Lit("a"), 0.5)},
+		"boost_float":    {`a^2.5`, expr.BOOST(expr.Lit("a"), 2.5)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
 }
 

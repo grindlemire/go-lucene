@@ -377,7 +377,7 @@ func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 
 	// We have 3+ elements. Check if elems[2] is a valid numeric distance
 	if distance, ok := elems[2].(*expr.Expression); ok {
-		if idistance, err := strconv.Atoi(distance.String()); err == nil {
+		if idistance, err := strconv.Atoi(termText(distance)); err == nil {
 			return []any{expr.FUZZY(rest, idistance)}, drop(nonTerminals, 1), true
 		}
 		// elems[2] is an Expression but not a valid numeric distance
@@ -415,7 +415,7 @@ func boost(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 
 	// We have 3+ elements. Check if elems[2] is a valid numeric power
 	if power, ok := elems[2].(*expr.Expression); ok {
-		if fpower, err := toPositiveFloat(power.String()); err == nil {
+		if fpower, err := toPositiveFloat(termText(power)); err == nil {
 			// Valid power - reduce all 3 elements
 			return []any{expr.BOOST(rest, fpower)}, drop(nonTerminals, 1), true
 		}
@@ -476,6 +476,16 @@ func rangeop(elems []any, nonTerminals []lex.Token, defaultField string) ([]any,
 
 func drop[T any](stack []T, i int) []T {
 	return stack[:len(stack)-i]
+}
+
+// termText returns the value of a literal as plain text, or "" for anything
+// else. It reads the value directly rather than through String(), which
+// quotes values such as "2" so they parse back as strings.
+func termText(e *expr.Expression) string {
+	if e.Op != expr.Literal {
+		return ""
+	}
+	return fmt.Sprint(e.Left)
 }
 
 func toPositiveFloat(in string) (f float64, err error) {

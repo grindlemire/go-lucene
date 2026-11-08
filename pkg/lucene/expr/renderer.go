@@ -2,7 +2,9 @@ package expr
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 type renderer func(e *Expression, verbose bool) string
@@ -205,22 +207,73 @@ func renderLiteral(e *Expression, verbose bool) string {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
-	// only a plain Literal can hold a raw quote character today (produced by
-	// unescaping \" or \' inside a phrase), so only escape/quote-guard those.
-	// Wild and Regexp also render through here but keep their prior,
-	// space-only quoting - their raw text isn't phrase-delimiter-escaped and
-	// wrapping it in quotes here would change what it re-parses as.
-	s, isStr := e.Left.(string)
-	if isStr && e.Op == Literal && strings.ContainsAny(s, ` "'`) {
-		// the rendered phrase always uses " as its delimiter, so only " (and
-		// the backslash that would otherwise escape it) need escaping here -
-		// a bare ' just needs the value quoted so it isn't lexed as a word.
-		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
-		return fmt.Sprintf(`"%s"`, escaped)
-	}
-	if isStr && strings.ContainsAny(s, " ") {
-		return fmt.Sprintf(`"%s"`, s)
+	switch v := e.Left.(type) {
+	case string:
+		// The parser keeps a wildcard or regex as the text it read, with its
+		// escapes and slashes, so that text lexes back to the same term.
+		if e.Op == Wild || e.Op == Regexp {
+			return v
+		}
+		if !isPlainTerm(v) || readsAsValue(v) {
+			return quotePhrase(v)
+		}
+		return v
+	case Column:
+		// A field that looks like a number or null is still read as a
+		// column, so only the lexer decides whether it needs quotes.
+		if !isPlainTerm(string(v)) || isKeyword(string(v)) {
+			return quotePhrase(string(v))
+		}
+		return string(v)
 	}
 
 	return fmt.Sprintf("%v", e.Left)
+}
+
+// isPlainTerm reports whether s lexes as one word with no escapes: letters,
+// digits, _ % @ # and $, and also . and - after the first character. This
+// follows lexWord in internal/lex. * and ? are left out because they would
+// make the word a wildcard.
+func isPlainTerm(s string) bool {
+	for i, r := range s {
+		switch {
+		case r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("%@#$", r):
+		case i > 0 && (r == '.' || r == '-'):
+		default:
+			return false
+		}
+	}
+	return s != ""
+}
+
+// isKeyword reports whether s lexes as an operator rather than a word.
+func isKeyword(s string) bool {
+	switch strings.ToUpper(s) {
+	case "AND", "OR", "NOT", "TO":
+		return true
+	}
+	return false
+}
+
+// readsAsValue reports whether the parser would read the bare word s as
+// something other than the string s: a keyword, null or a number. Anything
+// strconv reads as a number counts, even where the parser keeps it a word
+// (inf, 0x10), so quoting stays correct if the parser's number rules change.
+func readsAsValue(s string) bool {
+	if isKeyword(s) || strings.EqualFold(s, "null") {
+		return true
+	}
+	if _, err := strconv.ParseInt(s, 0, 64); err == nil {
+		return true
+	}
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
+}
+
+var phraseEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+
+// quotePhrase writes s as a double-quoted phrase. The parser unescapes only
+// \" and \\ inside a phrase, so escaping those two is enough.
+func quotePhrase(s string) string {
+	return `"` + phraseEscaper.Replace(s) + `"`
 }
