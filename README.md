@@ -76,6 +76,8 @@ sql, err := lucene.ToPostgres(`red OR green`, lucene.WithDefaultField("color"))
 // ("color" = 'red') OR ("color" = 'green')
 ```
 
+It applies to every term with no field, including wildcards, regexes, `null` and ranges: `red OR gr*` renders `("color" = 'red') OR ("color" SIMILAR TO 'gr%')`. Terms inside a field group like `size:(s OR m)` take the group's field instead.
+
 ## Operator reference
 
 Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where those drivers differ.

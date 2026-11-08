@@ -346,6 +346,15 @@ func TestCaseInsensitiveFields(t *testing.T) {
 				"sqlite":   {`LOWER("name") = LOWER('Foo')`, `LOWER("name") = LOWER(?)`, []any{"Foo"}},
 			},
 		},
+		"listed_default_field_wildcard": {
+			input: "x OR Foo*",
+			opts:  []Opt{WithDefaultField("name"), WithCaseInsensitiveFields("name")},
+			want: map[string]ciWant{
+				"postgres": {`(LOWER("name") = LOWER('x')) OR (LOWER("name") SIMILAR TO LOWER('Foo%'))`, `(LOWER("name") = LOWER($1)) OR (LOWER("name") SIMILAR TO LOWER($2))`, []any{"x", "Foo%"}},
+				"mysql":    {"(LOWER(`name`) = LOWER('x')) OR (LOWER(`name`) LIKE LOWER('Foo%') ESCAPE '#')", "(LOWER(`name`) = LOWER(?)) OR (LOWER(`name`) LIKE LOWER(?) ESCAPE '#')", []any{"x", "Foo%"}},
+				"sqlite":   {`(LOWER("name") = LOWER('x')) OR (LOWER("name") GLOB LOWER('Foo*'))`, `(LOWER("name") = LOWER(?)) OR (LOWER("name") GLOB LOWER(?))`, []any{"x", "Foo*"}},
+			},
+		},
 		"unlisted_default_field_unchanged": {
 			input: "Foo",
 			opts:  []Opt{WithDefaultField("other"), WithCaseInsensitiveFields("name")},
