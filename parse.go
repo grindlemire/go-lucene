@@ -22,6 +22,27 @@ func WithDefaultField(field string) Opt {
 	}
 }
 
+// WithJSONFields marks columns that hold JSON. A dotted field on one of these
+// columns, such as labels.category, parses to an expr.JSONPath and the SQL drivers
+// render it with the dialect's JSON accessor. Dotted fields on other columns
+// keep their current meaning: a column whose name contains a dot. A column
+// name that is empty or contains a dot makes Parse return an error, because the
+// first dot of a field always ends the column name.
+func WithJSONFields(columns ...string) Opt {
+	return func(p *parser) {
+		if p.jsonFields == nil {
+			p.jsonFields = map[string]bool{}
+		}
+		for _, c := range columns {
+			if c == "" || strings.Contains(c, ".") {
+				p.optErr = fmt.Errorf("WithJSONFields: column name %q must be non-empty and must not contain a dot", c)
+				return
+			}
+			p.jsonFields[c] = true
+		}
+	}
+}
+
 // WithCaseInsensitiveFields makes string matches on the listed fields ignore
 // case: equality, phrases, IN lists and wildcards. The SQL wraps the column
 // and the value in LOWER(). Numbers, regexes, ranges, comparisons, field:*
@@ -58,10 +79,17 @@ func parseWithOptions(input string, opts ...Opt) (e *expr.Expression, p *parser,
 	for _, opt := range opts {
 		opt(p)
 	}
+	if p.optErr != nil {
+		return e, p, p.optErr
+	}
 
 	ex, err := p.parse()
 	if err != nil {
 		return e, p, err
+	}
+
+	if len(p.jsonFields) > 0 {
+		toJSONPaths(ex, p.jsonFields)
 	}
 
 	err = expr.Validate(ex)
@@ -82,6 +110,8 @@ type parser struct {
 	numberText map[*expr.Expression]string
 
 	defaultField string
+	jsonFields   map[string]bool
+	optErr       error
 
 	// fieldOps counts the ':' and '=' tokens on nonTerminals, so reduce can
 	// tell whether it is inside a field's value without scanning the stack.
@@ -89,6 +119,44 @@ type parser struct {
 
 	// caseInsensitiveFields is read by the render functions, not the parser.
 	caseInsensitiveFields []string
+}
+
+// toJSONPaths replaces each column named "<json column>.<path>" with an expr.JSONPath.
+func toJSONPaths(e *expr.Expression, jsonFields map[string]bool) {
+	if e == nil {
+		return
+	}
+	if col, ok := e.Left.(expr.Column); ok {
+		base, path, dotted := strings.Cut(string(col), ".")
+		if dotted && jsonFields[base] {
+			e.Left = expr.JSONPath{Column: expr.Column(base), Path: strings.Split(path, ".")}
+		}
+		return
+	}
+	for _, side := range []any{e.Left, e.Right} {
+		switch v := side.(type) {
+		case *expr.Expression:
+			toJSONPaths(v, jsonFields)
+		case []*expr.Expression:
+			for _, child := range v {
+				toJSONPaths(child, jsonFields)
+			}
+		}
+	}
+}
+
+// checkJSONField rejects a field on a JSON column with an escaped dot, such
+// as labels.a\.b. Every dot separates keys, so the key a.b cannot be
+// addressed, and reading the path as a, b would match the wrong key.
+func (p *parser) checkJSONField(tok lex.Token) error {
+	if tok.Typ == lex.TQuoted || !strings.Contains(tok.Val, `\.`) {
+		return nil
+	}
+	base, _, _ := strings.Cut(strings.ReplaceAll(tok.Val, `\`, ""), ".")
+	if p.jsonFields[base] {
+		return fmt.Errorf("json path key cannot contain a dot: %s", tok.Val)
+	}
+	return nil
 }
 
 func (p *parser) parse() (e *expr.Expression, err error) {
@@ -127,6 +195,11 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				// Keep a number's text in case it turns out to be a field.
 				if isNumberLiteral(lit) {
 					p.numberText[lit.(*expr.Expression)] = tok.Val
+				}
+				if p.lex.Peek().Typ == lex.TColon {
+					if err := p.checkJSONField(tok); err != nil {
+						return e, err
+					}
 				}
 
 				// we should always check if the current top of the stack is another token
@@ -384,7 +457,7 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	// attempt to parse it as an integer. Atoi only accepts decimal digits.
 	ival, err := strconv.Atoi(token.Val)
 	if err == nil {
-		return expr.Lit(ival), nil
+		return expr.NumberLit(ival, token.Val), nil
 	}
 
 	// attempt to parse it as a float. ParseFloat also accepts inf, NaN, hex
@@ -392,7 +465,7 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	// because only a plain decimal number is a number.
 	fval, err := strconv.ParseFloat(token.Val, 64)
 	if err == nil && decimalNumber.MatchString(token.Val) {
-		return expr.Lit(fval), nil
+		return expr.NumberLit(fval, token.Val), nil
 	}
 
 	// if it contains unescaped wildcards then it is a wildcard string

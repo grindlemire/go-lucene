@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Lucene Grammar:
@@ -39,6 +42,7 @@ type Expression struct {
 	// these are operator specific states we have to track
 	boostPower    float64
 	fuzzyDistance int
+	numberText    string
 }
 
 // RangeBoundary represents the boundary conditions for a range operator
@@ -75,6 +79,80 @@ func (e Expression) GoString() string {
 // Lit represents a literal expression
 func Lit(in any) *Expression {
 	return Expr(in, Literal)
+}
+
+// NumberLit returns a literal for the number v, written as text in the query,
+// such as 1.0 or 02134. A driver that compares the number as text uses text,
+// and String prints it. text is kept only when it differs from how v prints,
+// so NumberLit(5, "5") equals Lit(5). It is also dropped when it is not a
+// plain decimal number equal to v, so it can never print as another query.
+func NumberLit(v any, text string) *Expression {
+	e := Lit(v)
+	if text != numberString(v) && spellsNumber(text, v) {
+		e.numberText = text
+	}
+	return e
+}
+
+// numberSpelling matches a number as the lexer reads it: an optional minus,
+// digits with an optional dot or a dot and digits, and an optional exponent.
+var numberSpelling = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+
+// spellsNumber reports whether text is a plain decimal number equal to v.
+func spellsNumber(text string, v any) bool {
+	if !numberSpelling.MatchString(text) {
+		return false
+	}
+	f, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return false
+	}
+	switch n := v.(type) {
+	case int:
+		return f == float64(n)
+	case int8:
+		return f == float64(n)
+	case int16:
+		return f == float64(n)
+	case int32:
+		return f == float64(n)
+	case int64:
+		return f == float64(n)
+	case uint:
+		return f == float64(n)
+	case uint8:
+		return f == float64(n)
+	case uint16:
+		return f == float64(n)
+	case uint32:
+		return f == float64(n)
+	case uint64:
+		return f == float64(n)
+	case float32:
+		return float32(f) == n
+	case float64:
+		return f == n
+	default:
+		return false
+	}
+}
+
+// numberString prints v the way the SQL drivers print a number as text.
+func numberString(v any) string {
+	switch n := v.(type) {
+	case float64:
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(n), 'f', -1, 32)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// NumberText returns the text that a NumberLit was written as. It is empty
+// when the number prints as written.
+func (e *Expression) NumberText() string {
+	return e.numberText
 }
 
 // WILD represents a literal wildcard expression
@@ -229,6 +307,64 @@ func (c Column) GoString() string {
 	return fmt.Sprintf("COLUMN(%s)", c)
 }
 
+// JSONPath addresses a key inside a JSON column, e.g. labels.category is
+// Column "labels" with Path ["category"]. The parser produces it in column
+// position for columns registered with lucene.WithJSONFields.
+type JSONPath struct {
+	Column Column   `json:"column"`
+	Path   []string `json:"path"`
+}
+
+// jsonPathLeaf is the JSON form of a JSONPath leaf. The "json_path" key tells
+// it apart from a nested expression object.
+type jsonPathLeaf struct {
+	JSONPath *jsonPathFields `json:"json_path"`
+}
+
+// jsonPathFields has JSONPath's fields without its MarshalJSON method.
+type jsonPathFields JSONPath
+
+// MarshalJSON wraps the path in a "json_path" object so UnmarshalJSON can tell
+// it apart from a nested expression.
+func (p JSONPath) MarshalJSON() ([]byte, error) {
+	return json.Marshal(jsonPathLeaf{JSONPath: (*jsonPathFields)(&p)})
+}
+
+// String renders the path in lucene dot syntax, e.g. labels.category.
+func (p JSONPath) String() string {
+	return string(p.Column) + "." + strings.Join(p.Path, ".")
+}
+
+// GoString is a debug print for the json path type
+func (p JSONPath) GoString() string {
+	return fmt.Sprintf("JSON_PATH(%s)", p)
+}
+
+// Validate reports whether the path can be rendered. The column must be
+// non-empty, and each path segment non-empty valid UTF-8 without a double
+// quote, backslash or control character.
+func (p JSONPath) Validate() error {
+	if len(p.Column) == 0 {
+		return fmt.Errorf("json path column name is empty")
+	}
+	if len(p.Path) == 0 {
+		return fmt.Errorf("json path on column %q is empty", p.Column)
+	}
+	for _, seg := range p.Path {
+		switch {
+		case seg == "":
+			return fmt.Errorf("json path has an empty segment: %q", p.String())
+		case !utf8.ValidString(seg):
+			return fmt.Errorf("json path segment is not valid UTF-8: %q", seg)
+		case strings.ContainsAny(seg, `"\`):
+			return fmt.Errorf("json path segment contains a double quote or backslash: %q", seg)
+		case strings.ContainsFunc(seg, unicode.IsControl):
+			return fmt.Errorf("json path segment contains a control character: %q", seg)
+		}
+	}
+	return nil
+}
+
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {
@@ -333,6 +469,9 @@ type jsonExpression struct {
 // MarshalJSON is a custom JSON serialization for the Expression
 func (e Expression) MarshalJSON() (out []byte, err error) {
 	// if we are in a leaf node just marshal the value
+	if e.Op == Literal && e.numberText != "" {
+		return json.Marshal(numberLeaf{Number: numberFields{Value: e.Left, Text: e.numberText}})
+	}
 	if e.Op == Literal || e.Op == Wild || e.Op == Regexp || e.Op == Null {
 		return json.Marshal(e.Left)
 	}
@@ -378,6 +517,27 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		// this is required because apparently you can't swap pointers to your receiver mid method
 		*e = *Expr
 		return err
+	}
+
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
+	if raw, ok := keys["json_path"]; ok {
+		p, err := unmarshalJSONPath(raw, len(keys))
+		if err != nil {
+			return err
+		}
+		*e = *Lit(p)
+		return nil
+	}
+	if raw, ok := keys["number"]; ok {
+		n, err := unmarshalNumber(raw, len(keys))
+		if err != nil {
+			return err
+		}
+		*e = *n
+		return nil
 	}
 
 	// unmarshal the current layer in the json first, then worry about
@@ -426,12 +586,11 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		if err != nil {
 			return err
 		}
-		if !IsExpr(boundary.Min) {
-			boundary.Min = literalToExpr(toIntIfNecessary(boundary.Min))
+		if boundary.Min, err = unmarshalBound(boundary.Min); err != nil {
+			return err
 		}
-
-		if !IsExpr(boundary.Max) {
-			boundary.Max = literalToExpr(toIntIfNecessary(boundary.Max))
+		if boundary.Max, err = unmarshalBound(boundary.Max); err != nil {
+			return err
 		}
 		e.Right = &boundary
 	} else if len(c.Right) > 0 {
@@ -459,8 +618,98 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	return nil
 }
 
+func unmarshalJSONPath(raw json.RawMessage, keys int) (JSONPath, error) {
+	if keys != 1 {
+		return JSONPath{}, fmt.Errorf("json_path must be the only key of its object")
+	}
+	var p jsonPathFields
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return JSONPath{}, fmt.Errorf("invalid json_path: %w", err)
+	}
+	if err := JSONPath(p).Validate(); err != nil {
+		return JSONPath{}, fmt.Errorf("invalid json_path: %w", err)
+	}
+	return JSONPath(p), nil
+}
+
+// numberLeaf is the JSON form of a number literal that keeps the text it was
+// written as, such as {"number":{"value":1,"text":"1.0"}}.
+type numberLeaf struct {
+	Number numberFields `json:"number"`
+}
+
+type numberFields struct {
+	Value any    `json:"value"`
+	Text  string `json:"text"`
+}
+
+// unmarshalNumber decodes a numberLeaf. Like the parser, it reads the number
+// as an int when its text is an int, and as a float64 otherwise.
+func unmarshalNumber(raw json.RawMessage, keys int) (*Expression, error) {
+	if keys != 1 {
+		return nil, fmt.Errorf("number must be the only key of its object")
+	}
+	var n struct {
+		Value json.Number `json:"value"`
+		Text  string      `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return nil, fmt.Errorf("invalid number: %w", err)
+	}
+	if n.Text == "" {
+		return nil, fmt.Errorf("invalid number: text must not be empty")
+	}
+	if !numberSpelling.MatchString(n.Text) {
+		return nil, fmt.Errorf("invalid number: text %q is not a decimal number", n.Text)
+	}
+	if _, err := strconv.Atoi(n.Text); err == nil {
+		i, err := strconv.Atoi(n.Value.String())
+		if err != nil {
+			return nil, fmt.Errorf("invalid number: value %q is not an int", n.Value)
+		}
+		return checkedNumberLit(i, n.Text)
+	}
+	f, err := n.Value.Float64()
+	if err != nil {
+		return nil, fmt.Errorf("invalid number: %w", err)
+	}
+	return checkedNumberLit(f, n.Text)
+}
+
+func checkedNumberLit(v any, text string) (*Expression, error) {
+	if !spellsNumber(text, v) {
+		return nil, fmt.Errorf("invalid number: text %q does not equal value %v", text, v)
+	}
+	return NumberLit(v, text), nil
+}
+
+// unmarshalBound turns a range bound decoded into an any back into a literal.
+// Any other object stays a map, which Validate rejects.
+func unmarshalBound(in any) (*Expression, error) {
+	m, isObject := in.(map[string]any)
+	if _, isNumber := m["number"]; !isObject || !isNumber {
+		return literalToExpr(toIntIfNecessary(in)), nil
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalLiteral(raw)
+}
+
 func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 	e = ptr(empty())
+
+	// a number that keeps the text it was written as
+	if isJSONObject(in) {
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(in, &keys); err != nil {
+			return e, err
+		}
+		if raw, ok := keys["number"]; ok {
+			return unmarshalNumber(raw, len(keys))
+		}
+	}
 
 	// JSON `null` -> NULL expression.
 	if bytes.Equal(bytes.TrimSpace(in), []byte("null")) {

@@ -230,18 +230,25 @@ func TestParseBoostAndFuzzyParams(t *testing.T) {
 func TestStringKeepsNumberType(t *testing.T) {
 	runStringCases(t, map[string]stringCase{
 		"whole_float":    {`a:5.0`, `a:5.0`},
-		"exponent":       {`a:1e3`, `a:1000.0`},
+		"exponent":       {`a:1e3`, `a:1e3`},
 		"large_exponent": {`a:1e21`, `a:1e21`},
-		"small_exponent": {`a:1.5e-7`, `a:1.5e-07`},
+		"small_exponent": {`a:1.5e-7`, `a:1.5e-7`},
 		"huge":           {`a:1e300`, `a:1e300`},
 		"small":          {`a:0.0001`, `a:0.0001`},
 		"wide_int":       {`a:100000000.0`, `a:100000000.0`},
-		"trailing_zero":  {`a:-2.50`, `a:-2.5`},
+		"trailing_zero":  {`a:-2.50`, `a:-2.50`},
 		"range":          {`a:[0.5 TO 5.0]`, `a:[0.5 TO 5.0]`},
 		"bare":           {`8.0`, `8.0`},
 		"in":             {`a:(1.0 OR 2)`, `a:(1.0 OR 2)`},
 		"int":            {`a:5`, `a:5`},
+		"trailing_dot":   {`a:0.`, `a:0.`},
+		"big_whole":      {`a:20000000022222200000`, `a:20000000022222200000`},
+		"small_digits":   {`a:0.00001`, `a:0.00001`},
+		"must_not_dot":   {`- .5`, `-(.5)`},
 	})
+	runStringCases(t, map[string]stringCase{
+		"default_field": {`0.`, `default:0.`},
+	}, WithDefaultField("default"))
 }
 
 // TestStringFieldGroup checks how a field group prints once its field has been

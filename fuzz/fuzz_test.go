@@ -23,6 +23,12 @@ func FuzzPostgresDriver(f *testing.F) {
 		`-bbq:"woo"`,
 		`(a:b)^10`,
 		`a:foo~`,
+		`a.b:c AND a.b.c:>5`,
+		`a.b:[1 TO 10] OR a.b:(x OR y)`,
+		`a.it\'s:x AND NOT a.b:null`,
+		`a.b:1.0 AND a.b:(02 OR x) AND a.b:[1e3 TO z]`,
+		`a.b\.c:x OR a.b:"5"`,
+		`a.b:FoO* AND a.b:(X OR y)`,
 		// issue #68: compound range bounds
 		`0:[0 0 TO 0]`,
 		`a:["\" AND 1) OR 1=1 --" z TO q]`,
@@ -61,6 +67,15 @@ func FuzzPostgresDriver(f *testing.F) {
 		}
 
 		validateRender(t, e)
+
+		// Test JSON paths on a registered column.
+		e, err = lucene.Parse(in, lucene.WithJSONFields("a", "A"))
+		if err != nil {
+			// Ignore invalid expressions.
+			return
+		}
+
+		validateRender(t, e)
 	})
 }
 
@@ -69,7 +84,7 @@ func validateRender(t *testing.T, e *expr.Expression) {
 
 	// Fold case on the columns the seeds use.
 	folded := driver.NewPostgresDriver()
-	folded.CaseInsensitiveFields = []string{"a", "A", "default"}
+	folded.CaseInsensitiveFields = []string{"a", "A", "a.b", "default"}
 	validateRenderWith(t, folded, e)
 }
 

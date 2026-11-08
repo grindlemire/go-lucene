@@ -154,3 +154,20 @@ func (mysqlDialect) QuoteColumn(name string) (string, error) {
 	}
 	return "`" + name + "`", nil
 }
+
+// RenderJSONPath reads the value as text, the same as a plain column, and maps
+// a JSON null to SQL NULL (JSON_UNQUOTE alone gives the string 'null'). The
+// type check matters for numbers: MySQL would otherwise convert text such as
+// 'abc' to 0 and match it.
+func (d mysqlDialect) RenderJSONPath(column string, path []string) (JSONPathSQL, error) {
+	value := fmt.Sprintf("JSON_EXTRACT(%s, %s)", column, d.EscapeStringLiteral(dollarJSONPath(path)))
+	// Value is Text: JSON_UNQUOTE alone turns a JSON null into the string
+	// 'null', so NOT labels.a:x would match it.
+	text := fmt.Sprintf("CASE WHEN JSON_TYPE(%s) <> 'NULL' THEN JSON_UNQUOTE(%s) END", value, value)
+	return JSONPathSQL{
+		Text:     text,
+		Value:    text,
+		IsNumber: fmt.Sprintf("JSON_TYPE(%s) IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL')", value),
+		Number:   value,
+	}, nil
+}

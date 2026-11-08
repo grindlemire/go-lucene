@@ -134,9 +134,10 @@ func renderMustNot(e *Expression, verbose bool) string {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 	s := wrap(e.Left, prefixOps)
-	// A minus right before a digit lexes as part of a negative number, so
-	// -5 would parse as the number -5 rather than MUST_NOT(5).
-	if r, _ := utf8.DecodeRuneInString(s); unicode.IsDigit(r) {
+	// A minus right before a digit, or before a dot and a digit, lexes as
+	// part of a negative number, so -5 and -.5 would parse as numbers rather
+	// than MUST_NOT(5) and MUST_NOT(.5).
+	if r, _ := utf8.DecodeRuneInString(strings.TrimPrefix(s, ".")); unicode.IsDigit(r) {
 		s = "(" + s + ")"
 	}
 	return "-" + s
@@ -241,6 +242,12 @@ func renderLiteral(e *Expression, verbose bool) string {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 
+	// A number keeps the text it was written as. The lexer read that text as
+	// one token, so it parses back to the same number and text.
+	if e.numberText != "" {
+		return e.numberText
+	}
+
 	switch v := e.Left.(type) {
 	case string:
 		// The parser keeps a wildcard or regex as the text it read, with its
@@ -263,7 +270,13 @@ func renderLiteral(e *Expression, verbose bool) string {
 		}
 		return s
 	case float64:
-		return formatFloat(v)
+		// The parser keeps no text for a float written as its plain digits,
+		// so print those digits, with .0 if they would read back as an int.
+		d := strconv.FormatFloat(v, 'f', -1, 64)
+		if _, err := strconv.Atoi(d); err == nil {
+			d += ".0"
+		}
+		return d
 	}
 
 	return fmt.Sprintf("%v", e.Left)

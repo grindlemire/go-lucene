@@ -12,9 +12,12 @@ import (
 	"database/sql/driver"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	lucene "github.com/grindlemire/go-lucene"
+	lucenedriver "github.com/grindlemire/go-lucene/pkg/driver"
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 
 	// Register the modernc.org/sqlite driver under the name "sqlite".
 	_ "modernc.org/sqlite"
@@ -304,4 +307,182 @@ func TestSQLiteIntegrationCaseInsensitiveFields(t *testing.T) {
 			t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, want, got)
 		}
 	})
+}
+
+func TestSQLiteIntegrationJSONPath(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const labels = `
+        ALTER TABLE items ADD COLUMN labels TEXT;
+        UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes", "n": 10, "v": "2"}' WHERE id = 1;
+        UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}, "n": "abc", "v": 2}' WHERE id = 2;
+        UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}, "n": null, "v": 2.0}' WHERE id = 3;
+        UPDATE items SET labels = '{"color": "green", "n": true, "v": "abc"}' WHERE id = 4;
+    `
+	if _, err := db.Exec(labels); err != nil {
+		t.Fatalf("seed labels: %v", err)
+	}
+
+	// Row 5 has labels = NULL; row 4 has no stock key.
+	cases := []struct {
+		name    string
+		lucene  string
+		wantIDs []int
+	}{
+		{"equality", `labels.color:red`, []int{1}},
+		{"nested_greater", `labels.stock.count:>5`, []int{1, 3}},
+		{"nested_range", `labels.stock.count:[3 TO 10]`, []int{1, 2}},
+		{"nested_in_numbers", `labels.stock.count:(3 OR 25)`, []int{2, 3}},
+		{"in_list", `labels.color:(red OR yellow)`, []int{1, 2}},
+		{"glob", `labels.color:ye*`, []int{2}},
+		{"null", `labels.stock.count:null`, []int{4, 5}},
+		{"not_null", `NOT labels.stock.count:null`, []int{1, 2, 3}},
+		{"in_list_with_null", `labels.color:(red OR null)`, []int{1, 5}},
+		{"standalone_star", `labels.color:*`, []int{1, 2, 3, 4}},
+		{"quote_in_key", `labels.it\'s:yes`, []int{1}},
+		{"injection_in_key", `labels.x\'\ OR\ \'a\'\ \=\ \'a:z`, nil},
+		{"with_plain_column", `category:fruit AND labels.color:yellow`, []int{2}},
+		// n is 10, "abc", JSON null and true in rows 1-4.
+		{"numeric_skips_text", `labels.n:>5`, []int{1}},
+		{"numeric_zero_skips_text", `labels.n:0`, nil},
+		{"numeric_less_skips_text", `labels.n:<100`, []int{1}},
+		{"json_null", `labels.n:null`, []int{3, 5}},
+		{"not_json_null", `NOT labels.n:null`, []int{1, 2, 4}},
+		{"numeric_in_with_null", `labels.n:(10 OR null)`, []int{1, 3, 5}},
+		{"text_value", `labels.n:abc`, []int{2}},
+		{"not_numeric_keeps_non_numbers", `-labels.n:>5`, []int{2, 4}},
+		{"not_equal_number", `-labels.n:7`, []int{1, 2, 4}},
+		// v is "2", 2, 2.0 and "abc" in rows 1-4.
+		{"number_matches_text_form", `labels.v:2`, []int{1, 2, 3}},
+		{"not_number_or_text_form", `-labels.v:2`, []int{4}},
+		{"in_numbers_match_text_form", `labels.v:(2 OR 7)`, []int{1, 2, 3}},
+		{"greater_skips_text_form", `labels.v:>1`, []int{2, 3}},
+		{"mixed_in_compares_text", `labels.v:(2 OR abc)`, []int{1, 2, 4}},
+		{"mixed_range_compares_text", `labels.v:{2 TO abc}`, []int{3}},
+		{"quoted_number_matches_number", `labels.stock.count:"10"`, []int{1}},
+		{"bool_text", `labels.n:true`, []int{4}},
+		{"written_decimal_keeps_text", `labels.v:2.0`, []int{2, 3}},
+		{"leading_zero_keeps_text", `labels.v:02`, []int{2, 3}},
+		{"not_plain_text_skips_json_null", `-labels.n:abc`, []int{1, 4}},
+		{"plain_text_in_list", `labels.color:(red OR green)`, []int{1, 4}},
+	}
+
+	opt := lucene.WithJSONFields("labels")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToSQLite(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedSQLite(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToParameterizedSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+	// labels.color is listed by its dotted name, so it folds case.
+	folded := []lucene.Opt{opt, lucene.WithCaseInsensitiveFields("labels.color")}
+	for _, tc := range []struct {
+		lucene  string
+		wantIDs []int
+	}{
+		{`labels.color:RED`, []int{1}},
+		{`labels.color:(RED OR Green)`, []int{1, 4}},
+	} {
+		t.Run("folded_"+tc.lucene, func(t *testing.T) {
+			where, err := lucene.ToSQLite(tc.lucene, folded...)
+			if err != nil {
+				t.Fatalf("ToSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v", tc.lucene, where, tc.wantIDs, got)
+			}
+			where, params, err := lucene.ToParameterizedSQLite(tc.lucene, folded...)
+			if err != nil {
+				t.Fatalf("ToParameterizedSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v", tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	// A hand-built bool compares as the text true or false.
+	n := expr.JSONPath{Column: "labels", Path: []string{"n"}}
+	d := lucenedriver.NewSQLiteDriver()
+	for name, tc := range map[string]struct {
+		e       *expr.Expression
+		wantIDs []int
+	}{
+		"bool_true":  {expr.Eq(n, true), []int{4}},
+		"bool_false": {expr.Eq(n, false), nil},
+		"bool_in":    {expr.IN(n, expr.LIST(expr.Lit(true), expr.Lit(false))), []int{4}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			where, err := d.Render(tc.e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q\n  want ids %v\n  got  ids %v", where, tc.wantIDs, got)
+			}
+			where, params, err := d.RenderParam(tc.e)
+			if err != nil {
+				t.Fatalf("render param: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}
+
+// TestSQLiteIntegrationJSONPathUsesIndex checks that equality with plain text
+// compares the bare json_extract, so an index on that expression applies.
+func TestSQLiteIntegrationJSONPathUsesIndex(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const schema = `
+        ALTER TABLE items ADD COLUMN labels TEXT;
+        CREATE INDEX items_labels_color ON items (json_extract(labels, '$.color'));
+    `
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+
+	opt := lucene.WithJSONFields("labels")
+	for _, q := range []string{`labels.color:red`, `labels.color:(red OR green)`} {
+		where, err := lucene.ToSQLite(q, opt)
+		if err != nil {
+			t.Fatalf("ToSQLite(%q): %v", q, err)
+		}
+		rows, err := db.Query("EXPLAIN QUERY PLAN SELECT id FROM items WHERE " + where)
+		if err != nil {
+			t.Fatalf("explain %q: %v", where, err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		if joined := strings.Join(plan, "; "); !strings.HasPrefix(joined, "SEARCH") || !strings.Contains(joined, "INDEX items_labels_color") {
+			t.Errorf("lucene=%q where=%q: want a search on the index, got plan %q", q, where, joined)
+		}
+	}
 }

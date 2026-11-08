@@ -680,3 +680,137 @@ func TestMySQLIntegrationCaseInsensitiveFields(t *testing.T) {
 		})
 	}
 }
+
+func TestMySQLIntegrationJSONPath(t *testing.T) {
+	requireIntegration(t)
+	db := openTestDB(t)
+
+	const labels = `
+		ALTER TABLE items ADD COLUMN labels JSON;
+		UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes", "n": 10, "v": "2"}' WHERE id = 1;
+		UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}, "n": "abc", "v": 2}' WHERE id = 2;
+		UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}, "n": null, "v": 2.0}' WHERE id = 3;
+		UPDATE items SET labels = '{"color": "green", "n": true, "v": "abc"}' WHERE id = 4;
+	`
+	if _, err := db.Exec(labels); err != nil {
+		t.Fatalf("seed labels: %v", err)
+	}
+
+	// Rows 5-7 have labels = NULL; row 4 has no stock key.
+	cases := []integrationCase{
+		{name: "equality", lucene: `labels.color:red`, wantIDs: []int{1}},
+		{name: "nested_greater", lucene: `labels.stock.count:>5`, wantIDs: []int{1, 3}},
+		{name: "nested_range", lucene: `labels.stock.count:[3 TO 10]`, wantIDs: []int{1, 2}},
+		{name: "nested_in_numbers", lucene: `labels.stock.count:(3 OR 25)`, wantIDs: []int{2, 3}},
+		{name: "in_list", lucene: `labels.color:(red OR yellow)`, wantIDs: []int{1, 2}},
+		{name: "like_prefix", lucene: `labels.color:ye*`, wantIDs: []int{2}},
+		{name: "null", lucene: `labels.stock.count:null`, wantIDs: []int{4, 5, 6, 7}},
+		{name: "not_null", lucene: `NOT labels.stock.count:null`, wantIDs: []int{1, 2, 3}},
+		{name: "in_list_with_null", lucene: `labels.color:(red OR null)`, wantIDs: []int{1, 5, 6, 7}},
+		{name: "standalone_star", lucene: `labels.color:*`, wantIDs: []int{1, 2, 3, 4}},
+		{name: "quote_in_key", lucene: `labels.it\'s:yes`, wantIDs: []int{1}},
+		{name: "injection_in_key", lucene: `labels.x\'\ OR\ \'a\'\ \=\ \'a:z`, wantIDs: nil},
+		{name: "with_plain_column", lucene: `category:fruit AND labels.color:yellow`, wantIDs: []int{2}},
+		// n is 10, "abc", JSON null and true in rows 1-4.
+		{name: "numeric_skips_text", lucene: `labels.n:>5`, wantIDs: []int{1}},
+		{name: "numeric_zero_skips_text", lucene: `labels.n:0`, wantIDs: nil},
+		{name: "numeric_less_skips_text", lucene: `labels.n:<100`, wantIDs: []int{1}},
+		{name: "json_null", lucene: `labels.n:null`, wantIDs: []int{3, 5, 6, 7}},
+		{name: "not_json_null", lucene: `NOT labels.n:null`, wantIDs: []int{1, 2, 4}},
+		{name: "numeric_in_with_null", lucene: `labels.n:(10 OR null)`, wantIDs: []int{1, 3, 5, 6, 7}},
+		{name: "text_value", lucene: `labels.n:abc`, wantIDs: []int{2}},
+		{name: "not_numeric_keeps_non_numbers", lucene: `-labels.n:>5`, wantIDs: []int{2, 4}},
+		{name: "not_equal_number", lucene: `-labels.n:7`, wantIDs: []int{1, 2, 4}},
+		// v is "2", 2, 2.0 and "abc" in rows 1-4.
+		{name: "number_matches_text_form", lucene: `labels.v:2`, wantIDs: []int{1, 2, 3}},
+		{name: "not_number_or_text_form", lucene: `-labels.v:2`, wantIDs: []int{4}},
+		{name: "in_numbers_match_text_form", lucene: `labels.v:(2 OR 7)`, wantIDs: []int{1, 2, 3}},
+		{name: "greater_skips_text_form", lucene: `labels.v:>1`, wantIDs: []int{2, 3}},
+		{name: "mixed_in_compares_text", lucene: `labels.v:(2 OR abc)`, wantIDs: []int{1, 2, 4}},
+		{name: "mixed_range_compares_text", lucene: `labels.v:{2 TO abc}`, wantIDs: []int{3}},
+		{name: "quoted_number_matches_number", lucene: `labels.stock.count:"10"`, wantIDs: []int{1}},
+		{name: "bool_text", lucene: `labels.n:true`, wantIDs: []int{4}},
+		{name: "written_decimal_keeps_text", lucene: `labels.v:2.0`, wantIDs: []int{2, 3}},
+		{name: "leading_zero_keeps_text", lucene: `labels.v:02`, wantIDs: []int{2, 3}},
+		{name: "not_plain_text_skips_json_null", lucene: `-labels.n:abc`, wantIDs: []int{1, 4}},
+		{name: "plain_text_in_list", lucene: `labels.color:(red OR green)`, wantIDs: []int{1, 4}},
+	}
+
+	opt := lucene.WithJSONFields("labels")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, err := lucene.ToMySQL(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, tc.wantIDs, got)
+			}
+
+			where, params, err := lucene.ToParameterizedMySQL(tc.lucene, opt)
+			if err != nil {
+				t.Fatalf("ToParameterizedMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
+					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+	// labels.color is listed by its dotted name, so it folds case.
+	folded := []lucene.Opt{opt, lucene.WithCaseInsensitiveFields("labels.color")}
+	for _, tc := range []struct {
+		lucene  string
+		wantIDs []int
+	}{
+		{`labels.color:RED`, []int{1}},
+		{`labels.color:(RED OR Green)`, []int{1, 4}},
+	} {
+		t.Run("folded_"+tc.lucene, func(t *testing.T) {
+			where, err := lucene.ToMySQL(tc.lucene, folded...)
+			if err != nil {
+				t.Fatalf("ToMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v", tc.lucene, where, tc.wantIDs, got)
+			}
+			where, params, err := lucene.ToParameterizedMySQL(tc.lucene, folded...)
+			if err != nil {
+				t.Fatalf("ToParameterizedMySQL(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v", tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	// A hand-built bool compares as the text true or false.
+	n := expr.JSONPath{Column: "labels", Path: []string{"n"}}
+	d := driver.NewMySQLDriver()
+	for name, tc := range map[string]struct {
+		e       *expr.Expression
+		wantIDs []int
+	}{
+		"bool_true":  {expr.Eq(n, true), []int{4}},
+		"bool_false": {expr.Eq(n, false), nil},
+		"bool_in":    {expr.IN(n, expr.LIST(expr.Lit(true), expr.Lit(false))), []int{4}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			where, err := d.Render(tc.e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q\n  want ids %v\n  got  ids %v", where, tc.wantIDs, got)
+			}
+			where, params, err := d.RenderParam(tc.e)
+			if err != nil {
+				t.Fatalf("render param: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, tc.wantIDs, got)
+			}
+		})
+	}
+}

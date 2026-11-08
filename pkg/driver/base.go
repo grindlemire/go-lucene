@@ -141,12 +141,22 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return fmt.Sprintf("%s IS NOT NULL", col), cparams, nil
 	}
 
-	d := b.dialect()
+	if p, ok := jsonPathLeft(e); ok {
+		return b.renderJSONPathCompare(e, p, b.renderCompareParam)
+	}
 
 	left, lparams, err := b.serializeParams(e.Left)
 	if err != nil {
 		return s, params, err
 	}
+	str, rparams, err := b.renderCompareParam(e, left, left)
+	return str, append(lparams, rparams...), err
+}
+
+// renderCompareParam renders e once its left side is rendered. nullLeft is the
+// left side for an IS NULL test.
+func (b Base) renderCompareParam(e *expr.Expression, left, nullLeft string) (s string, params []any, err error) {
+	d := b.dialect()
 
 	// Range: access typed boundary directly, skip serializing right side
 	if e.Op == expr.Range {
@@ -155,7 +165,10 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 			return "", nil, fmt.Errorf("range operator requires *expr.RangeBoundary, got %T", e.Right)
 		}
 		str, rangeParams, err := b.renderRangeParam(left, boundary)
-		return str, append(lparams, rangeParams...), err
+		if err != nil {
+			return "", nil, err
+		}
+		return str, rangeParams, nil
 	}
 
 	// Null right-hand side handling. Intercept before serializing the right
@@ -163,7 +176,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	if isNullExpr(e.Right) {
 		switch e.Op {
 		case expr.Equals:
-			return fmt.Sprintf("%s IS NULL", left), lparams, nil
+			return fmt.Sprintf("%s IS NULL", nullLeft), nil, nil
 		case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
 			return "", nil, fmt.Errorf(
 				"comparison operator %s cannot be used with null; use field:null for IS NULL",
@@ -178,7 +191,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 			return "", nil, err
 		}
 		if ok {
-			return str, append(lparams, inParams...), nil
+			return str, inParams, nil
 		}
 	}
 
@@ -188,14 +201,14 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		if ok && nullCount > 0 {
 			switch len(nonNulls) {
 			case 0:
-				return fmt.Sprintf("%s IS NULL", left), lparams, nil
+				return fmt.Sprintf("%s IS NULL", nullLeft), nil, nil
 			case 1:
 				rhs, rparams, err := b.serializeParams(nonNulls[0])
 				if err != nil {
 					return "", nil, err
 				}
-				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left),
-					append(lparams, rparams...), nil
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, nullLeft),
+					rparams, nil
 			default:
 				// Hand-roll the List rather than calling expr.LIST: that constructor
 				// takes ...any and would require boxing the []*expr.Expression slice.
@@ -204,8 +217,8 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 				if err != nil {
 					return "", nil, err
 				}
-				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, left),
-					append(lparams, inParams...), nil
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, nullLeft),
+					inParams, nil
 			}
 		}
 	}
@@ -228,7 +241,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	// dialect so each database can decide how to represent "any value".
 	if right == "'*'" && e.Op == expr.Like {
 		str, err := d.RenderStandaloneWild(left)
-		return str, lparams, err
+		return str, nil, err
 	}
 
 	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect escape
@@ -250,7 +263,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		}
 	}
 
-	params = append(lparams, rparams...)
+	params = rparams
 
 	if e.Op != expr.Not &&
 		e.Op != expr.List &&
@@ -281,7 +294,10 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	}
 
 	str, err := fn(left, right)
-	return str, params, err
+	if err != nil {
+		return "", nil, err
+	}
+	return str, params, nil
 }
 
 // Render will render the expression based on the renderFNs provided by the driver.
@@ -316,12 +332,29 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return fmt.Sprintf("%s IS NOT NULL", col), nil
 	}
 
-	d := b.dialect()
+	if p, ok := jsonPathLeft(e); ok {
+		str, _, err := b.renderJSONPathCompare(e, p, b.renderCompareInline)
+		return str, err
+	}
 
 	left, err := b.serialize(e.Left)
 	if err != nil {
 		return s, err
 	}
+	return b.renderCompare(e, left, left)
+}
+
+// renderCompareInline adapts renderCompare to the signature that
+// renderJSONPathCompare shares with renderCompareParam.
+func (b Base) renderCompareInline(e *expr.Expression, left, nullLeft string) (string, []any, error) {
+	s, err := b.renderCompare(e, left, nullLeft)
+	return s, nil, err
+}
+
+// renderCompare renders e once its left side is rendered. nullLeft is the left
+// side for an IS NULL test.
+func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string, err error) {
+	d := b.dialect()
 
 	// Range: access typed boundary directly, skip serializing right side
 	if e.Op == expr.Range {
@@ -329,7 +362,11 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		if !ok {
 			return "", fmt.Errorf("range operator requires *expr.RangeBoundary, got %T", e.Right)
 		}
-		return b.renderRange(left, boundary)
+		str, err := b.renderRange(left, boundary)
+		if err != nil {
+			return "", err
+		}
+		return str, nil
 	}
 
 	// Null right-hand side handling. Intercept before serializing the right
@@ -337,7 +374,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	if isNullExpr(e.Right) {
 		switch e.Op {
 		case expr.Equals:
-			return fmt.Sprintf("%s IS NULL", left), nil
+			return fmt.Sprintf("%s IS NULL", nullLeft), nil
 		case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
 			return "", fmt.Errorf(
 				"comparison operator %s cannot be used with null; use field:null for IS NULL",
@@ -366,13 +403,13 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		if ok && nullCount > 0 {
 			switch len(nonNulls) {
 			case 0:
-				return fmt.Sprintf("%s IS NULL", left), nil
+				return fmt.Sprintf("%s IS NULL", nullLeft), nil
 			case 1:
 				rhs, err := b.serialize(nonNulls[0])
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, left), nil
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, nullLeft), nil
 			default:
 				// Hand-roll the List rather than calling expr.LIST: that constructor
 				// takes ...any and would require boxing the []*expr.Expression slice.
@@ -381,7 +418,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, left), nil
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, nullLeft), nil
 			}
 		}
 	}
@@ -453,14 +490,18 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return s, fmt.Errorf("unable to render operator [%s]", e.Op)
 	}
 
-	return fn(left, right)
+	str, err := fn(left, right)
+	if err != nil {
+		return "", err
+	}
+	return str, nil
 }
 
 func (b Base) isSimple(in any) bool {
 	switch v := in.(type) {
 	case *expr.Expression:
 		return v.Op == expr.Undefined || v.Op == expr.Literal || v.Op == expr.Regexp || v.Op == expr.Wild
-	case expr.Column:
+	case expr.Column, expr.JSONPath:
 		return true
 	case nil:
 		return true
@@ -499,6 +540,9 @@ func (b Base) serialize(in any) (s string, err error) {
 		return strings.Join(strs, ", "), nil
 	case expr.Column:
 		return b.quoteColumn(v)
+	case expr.JSONPath:
+		sql, err := b.renderJSONPath(v)
+		return sql.Text, err
 	case string:
 		if err := validateStringLiteral(v); err != nil {
 			return "", err
@@ -633,6 +677,9 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 			return "", params, err
 		}
 		return quoted, params, nil
+	case expr.JSONPath:
+		sql, err := b.renderJSONPath(v)
+		return sql.Text, params, err
 	case bool:
 		return "?", []any{b.dialect().BoolParam(v)}, nil
 	case string:

@@ -8,16 +8,26 @@ import (
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
-// foldsCase reports whether in is a column listed in CaseInsensitiveFields.
+// foldsCase reports whether in is a column or JSON path listed in
+// CaseInsensitiveFields. A JSON path is listed by its dotted name, such as
+// labels.category.
 func (b Base) foldsCase(in any) bool {
 	if len(b.CaseInsensitiveFields) == 0 {
 		return false
 	}
-	col, ok := in.(expr.Column)
 	if e, isExpr := in.(*expr.Expression); isExpr && e.Op == expr.Literal {
-		col, ok = e.Left.(expr.Column)
+		in = e.Left
 	}
-	return ok && slices.Contains(b.CaseInsensitiveFields, string(col))
+	var name string
+	switch v := in.(type) {
+	case expr.Column:
+		name = string(v)
+	case expr.JSONPath:
+		name = v.String()
+	default:
+		return false
+	}
+	return slices.Contains(b.CaseInsensitiveFields, name)
 }
 
 // foldsCaseCompare reports whether e is an equality or wildcard match on a

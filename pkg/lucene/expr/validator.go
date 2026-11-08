@@ -282,6 +282,10 @@ func validateLiteral(e *Expression) (err error) {
 		return fmt.Errorf("LITERAL validation: value must be a literal, not %s", reflect.TypeOf(e.Left))
 	}
 
+	if p, ok := e.Left.(JSONPath); ok {
+		return p.Validate()
+	}
+
 	return nil
 }
 
@@ -445,8 +449,12 @@ func isLiteral(in any) bool {
 }
 
 func isColumn(in any) bool {
-	_, is := in.(Column)
-	return is
+	switch in.(type) {
+	case Column, JSONPath:
+		return true
+	default:
+		return false
+	}
 }
 
 func isString(in any) bool {

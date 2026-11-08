@@ -17,6 +17,7 @@ sql, params, err := lucene.ToParameterizedPostgres(query)
 - [Usage](#usage)
 - [Operator reference](#operator-reference)
 - [Null handling](#null-handling)
+- [JSON fields](#json-fields)
 - [Case-insensitive fields](#case-insensitive-fields)
 - [SQLite](#sqlite)
 - [MySQL](#mysql)
@@ -133,6 +134,41 @@ Comparison operators against null and range bounds containing null both error ra
 field:>null         ->  error: comparison operator GREATER cannot be used with null
 field:[null TO 5]   ->  error: null is not allowed as a range bound
 ```
+
+## JSON fields
+
+Register the columns that hold JSON with `WithJSONFields`. A dotted field on one of them reads a key inside the JSON value:
+
+```go
+sql, err := lucene.ToPostgres(`metadata.address.city:Boston AND labels.category:fruit`,
+    lucene.WithJSONFields("labels", "metadata"))
+// ("metadata"->'address'->>'city' = 'Boston') AND ("labels"->>'category' = 'fruit')
+```
+
+| Lucene | Postgres | MySQL / MariaDB | SQLite |
+|---|---|---|---|
+| `labels.category:fruit` | `"labels"->>'category' = 'fruit'` | `JSON_UNQUOTE(...)` of the value, NULL for a JSON null | `json_extract("labels", '$.category') = 'fruit'` |
+| `labels.category:null` | `"labels"->>'category' IS NULL` | same accessor `IS NULL` | same accessor `IS NULL` |
+| `labels.count:>5` | the value cast to `numeric` when it is a JSON number | `JSON_EXTRACT(...)` when `JSON_TYPE` is a number | `json_extract(...)` when `json_type` is `integer` or `real` |
+
+Every operator works on a JSON path: comparisons, ranges, IN lists, wildcards, regex and null.
+
+- Without the option, or for a column that is not registered, a dotted field is still one column name: `other.category` renders as `"other.category"`.
+- A registered column without a dot (`labels:x`) is compared as a whole column, as before.
+- Register the column name only. A name that is empty or contains a dot (`WithJSONFields("t.labels")`) makes `Parse` return an error, because the first dot of a field always ends the column name.
+- Equality and IN with a number match a JSON number by value and any other value by its text: `labels.version:2` matches `2`, `2.0` and `"2"`.
+- `>`, `<`, `>=`, `<=` and a numeric range (`labels.count:[1 TO 10]`) match only JSON numbers. Any other value, such as `"abc"`, `"5"` or `true`, does not match, and it does not make the query fail. Negation keeps those values: `-labels.count:>5` matches `"abc"`.
+- A range or IN list that mixes numbers and text (`labels.count:[1 TO abc]`, `labels.count:(1 OR abc)`) compares as text, with the numbers written as text.
+- A number keeps the text it was written as for a text comparison. `labels.version:1.0` matches the number `1` and the text `"1.0"`, but not the text `"1"`. The same goes for `02134` and `1e3`. The written text survives a round trip through JSON: such a number marshals as `{"number":{"value":1,"text":"1.0"}}`.
+- A missing key and a JSON `null` are both `null`: `labels.category:null` matches both.
+- Text comparisons read the value as text in every dialect: a JSON number as its digits and a boolean as `true` or `false`. So `labels.count:"5"` matches a stored `5`, and `labels.flag:true` matches a stored `true`. MySQL compares the text case-sensitively. A Go `bool` on a JSON path, as in `expr.Eq(path, true)`, compares as the text `true` or `false` in the same way.
+- The text of a number that is not written in its shortest form depends on the database. A stored `1e3` reads as `1e3` on Postgres `json` and MariaDB, `1000` on Postgres `jsonb`, and `1000.0` on MySQL and SQLite. So `labels.count:"1e3"` matches it only on some of them. Compare numbers as numbers (`labels.count:1000`) to match it everywhere.
+- A path is checked when the query is parsed. A path with an empty key (`labels..x`, `labels.:x`) or a key that contains `"`, `\` or a control character is an error. Other keys are quoted in the MySQL and SQLite path (`$."a[0]"`). A dot always separates keys, so a key that contains a dot cannot be addressed, and an escaped dot (`labels.a\.b`) is an error.
+- On SQLite every value in a registered column must be valid JSON or NULL. One row with invalid JSON, even `''`, makes every JSON-path query on that table fail with `malformed JSON`.
+- Equality and IN with plain text, a term that is not a number, `true`, `false` or `null`, compare the plain accessor. An expression index on it applies: `CREATE INDEX ON items ((labels->>'category'))` in Postgres, `CREATE INDEX idx ON items (json_extract(labels, '$.category'))` in SQLite. MySQL compares through a `CASE`, because `JSON_UNQUOTE` alone turns a JSON `null` into the text `'null'`.
+- A numeric comparison, and a text comparison with a term such as `"5"` or `true`, cannot use an index, because they read the value through a type check.
+- To fold case on a JSON path, list it by its dotted name: `WithCaseInsensitiveFields("labels.category")`.
+- Array containment (`labels.tags:foo` meaning "the array contains foo") is not supported.
 
 ## Case-insensitive fields
 
@@ -366,6 +402,8 @@ The three built-in drivers are the best reference implementations: [`pkg/driver/
 ### Dialect defaults
 
 A driver that leaves `driver.Base.Dialect` unset inherits Postgres-flavored rendering: `SIMILAR TO` for wildcards, `~` for regex, and `true`/`false` for bool literals. Set a `Dialect` on the embedded `Base` whenever your target database diverges from that.
+
+To render [JSON fields](#json-fields), a dialect also implements `driver.JSONPathDialect`. A dialect without it returns an error for a JSON path and renders everything else as before. `RenderJSONPath` must return all four SQL fragments (`Text`, `Value`, `IsNumber` and `Number`); an empty one is an error.
 
 ### Migrating from pre-Dialect drivers
 

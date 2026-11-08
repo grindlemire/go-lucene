@@ -1226,23 +1226,23 @@ func TestParseNumberSpellings(t *testing.T) {
 		input string
 		want  *expr.Expression
 	}{
-		"exponent_plus":       {`a:1E+3`, expr.Eq("a", 1000.0)},
-		"exponent_plus_lower": {`a:1e+3`, expr.Eq("a", 1000.0)},
-		"negative_exponent":   {`a:-2.5e+2`, expr.Eq("a", -250.0)},
-		"exponent_in_range":   {`a:[1e+2 TO 1E+3]`, expr.Rang("a", 100.0, 1000.0, true)},
-		"exponent_compare":    {`a:>=1e+3`, expr.GREATEREQ("a", 1000.0)},
-		"exponent_in_list":    {`a:(1e+3 OR 2)`, expr.IN("a", expr.LIST(expr.Lit(1000.0), expr.Lit(2)))},
+		"exponent_plus":       {`a:1E+3`, expr.Eq("a", expr.NumberLit(1000.0, "1E+3"))},
+		"exponent_plus_lower": {`a:1e+3`, expr.Eq("a", expr.NumberLit(1000.0, "1e+3"))},
+		"negative_exponent":   {`a:-2.5e+2`, expr.Eq("a", expr.NumberLit(-250.0, "-2.5e+2"))},
+		"exponent_in_range":   {`a:[1e+2 TO 1E+3]`, expr.Rang("a", expr.NumberLit(100.0, "1e+2"), expr.NumberLit(1000.0, "1E+3"), true)},
+		"exponent_compare":    {`a:>=1e+3`, expr.GREATEREQ("a", expr.NumberLit(1000.0, "1e+3"))},
+		"exponent_in_list":    {`a:(1e+3 OR 2)`, expr.IN("a", expr.LIST(expr.NumberLit(1000.0, "1e+3"), expr.Lit(2)))},
 		"exponent_boost":      {`a:b^1e+1`, expr.BOOST(expr.Eq("a", "b"), 10.0)},
-		"leading_dot":         {`a:.5`, expr.Eq("a", 0.5)},
-		"negative_dot":        {`a:-.5`, expr.Eq("a", -0.5)},
-		"dot_range":           {`a:[-.5 TO .5]`, expr.Rang("a", -0.5, 0.5, true)},
-		"dot_exponent":        {`a:.5e+1`, expr.Eq("a", 5.0)},
+		"leading_dot":         {`a:.5`, expr.Eq("a", expr.NumberLit(0.5, ".5"))},
+		"negative_dot":        {`a:-.5`, expr.Eq("a", expr.NumberLit(-0.5, "-.5"))},
+		"dot_range":           {`a:[-.5 TO .5]`, expr.Rang("a", expr.NumberLit(-0.5, "-.5"), expr.NumberLit(0.5, ".5"), true)},
+		"dot_exponent":        {`a:.5e+1`, expr.Eq("a", expr.NumberLit(5.0, ".5e+1"))},
 		"dot_word":            {`a:.foo`, expr.Eq("a", ".foo")},
 		"dot_field":           {`.5:x`, expr.Eq(".5", "x")},
 		"minus_dot_word":      {`-.foo`, expr.MUSTNOT(expr.Lit(".foo"))},
 		// Unchanged: + outside an exponent still means MUST.
 		"plus_after_word": {`a:be+3`, expr.AND(expr.Eq("a", "be"), expr.MUST(expr.Lit(3)))},
-		"exponent_minus":  {`a:1e-3`, expr.Eq("a", 0.001)},
+		"exponent_minus":  {`a:1e-3`, expr.Eq("a", expr.NumberLit(0.001, "1e-3"))},
 	}
 
 	for name, tc := range tcs {

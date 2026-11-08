@@ -75,8 +75,6 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 		want         string
 		wantErr      bool
 	}{
-		// The $N rewrite also replaces a ? inside a quoted column name.
-		"question_mark_in_column": {input: `a?b:c`, render: "param_postgres", want: `"a$1b" = $2`},
 		// An escaped \* is meant to match a literal *, but becomes \%.
 		"escaped_star_in_wildcard": {input: `a:\*x*`, render: "postgres", want: `"a" SIMILAR TO '\%x%'`},
 	}
