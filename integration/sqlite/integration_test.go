@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	lucene "github.com/grindlemire/go-lucene"
+	lucenedriver "github.com/grindlemire/go-lucene/pkg/driver"
+	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 
 	// Register the modernc.org/sqlite driver under the name "sqlite".
 	_ "modernc.org/sqlite"
@@ -380,6 +382,61 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
 				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v",
 					tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+	// labels.color is listed by its dotted name, so it folds case.
+	folded := []lucene.Opt{opt, lucene.WithCaseInsensitiveFields("labels.color")}
+	for _, tc := range []struct {
+		lucene  string
+		wantIDs []int
+	}{
+		{`labels.color:RED`, []int{1}},
+		{`labels.color:(RED OR Green)`, []int{1, 4}},
+	} {
+		t.Run("folded_"+tc.lucene, func(t *testing.T) {
+			where, err := lucene.ToSQLite(tc.lucene, folded...)
+			if err != nil {
+				t.Fatalf("ToSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q\n  want ids %v\n  got  ids %v", tc.lucene, where, tc.wantIDs, got)
+			}
+			where, params, err := lucene.ToParameterizedSQLite(tc.lucene, folded...)
+			if err != nil {
+				t.Fatalf("ToParameterizedSQLite(%q): %v", tc.lucene, err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("lucene=%q where=%q params=%v\n  want ids %v\n  got  ids %v", tc.lucene, where, params, tc.wantIDs, got)
+			}
+		})
+	}
+
+	// A hand-built bool compares as the text true or false.
+	n := expr.JSONPath{Column: "labels", Path: []string{"n"}}
+	d := lucenedriver.NewSQLiteDriver()
+	for name, tc := range map[string]struct {
+		e       *expr.Expression
+		wantIDs []int
+	}{
+		"bool_true":  {expr.Eq(n, true), []int{4}},
+		"bool_false": {expr.Eq(n, false), nil},
+		"bool_in":    {expr.IN(n, expr.LIST(expr.Lit(true), expr.Lit(false))), []int{4}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			where, err := d.Render(tc.e)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if got := queryIDs(t, db, where); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q\n  want ids %v\n  got  ids %v", where, tc.wantIDs, got)
+			}
+			where, params, err := d.RenderParam(tc.e)
+			if err != nil {
+				t.Fatalf("render param: %v", err)
+			}
+			if got := queryIDs(t, db, where, params...); !equalInts(got, tc.wantIDs) {
+				t.Fatalf("where=%q params=%v\n  want ids %v\n  got  ids %v", where, params, tc.wantIDs, got)
 			}
 		})
 	}

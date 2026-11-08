@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/grindlemire/go-lucene/pkg/driver"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
@@ -464,6 +465,11 @@ func TestJSONPathJSONRoundTrip(t *testing.T) {
 		`metadata.address.city:Boston AND name:x`,
 		`labels.count:[1 TO 10]`,
 		`labels.category:(fruit OR null)`,
+		`labels.v:1.0`,
+		`labels.v:02134`,
+		`labels.v:1e3`,
+		`labels.v:[1.0 TO 2.10]`,
+		`labels.v:(1.0 OR 2)`,
 	}
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
@@ -481,6 +487,17 @@ func TestJSONPathJSONRoundTrip(t *testing.T) {
 			}
 			if !reflect.DeepEqual(first, &second) {
 				t.Fatalf("round trip through JSON changed the expression:\n got: %#v\nwant: %#v", &second, first)
+			}
+			want, _, err := driver.NewPostgresDriver().RenderParam(first)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			got, _, err := driver.NewPostgresDriver().RenderParam(&second)
+			if err != nil {
+				t.Fatalf("render after round trip: %v", err)
+			}
+			if got != want {
+				t.Fatalf("round trip through JSON changed the SQL:\n got: %s\nwant: %s", got, want)
 			}
 		})
 	}
@@ -510,11 +527,18 @@ func TestPostgresPlaceholdersSkipQuotedText(t *testing.T) {
 
 func TestJSONPathJSONRejectsMalformedLeaf(t *testing.T) {
 	tcs := map[string]string{
-		"null":       `{"left":{"json_path":null},"operator":"EQUALS","right":"x"}`,
-		"string":     `{"left":{"json_path":"labels.a"},"operator":"EQUALS","right":"x"}`,
-		"empty":      `{"left":{"json_path":{}},"operator":"EQUALS","right":"x"}`,
-		"no_path":    `{"left":{"json_path":{"column":"labels"}},"operator":"EQUALS","right":"x"}`,
-		"extra_keys": `{"left":{"json_path":{"column":"labels","path":["a"]},"operator":"AND"},"operator":"EQUALS","right":"x"}`,
+		"null":               `{"left":{"json_path":null},"operator":"EQUALS","right":"x"}`,
+		"string":             `{"left":{"json_path":"labels.a"},"operator":"EQUALS","right":"x"}`,
+		"empty":              `{"left":{"json_path":{}},"operator":"EQUALS","right":"x"}`,
+		"no_path":            `{"left":{"json_path":{"column":"labels"}},"operator":"EQUALS","right":"x"}`,
+		"extra_keys":         `{"left":{"json_path":{"column":"labels","path":["a"]},"operator":"AND"},"operator":"EQUALS","right":"x"}`,
+		"number_no_text":     `{"left":"a","operator":"EQUALS","right":{"number":{"value":1}}}`,
+		"number_no_value":    `{"left":"a","operator":"EQUALS","right":{"number":{"text":"1.0"}}}`,
+		"number_string":      `{"left":"a","operator":"EQUALS","right":{"number":{"value":"x","text":"1.0"}}}`,
+		"number_int_text":    `{"left":"a","operator":"EQUALS","right":{"number":{"value":1.5,"text":"02"}}}`,
+		"number_extra_keys":  `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"1.0"},"operator":"AND"}}`,
+		"number_in_list":     `{"left":"a","operator":"IN","right":{"left":[{"number":{"value":1}}],"operator":"LIST"}}`,
+		"number_range_bound": `{"left":"a","operator":"RANGE","right":{"min":{"number":{"value":1}},"max":2,"inclusive":true}}`,
 	}
 	for name, raw := range tcs {
 		t.Run(name, func(t *testing.T) {

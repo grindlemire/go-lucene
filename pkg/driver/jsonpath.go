@@ -118,7 +118,7 @@ func (b Base) renderJSONPathCompare(e *expr.Expression, p expr.JSONPath, compare
 	if comparesPlainText(e) {
 		return compare(e, sql.Value, sql.Value)
 	}
-	asText := numbersAsText(e)
+	asText := termsAsText(e)
 	if !comparesNumber(e) {
 		return compare(asText, sql.Text, sql.Text)
 	}
@@ -136,35 +136,35 @@ func (b Base) renderJSONPathCompare(e *expr.Expression, p expr.JSONPath, compare
 	return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", sql.IsNumber, num, text), append(params, textParams...), nil
 }
 
-// numbersAsText returns a copy of e with each number on its right side, in a
-// literal, a range bound or an IN list, replaced by its text.
-func numbersAsText(e *expr.Expression) *expr.Expression {
+// termsAsText returns a copy of e with each number or bool on its right side,
+// in a literal, a range bound or an IN list, replaced by its text.
+func termsAsText(e *expr.Expression) *expr.Expression {
 	c := *e
 	switch r := e.Right.(type) {
 	case *expr.RangeBoundary:
 		rb := *r
-		rb.Min, rb.Max = numberAsText(r.Min), numberAsText(r.Max)
+		rb.Min, rb.Max = termAsText(r.Min), termAsText(r.Max)
 		c.Right = &rb
 	case *expr.Expression:
 		if items, ok := r.Left.([]*expr.Expression); ok && r.Op == expr.List {
 			list := *r
 			texts := make([]*expr.Expression, len(items))
 			for i, item := range items {
-				texts[i] = numberAsText(item).(*expr.Expression)
+				texts[i] = termAsText(item).(*expr.Expression)
 			}
 			list.Left = texts
 			c.Right = &list
 		} else {
-			c.Right = numberAsText(r)
+			c.Right = termAsText(r)
 		}
 	}
 	return &c
 }
 
-// numberAsText turns a number, or a literal that holds one, into text. A
-// literal keeps the text it was written as, so 1.0 stays 1.0 and does not
-// become 1.
-func numberAsText(in any) any {
+// termAsText turns a number or bool, or a literal that holds one, into the
+// text that Text reads for it. A literal keeps the text it was written as, so
+// 1.0 stays 1.0 and does not become 1.
+func termAsText(in any) any {
 	v := in
 	lit, isLit := in.(*expr.Expression)
 	if isLit {
@@ -173,14 +173,15 @@ func numberAsText(in any) any {
 		}
 		v = lit.Left
 	}
-	if !isNumber(v) {
-		return in
-	}
 	text := ""
-	if isLit {
+	switch b, isBool := v.(bool); {
+	case isBool:
+		text = strconv.FormatBool(b)
+	case !isNumber(v):
+		return in
+	case isLit && lit.NumberText() != "":
 		text = lit.NumberText()
-	}
-	if text == "" {
+	default:
 		s, _, err := formatNumber(v, 'f')
 		if err != nil {
 			return in

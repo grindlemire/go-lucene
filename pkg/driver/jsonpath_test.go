@@ -189,3 +189,30 @@ func TestJSONPathChecksColumnName(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONPathComparesBoolAsText(t *testing.T) {
+	f := path("labels", "f")
+	tcs := map[string]struct {
+		e      *expr.Expression
+		suffix string
+	}{
+		"true":    {expr.Eq(f, true), ` = 'true'`},
+		"false":   {expr.Eq(f, false), ` = 'false'`},
+		"in":      {expr.IN(f, expr.LIST(expr.Lit(true), expr.Lit(false))), ` IN ('true', 'false')`},
+		"mixedIn": {expr.IN(f, expr.LIST(expr.Lit(true), expr.Lit("x"))), ` IN ('true', 'x')`},
+	}
+	drivers := map[string]interface {
+		Render(*expr.Expression) (string, error)
+	}{"postgres": NewPostgresDriver(), "sqlite": NewSQLiteDriver(), "mysql": NewMySQLDriver()}
+	for dname, d := range drivers {
+		for name, tc := range tcs {
+			got, err := d.Render(tc.e)
+			if err != nil {
+				t.Fatalf("%s %s: unexpected error %v", dname, name, err)
+			}
+			if !strings.HasSuffix(got, tc.suffix) {
+				t.Errorf("%s %s: want suffix %q, got %s", dname, name, tc.suffix, got)
+			}
+		}
+	}
+}

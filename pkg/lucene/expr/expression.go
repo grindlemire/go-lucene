@@ -424,6 +424,9 @@ type jsonExpression struct {
 // MarshalJSON is a custom JSON serialization for the Expression
 func (e Expression) MarshalJSON() (out []byte, err error) {
 	// if we are in a leaf node just marshal the value
+	if e.Op == Literal && e.numberText != "" {
+		return json.Marshal(numberLeaf{Number: numberFields{Value: e.Left, Text: e.numberText}})
+	}
 	if e.Op == Literal || e.Op == Wild || e.Op == Regexp || e.Op == Null {
 		return json.Marshal(e.Left)
 	}
@@ -483,6 +486,14 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		*e = *Lit(p)
 		return nil
 	}
+	if raw, ok := keys["number"]; ok {
+		n, err := unmarshalNumber(raw, len(keys))
+		if err != nil {
+			return err
+		}
+		*e = *n
+		return nil
+	}
 
 	// unmarshal the current layer in the json first, then worry about
 	// the left and right hand subobjects
@@ -530,12 +541,11 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 		if err != nil {
 			return err
 		}
-		if !IsExpr(boundary.Min) {
-			boundary.Min = literalToExpr(toIntIfNecessary(boundary.Min))
+		if boundary.Min, err = unmarshalBound(boundary.Min); err != nil {
+			return err
 		}
-
-		if !IsExpr(boundary.Max) {
-			boundary.Max = literalToExpr(toIntIfNecessary(boundary.Max))
+		if boundary.Max, err = unmarshalBound(boundary.Max); err != nil {
+			return err
 		}
 		e.Right = &boundary
 	} else if len(c.Right) > 0 {
@@ -577,8 +587,74 @@ func unmarshalJSONPath(raw json.RawMessage, keys int) (JSONPath, error) {
 	return JSONPath(p), nil
 }
 
+// numberLeaf is the JSON form of a number literal that keeps the text it was
+// written as, such as {"number":{"value":1,"text":"1.0"}}.
+type numberLeaf struct {
+	Number numberFields `json:"number"`
+}
+
+type numberFields struct {
+	Value any    `json:"value"`
+	Text  string `json:"text"`
+}
+
+// unmarshalNumber decodes a numberLeaf. Like the parser, it reads the number
+// as an int when its text is an int, and as a float64 otherwise.
+func unmarshalNumber(raw json.RawMessage, keys int) (*Expression, error) {
+	if keys != 1 {
+		return nil, fmt.Errorf("number must be the only key of its object")
+	}
+	var n struct {
+		Value json.Number `json:"value"`
+		Text  string      `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return nil, fmt.Errorf("invalid number: %w", err)
+	}
+	if n.Text == "" {
+		return nil, fmt.Errorf("invalid number: text must not be empty")
+	}
+	if _, err := strconv.Atoi(n.Text); err == nil {
+		i, err := strconv.Atoi(n.Value.String())
+		if err != nil {
+			return nil, fmt.Errorf("invalid number: value %q is not an int", n.Value)
+		}
+		return NumberLit(i, n.Text), nil
+	}
+	f, err := n.Value.Float64()
+	if err != nil {
+		return nil, fmt.Errorf("invalid number: %w", err)
+	}
+	return NumberLit(f, n.Text), nil
+}
+
+// unmarshalBound turns a range bound decoded into an any back into a literal.
+// Any other object stays a map, which Validate rejects.
+func unmarshalBound(in any) (*Expression, error) {
+	m, isObject := in.(map[string]any)
+	if _, isNumber := m["number"]; !isObject || !isNumber {
+		return literalToExpr(toIntIfNecessary(in)), nil
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalLiteral(raw)
+}
+
 func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 	e = ptr(empty())
+
+	// a number that keeps the text it was written as
+	if isJSONObject(in) {
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(in, &keys); err != nil {
+			return e, err
+		}
+		if raw, ok := keys["number"]; ok {
+			return unmarshalNumber(raw, len(keys))
+		}
+	}
 
 	// JSON `null` -> NULL expression.
 	if bytes.Equal(bytes.TrimSpace(in), []byte("null")) {
