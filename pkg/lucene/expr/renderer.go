@@ -256,10 +256,8 @@ func renderLiteral(e *Expression, verbose bool) string {
 		if e.Op == Wild {
 			return wildcardTerm(v)
 		}
-		// The parser keeps a regex as the text it read, with its slashes,
-		// so that text lexes back to the same term.
 		if e.Op == Regexp {
-			return v
+			return regexpTerm(v)
 		}
 		return literalTerm(v)
 	case Column:
@@ -358,6 +356,34 @@ func bareInWildcard(chars []wildcard.Char, i int) bool {
 		return unicode.IsDigit(d)
 	}
 	return false
+}
+
+// regexpTerm prints a regex's value as a /.../ term. The parser keeps a regex
+// with its slashes and with every slash inside it escaped. A regex built in
+// code may have neither, so String() adds the slashes and escapes a slash
+// inside, along with a backslash at the end, which would escape the closing
+// slash.
+func regexpTerm(s string) string {
+	inner := s
+	if len(s) >= 2 && s[0] == '/' && s[len(s)-1] == '/' {
+		inner = s[1 : len(s)-1]
+	}
+	var b strings.Builder
+	b.WriteByte('/')
+	for i := 0; i < len(inner); i++ {
+		switch {
+		case inner[i] == '\\' && i+1 < len(inner):
+			b.WriteString(inner[i : i+2])
+			i++
+		case inner[i] == '\\' || inner[i] == '/':
+			b.WriteByte('\\')
+			b.WriteByte(inner[i])
+		default:
+			b.WriteByte(inner[i])
+		}
+	}
+	b.WriteByte('/')
+	return b.String()
 }
 
 // isPlainTerm reports whether s lexes as one word with no escapes: letters,
