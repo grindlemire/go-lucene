@@ -600,18 +600,6 @@ func likeOperand(right any) (pattern string, hasPattern bool, err error) {
 	}
 }
 
-// isUnbindable reports whether v is a piece of an AST or a container left
-// over from JSON decoding. Neither is a value: binding one as a parameter
-// would send the database a Go struct, map, or slice instead of a term.
-func isUnbindable(v any) bool {
-	switch v.(type) {
-	case nil, *expr.Expression, expr.Expression, *expr.RangeBoundary, expr.RangeBoundary, map[string]any, []any:
-		return true
-	default:
-		return false
-	}
-}
-
 func (b Base) serializeParams(in any) (s string, params []any, err error) {
 	if in == nil {
 		return "", params, nil
@@ -657,7 +645,9 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 		// escape single quotes with double single quotes
 		return "?", []any{v}, nil
 	default:
-		if isUnbindable(v) {
+		// Binding an AST piece or a JSON map/slice would send the database
+		// a Go struct, map, or slice instead of a term.
+		if expr.IsASTOrJSONContainer(v) {
 			return "", nil, fmt.Errorf("unsupported value of type %T", v)
 		}
 		return "?", []any{v}, nil
@@ -670,22 +660,36 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 // or JSON-decoded AST can still carry a compound bound here.
 func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 	val = bound
-	if e, ok := bound.(*expr.Expression); ok {
+	if e, ok := bound.(*expr.Expression); ok && e != nil {
 		switch e.Op {
 		case expr.Null:
 			return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
 		case expr.Wild:
-			return nil, true, nil
+			// Only a bare * leaves this side open. Any other wildcard bound,
+			// such as ab*, is literal text, as in Lucene.
+			if s, ok := e.Left.(string); ok && s == "*" {
+				return nil, true, nil
+			}
+			val = e.Left
 		case expr.Literal, expr.Regexp:
 			val = e.Left
 		default:
-			return nil, false, fmt.Errorf("range bound must be a single term, not a %s expression", e.Op)
+			return nil, false, fmt.Errorf("range bound must be a single term, not %s %s expression", article(e.Op), e.Op)
 		}
 	}
-	if isUnbindable(val) {
+	if expr.IsASTOrJSONContainer(val) {
 		return nil, false, fmt.Errorf("range bound must be a single term, not %T", val)
 	}
 	return val, false, nil
+}
+
+// article returns "an" for an operator name that starts with a vowel and
+// "a" otherwise.
+func article(op expr.Operator) string {
+	if name := op.String(); name != "" && strings.ContainsRune("AEIOU", rune(name[0])) {
+		return "an"
+	}
+	return "a"
 }
 
 // formatRangeValue renders a range bound value as a SQL literal.
@@ -791,29 +795,54 @@ func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (strin
 		return "1=1", nil, nil
 	}
 
+	var minSQL, maxSQL string
+	var params []any
+	if !minUnbounded {
+		if minSQL, params, err = b.rangeParam(minVal, params); err != nil {
+			return "", nil, err
+		}
+	}
+	if !maxUnbounded {
+		if maxSQL, params, err = b.rangeParam(maxVal, params); err != nil {
+			return "", nil, err
+		}
+	}
+
 	if minUnbounded {
 		if inclusive {
-			return fmt.Sprintf("%s <= ?", left), []any{maxVal}, nil
+			return fmt.Sprintf("%s <= %s", left, maxSQL), params, nil
 		}
-		return fmt.Sprintf("%s < ?", left), []any{maxVal}, nil
+		return fmt.Sprintf("%s < %s", left, maxSQL), params, nil
 	}
 
 	if maxUnbounded {
 		if inclusive {
-			return fmt.Sprintf("%s >= ?", left), []any{minVal}, nil
+			return fmt.Sprintf("%s >= %s", left, minSQL), params, nil
 		}
-		return fmt.Sprintf("%s > ?", left), []any{minVal}, nil
+		return fmt.Sprintf("%s > %s", left, minSQL), params, nil
 	}
 
 	if isNumericBound(minVal) || isNumericBound(maxVal) {
 		if inclusive {
-			return fmt.Sprintf("%s >= ? AND %s <= ?", left, left), []any{minVal, maxVal}, nil
+			return fmt.Sprintf("%s >= %s AND %s <= %s", left, minSQL, left, maxSQL), params, nil
 		}
-		return fmt.Sprintf("%s > ? AND %s < ?", left, left), []any{minVal, maxVal}, nil
+		return fmt.Sprintf("%s > %s AND %s < %s", left, minSQL, left, maxSQL), params, nil
 	}
 
 	if inclusive {
-		return fmt.Sprintf("%s BETWEEN ? AND ?", left), []any{minVal, maxVal}, nil
+		return fmt.Sprintf("%s BETWEEN %s AND %s", left, minSQL, maxSQL), params, nil
 	}
-	return fmt.Sprintf("%s > ? AND %s < ?", left, left), []any{minVal, maxVal}, nil
+	return fmt.Sprintf("%s > %s AND %s < %s", left, minSQL, left, maxSQL), params, nil
+}
+
+// rangeParam renders one range bound for the parameterized path. A column is
+// written into the SQL as a quoted identifier, as Render does, so both modes
+// compare against the column; anything else becomes a placeholder and is
+// appended to params.
+func (b Base) rangeParam(val any, params []any) (string, []any, error) {
+	if c, ok := val.(expr.Column); ok {
+		quoted, err := b.quoteColumn(c)
+		return quoted, params, err
+	}
+	return "?", append(params, val), nil
 }

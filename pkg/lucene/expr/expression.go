@@ -181,6 +181,21 @@ func IsExpr(in any) bool {
 	return isExpr
 }
 
+// IsASTOrJSONContainer reports whether v is a piece of an AST (an Expression,
+// a slice of them, or a RangeBoundary), nil, or a map or slice left over from
+// JSON decoding. None of these is a value that can stand in for a single
+// term. Validate and the SQL drivers share this check so they reject the
+// same things.
+func IsASTOrJSONContainer(v any) bool {
+	switch v.(type) {
+	case nil, *Expression, Expression, []*Expression, []Expression,
+		*RangeBoundary, RangeBoundary, map[string]any, []any:
+		return true
+	default:
+		return false
+	}
+}
+
 // Validate validates the expression is correctly structured.
 func Validate(in any) (err error) {
 	e, isExpr := in.(*Expression)

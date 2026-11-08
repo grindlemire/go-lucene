@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 type validator = func(*Expression) (err error)
@@ -153,32 +154,45 @@ func validateRange(e *Expression) (err error) {
 }
 
 // validateRangeBound checks that a range bound is a single term, using the
-// same rules the driver applies when it renders the bound. Null and wildcard
-// expressions are accepted; Null is let through so the renderer can return
-// its dedicated error for it. A literal or regexp expression is checked by the
-// value it holds, and any other expression is rejected. The value itself may
-// be any Go value except a piece of an AST (an Expression or RangeBoundary) or
-// a map or slice left over from JSON decoding, so named numeric types and
-// time.Time bounds are accepted for the parameterized renderers.
+// same rules the driver applies when it renders the bound. A null expression
+// is accepted so the renderer can return its dedicated error for it. A
+// literal, wildcard, or regexp expression is checked by the value it holds (a
+// bare * wildcard is an open bound, any other wildcard is literal text), and
+// any other expression is rejected. The value itself may
+// be any Go value that IsASTOrJSONContainer does not flag, so named numeric
+// types and time.Time bounds are accepted for the parameterized renderers.
 func validateRangeBound(side string, bound any) error {
 	val := bound
-	if e, ok := bound.(*Expression); ok {
+	if e, ok := bound.(*Expression); ok && e != nil {
 		switch e.Op {
-		case Null, Wild:
+		case Null:
 			return nil
-		case Literal, Regexp:
+		case Literal, Wild, Regexp:
 			val = e.Left
 		default:
-			return fmt.Errorf("RANGE validation: range %s must be a single term, not a %s expression; quote a bound that contains spaces or ':'", side, e.Op)
+			// An unquoted space or colon inside a bound is what produces an
+			// AND, OR or EQUALS here, so only those get the quoting hint.
+			hint := ""
+			if e.Op == And || e.Op == Or || e.Op == Equals {
+				hint = "; quote a bound that contains spaces or ':'"
+			}
+			return fmt.Errorf("RANGE validation: range %s must be a single term, not %s %s expression%s", side, article(e.Op), e.Op, hint)
 		}
 	}
 
-	switch val.(type) {
-	case nil, *Expression, Expression, *RangeBoundary, RangeBoundary, map[string]any, []any:
+	if IsASTOrJSONContainer(val) {
 		return fmt.Errorf("RANGE validation: range %s must be a single term, not %T", side, val)
-	default:
-		return nil
 	}
+	return nil
+}
+
+// article returns "an" for an operator name that starts with a vowel and
+// "a" otherwise.
+func article(op Operator) string {
+	if name := op.String(); name != "" && strings.ContainsRune("AEIOU", rune(name[0])) {
+		return "an"
+	}
+	return "a"
 }
 
 func validateMust(e *Expression) (err error) {

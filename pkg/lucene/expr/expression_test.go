@@ -518,9 +518,18 @@ func TestValidateRangeBounds(t *testing.T) {
 		"nil_literal":    rangeOf(&Expression{Op: Literal}, Lit(3)),
 		"raw_map":        rangeOf(map[string]any{"x": "1"}, 3),
 		"raw_slice":      rangeOf([]any{"x"}, 3),
+		"ast_slice":      rangeOf(Lit([]*Expression{Lit("x")}), 5),
+		"ast_value_list": rangeOf(Lit([]Expression{*Lit("x")}), 5),
+		"typed_nil_min":  rangeOf((*Expression)(nil), Lit(3)),
+		"typed_nil_max":  rangeOf(Lit(1), (*Expression)(nil)),
 	}
 	for name, e := range invalid {
 		t.Run("invalid/"+name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("Validate panicked: %v", r)
+				}
+			}()
 			err := Validate(e)
 			if err == nil {
 				t.Fatalf("expected %#v to fail validation", e)
@@ -550,6 +559,47 @@ func TestValidateRangeBounds(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "must be a single term") {
 				t.Fatalf("expected a single-term range bound error, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestRangeBoundErrorMessage pins the compound-bound error. The quoting hint
+// only appears for AND, OR and EQUALS, the shapes an unquoted space or colon
+// in a bound produces.
+func TestRangeBoundErrorMessage(t *testing.T) {
+	const prefix = "RANGE validation: range minimum must be a single term, not "
+	const hint = "; quote a bound that contains spaces or ':'"
+
+	tcs := map[string]struct {
+		bound any
+		want  string
+	}{
+		"and":      {AND(Lit(1), Lit(2)), prefix + "an AND expression" + hint},
+		"or":       {OR(Lit(1), Lit(2)), prefix + "an OR expression" + hint},
+		"equals":   {Eq("b", "c"), prefix + "an EQUALS expression" + hint},
+		"not":      {NOT(Lit(1)), prefix + "a NOT expression"},
+		"must":     {MUST(Lit(1)), prefix + "a MUST expression"},
+		"must_not": {MUSTNOT(Lit(1)), prefix + "a MUST_NOT expression"},
+		"boost":    {BOOST(Lit(1), 2.0), prefix + "a BOOST expression"},
+		"fuzzy":    {FUZZY(Lit(1)), prefix + "a FUZZY expression"},
+		"range":    {Rang("b", 1, 2, true), prefix + "a RANGE expression"},
+		"in":       {IN("b", LIST(Lit(1))), prefix + "an IN expression"},
+		"list":     {LIST(Lit(1)), prefix + "a LIST expression"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			e := &Expression{
+				Left:  Lit(Column("a")),
+				Op:    Range,
+				Right: &RangeBoundary{Min: tc.bound, Max: Lit(3), Inclusive: true},
+			}
+			err := Validate(e)
+			if err == nil {
+				t.Fatalf("expected %#v to fail validation", e)
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("\nwant %s\ngot  %s", tc.want, err.Error())
 			}
 		})
 	}

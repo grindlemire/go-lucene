@@ -75,8 +75,6 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 		want         string
 		wantErr      bool
 	}{
-		// Any wildcard bound is treated as unbounded, not just a bare *.
-		"wildcard_bound_is_unbounded": {input: `a:[ab* TO c]`, render: "postgres", want: `"a" <= 'c'`},
 		// The $N rewrite also replaces a ? inside a quoted column name.
 		"question_mark_in_column": {input: `a?b:c`, render: "param_postgres", want: `"a$1b" = $2`},
 		// An escaped \* is meant to match a literal *, but becomes \%.
@@ -109,6 +107,82 @@ func TestRenderKnownQuirksStaySafe(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("\nwant %s\ngot  %s", tc.want, got)
+			}
+		})
+	}
+}
+
+// TestRangeWildcardBound checks that only a bare * leaves a side of a range
+// open. Any other wildcard bound is literal text, as in Lucene. a:[ab* TO c]
+// used to drop its minimum and render as "a" <= 'c'.
+func TestRangeWildcardBound(t *testing.T) {
+	tcs := map[string]struct {
+		input  string
+		want   map[string]string
+		params []any
+	}{
+		"wildcard_bound_is_literal": {
+			input: `a:[ab* TO c]`,
+			want: map[string]string{
+				"postgres":       `"a" BETWEEN 'ab*' AND 'c'`,
+				"mysql":          "`a` BETWEEN 'ab*' AND 'c'",
+				"sqlite":         `"a" BETWEEN 'ab*' AND 'c'`,
+				"param_postgres": `"a" BETWEEN $1 AND $2`,
+				"param_mysql":    "`a` BETWEEN ? AND ?",
+			},
+			params: []any{"ab*", "c"},
+		},
+		"wildcard_max_exclusive": {
+			input: `a:{a TO b?}`,
+			want: map[string]string{
+				"postgres":       `"a" > 'a' AND "a" < 'b?'`,
+				"param_postgres": `"a" > $1 AND "a" < $2`,
+			},
+			params: []any{"a", "b?"},
+		},
+		"open_min": {
+			input: `a:[* TO b]`,
+			want: map[string]string{
+				"postgres":       `"a" <= 'b'`,
+				"param_postgres": `"a" <= $1`,
+			},
+			params: []any{"b"},
+		},
+		"open_max_exclusive": {
+			input: `a:{b TO *}`,
+			want: map[string]string{
+				"postgres":       `"a" > 'b'`,
+				"param_postgres": `"a" > $1`,
+			},
+			params: []any{"b"},
+		},
+		"fully_open": {
+			input: `a:{* TO *}`,
+			want: map[string]string{
+				"postgres":       `1=1`,
+				"param_postgres": `1=1`,
+			},
+		},
+	}
+	for name, tc := range tcs {
+		for rname, want := range tc.want {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				got, err := renderers[rname](tc.input)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got != want {
+					t.Fatalf("\nwant %s\ngot  %s", want, got)
+				}
+			})
+		}
+		t.Run(name+"/params", func(t *testing.T) {
+			_, params, err := ToParameterizedPostgres(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(params) != len(tc.params) || (len(params) > 0 && !reflect.DeepEqual(params, tc.params)) {
+				t.Fatalf("want params %#v, got %#v", tc.params, params)
 			}
 		})
 	}

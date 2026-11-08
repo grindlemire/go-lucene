@@ -368,3 +368,5 @@ A driver that leaves `driver.Base.Dialect` unset inherits Postgres-flavored rend
 `expr.Like`, `expr.Range`, and `expr.Regexp` are no longer dispatched through `RenderFNs`. If a custom driver used to override any of those three through the map, move the logic into a `driver.Dialect` implementation (`RenderLike`, `RenderStandaloneWild`, `PrepareLikePattern`) and set it on `Base.Dialect`. Map entries for those operators are silently ignored.
 
 The `Dialect` interface evolved across releases: `EscapeLikePattern` was replaced by `PrepareLikePattern` (which additionally returns a `useRegex` flag so dialects can route alternation/grouping patterns to a regex path), and `EscapeStringLiteral` was added so dialects can control string-literal quoting (MySQL needs this to double backslashes under default `sql_mode`).
+
+`PrepareLikePattern` now receives the raw, unescaped pattern, and in the non-parameterized path its result is escaped with `EscapeStringLiteral` afterwards. A dialect that escaped its own output for SQL string literals should stop, or the escaping is applied twice.

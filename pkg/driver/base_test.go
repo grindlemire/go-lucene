@@ -63,6 +63,10 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 		"helper_and":     expr.Rang("a", expr.AND(expr.Lit("x"), expr.Lit("y")), expr.Lit("z"), true),
 		"helper_eq_max":  expr.Rang("a", 1, expr.Eq("b", "c"), false),
 		"unbounded_and":  rangeOf(expr.WILD("*"), expr.AND(expr.Lit("x"), expr.Lit("y"))),
+		"ast_slice":      expr.Rang("a", expr.Lit([]*expr.Expression{expr.Lit("x")}), 5, true),
+		"ast_value_list": rangeOf(expr.Lit([]expr.Expression{*expr.Lit("x")}), expr.Lit(5)),
+		"typed_nil_min":  rangeOf((*expr.Expression)(nil), expr.Lit(3)),
+		"typed_nil_max":  rangeOf(expr.Lit(1), (*expr.Expression)(nil)),
 	}
 
 	jsonBounds := map[string]string{
@@ -77,24 +81,48 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 	for name, e := range bounds {
 		for dname, d := range allDrivers {
 			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
-				got, err := d.Render(e)
-				if err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
-				}
-				if !strings.Contains(err.Error(), "must be a single term") {
-					t.Fatalf("expected a single-term range bound error, got: %v", err)
-				}
+				noPanic(t, func() {
+					got, err := d.Render(e)
+					if err == nil {
+						t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
+					}
+					if !strings.Contains(err.Error(), "must be a single term") {
+						t.Fatalf("expected a single-term range bound error, got: %v", err)
+					}
+				})
 			})
 			t.Run(name+"/"+dname+"/render_param", func(t *testing.T) {
-				got, params, err := d.RenderParam(e)
-				if err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", e, got, params)
-				}
-				if !strings.Contains(err.Error(), "must be a single term") {
-					t.Fatalf("expected a single-term range bound error, got: %v", err)
-				}
+				noPanic(t, func() {
+					got, params, err := d.RenderParam(e)
+					if err == nil {
+						t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", e, got, params)
+					}
+					if !strings.Contains(err.Error(), "must be a single term") {
+						t.Fatalf("expected a single-term range bound error, got: %v", err)
+					}
+				})
 			})
 		}
+	}
+}
+
+// TestRangeBoundErrorArticle checks the driver's compound-bound error uses
+// "an" before an operator name that starts with a vowel.
+func TestRangeBoundErrorArticle(t *testing.T) {
+	tcs := map[string]struct {
+		bound any
+		want  string
+	}{
+		"and": {expr.AND(expr.Lit(1), expr.Lit(2)), "range bound must be a single term, not an AND expression"},
+		"not": {expr.NOT(expr.Lit(1)), "range bound must be a single term, not a NOT expression"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewPostgresDriver().Render(rangeOf(tc.bound, expr.Lit(3)))
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("\nwant %s\ngot  %v", tc.want, err)
+			}
+		})
 	}
 }
 
@@ -106,23 +134,50 @@ func TestRenderRejectsUnsupportedValues(t *testing.T) {
 
 	// Rejected by both Render and RenderParam: AST pieces in a value slot.
 	// encoding/json produces these when a "right" object has min/max keys.
-	both := map[string]*expr.Expression{
-		"json_equals_boundary":  mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":{"min":"x\" OR 1=1 --","max":"z","inclusive":true}}`),
-		"json_greater_boundary": mustUnmarshal(t, `{"left":"a","operator":"GREATER","right":{"min":"x","max":"z","inclusive":true}}`),
-		"json_in_boundary":      mustUnmarshal(t, `{"left":"a","operator":"IN","right":{"min":"x","max":"z","inclusive":true}}`),
-		"json_like_boundary":    mustUnmarshal(t, `{"left":"a","operator":"LIKE","right":{"min":"x","max":"z","inclusive":true}}`),
-		"equals_raw_boundary":   expr.Eq("a", &expr.RangeBoundary{Min: expr.Lit(`x" OR 1=1 --`), Max: expr.Lit("z")}),
+	const boundaryValue = "unsupported value of type *expr.RangeBoundary"
+	both := map[string]struct {
+		input   *expr.Expression
+		wantErr string
+	}{
+		"json_equals_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":{"min":"x\" OR 1=1 --","max":"z","inclusive":true}}`),
+			boundaryValue,
+		},
+		"json_greater_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"GREATER","right":{"min":"x","max":"z","inclusive":true}}`),
+			boundaryValue,
+		},
+		"json_in_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"IN","right":{"min":"x","max":"z","inclusive":true}}`),
+			boundaryValue,
+		},
+		"json_like_boundary": {
+			mustUnmarshal(t, `{"left":"a","operator":"LIKE","right":{"min":"x","max":"z","inclusive":true}}`),
+			"LIKE pattern must be a single term, not *expr.RangeBoundary",
+		},
+		"equals_raw_boundary": {
+			expr.Eq("a", &expr.RangeBoundary{Min: expr.Lit(`x" OR 1=1 --`), Max: expr.Lit("z")}),
+			boundaryValue,
+		},
 	}
-	for name, e := range both {
+	for name, tc := range both {
 		for dname, d := range allDrivers {
 			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
-				if got, err := d.Render(e); err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
+				got, err := d.Render(tc.input)
+				if err == nil {
+					t.Fatalf("expected error rendering %#v, got SQL %q", tc.input, got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
 				}
 			})
 			t.Run(name+"/"+dname+"/render_param", func(t *testing.T) {
-				if got, params, err := d.RenderParam(e); err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", e, got, params)
+				got, params, err := d.RenderParam(tc.input)
+				if err == nil {
+					t.Fatalf("expected error rendering %#v, got SQL %q with params %#v", tc.input, got, params)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
 				}
 			})
 		}
@@ -131,23 +186,30 @@ func TestRenderRejectsUnsupportedValues(t *testing.T) {
 	// Rejected by Render only. A parameter is never spliced into the SQL, and
 	// types like time.Time or driver.Valuer implementations are legitimate
 	// bind values, so RenderParam keeps passing them through.
-	renderOnly := map[string]*expr.Expression{
-		"struct_value":      expr.Eq("a", expr.Lit(stringer{"x') OR 1=1 --"})),
-		"json_number_value": expr.Eq("a", expr.Lit(json.Number("1) OR (1=1"))),
-		"time_value":        expr.Eq("a", expr.Lit(time.Unix(0, 0).UTC())),
-		"nan_value":         expr.Eq("a", expr.Lit(math.NaN())),
-		"inf_value":         expr.GREATER("a", expr.Lit(math.Inf(1))),
-		"neg_inf_in_list":   expr.IN("a", expr.LIST(expr.Lit(1), expr.Lit(math.Inf(-1)))),
-		"nan_range_bound":   expr.Rang("a", math.NaN(), 1, true),
-		"inf_range_bound":   expr.Rang("a", 1, math.Inf(1), true),
-		"struct_range":      expr.Rang("a", stringer{"x"}, stringer{"y"}, true),
-		"time_range":        expr.Rang("a", time.Unix(0, 0).UTC(), time.Unix(60, 0).UTC(), true),
+	renderOnly := map[string]struct {
+		input   *expr.Expression
+		wantErr string
+	}{
+		"struct_value":      {expr.Eq("a", expr.Lit(stringer{"x') OR 1=1 --"})), "unsupported value of type driver.stringer"},
+		"json_number_value": {expr.Eq("a", expr.Lit(json.Number("1) OR (1=1"))), "unsupported value of type json.Number"},
+		"time_value":        {expr.Eq("a", expr.Lit(time.Unix(0, 0).UTC())), "unsupported value of type time.Time"},
+		"nan_value":         {expr.Eq("a", expr.Lit(math.NaN())), "NaN has no SQL literal form"},
+		"inf_value":         {expr.GREATER("a", expr.Lit(math.Inf(1))), "+Inf has no SQL literal form"},
+		"neg_inf_in_list":   {expr.IN("a", expr.LIST(expr.Lit(1), expr.Lit(math.Inf(-1)))), "-Inf has no SQL literal form"},
+		"nan_range_bound":   {expr.Rang("a", math.NaN(), 1, true), "NaN has no SQL literal form"},
+		"inf_range_bound":   {expr.Rang("a", 1, math.Inf(1), true), "+Inf has no SQL literal form"},
+		"struct_range":      {expr.Rang("a", stringer{"x"}, stringer{"y"}, true), "unsupported range bound value of type driver.stringer"},
+		"time_range":        {expr.Rang("a", time.Unix(0, 0).UTC(), time.Unix(60, 0).UTC(), true), "unsupported range bound value of type time.Time"},
 	}
-	for name, e := range renderOnly {
+	for name, tc := range renderOnly {
 		for dname, d := range allDrivers {
 			t.Run(name+"/"+dname+"/render", func(t *testing.T) {
-				if got, err := d.Render(e); err == nil {
-					t.Fatalf("expected error rendering %#v, got SQL %q", e, got)
+				got, err := d.Render(tc.input)
+				if err == nil {
+					t.Fatalf("expected error rendering %#v, got SQL %q", tc.input, got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
 				}
 			})
 		}
@@ -433,6 +495,85 @@ func TestMySQLRegexFallbackEscaping(t *testing.T) {
 	}
 }
 
+// TestRenderColumnRangeBound checks that a column used as a range bound is
+// compared as a column in both modes. RenderParam used to bind it as a
+// parameter, so the database compared against the column's name as a string.
+func TestRenderColumnRangeBound(t *testing.T) {
+	type want struct {
+		render, param string
+		params        []any
+	}
+	tcs := map[string]struct {
+		input *expr.Expression
+		want  map[string]want
+	}{
+		"column_range": {
+			input: expr.Rang("a", expr.Column("lo"), expr.Column("hi"), true),
+			want: map[string]want{
+				"postgres": {`"a" BETWEEN "lo" AND "hi"`, `"a" BETWEEN "lo" AND "hi"`, nil},
+				"mysql":    {"`a` BETWEEN `lo` AND `hi`", "`a` BETWEEN `lo` AND `hi`", nil},
+				"sqlite":   {`"a" BETWEEN "lo" AND "hi"`, `"a" BETWEEN "lo" AND "hi"`, nil},
+			},
+		},
+		"column_and_number": {
+			input: expr.Rang("a", expr.Lit(expr.Column("b")), 5, true),
+			want: map[string]want{
+				"postgres": {`"a" >= "b" AND "a" <= 5`, `"a" >= "b" AND "a" <= $1`, []any{5}},
+				"mysql":    {"`a` >= `b` AND `a` <= 5", "`a` >= `b` AND `a` <= ?", []any{5}},
+				"sqlite":   {`"a" >= "b" AND "a" <= 5`, `"a" >= "b" AND "a" <= ?`, []any{5}},
+			},
+		},
+		"number_and_column_exclusive": {
+			input: expr.Rang("a", 1, expr.Column("b"), false),
+			want: map[string]want{
+				"postgres": {`"a" > 1 AND "a" < "b"`, `"a" > $1 AND "a" < "b"`, []any{1}},
+				"mysql":    {"`a` > 1 AND `a` < `b`", "`a` > ? AND `a` < `b`", []any{1}},
+				"sqlite":   {`"a" > 1 AND "a" < "b"`, `"a" > ? AND "a" < "b"`, []any{1}},
+			},
+		},
+		"open_min_column_max": {
+			input: expr.Rang("a", "*", expr.Column("hi"), true),
+			want: map[string]want{
+				"postgres": {`"a" <= "hi"`, `"a" <= "hi"`, nil},
+				"mysql":    {"`a` <= `hi`", "`a` <= `hi`", nil},
+				"sqlite":   {`"a" <= "hi"`, `"a" <= "hi"`, nil},
+			},
+		},
+		"column_min_open_max": {
+			input: expr.Rang("a", expr.Column("lo"), "*", false),
+			want: map[string]want{
+				"postgres": {`"a" > "lo"`, `"a" > "lo"`, nil},
+				"mysql":    {"`a` > `lo`", "`a` > `lo`", nil},
+				"sqlite":   {`"a" > "lo"`, `"a" > "lo"`, nil},
+			},
+		},
+	}
+	for name, tc := range tcs {
+		for dname, d := range allDrivers {
+			w := tc.want[dname]
+			t.Run(name+"/"+dname, func(t *testing.T) {
+				got, err := d.Render(tc.input)
+				if err != nil {
+					t.Fatalf("Render: unexpected error: %v", err)
+				}
+				if got != w.render {
+					t.Fatalf(errTemplate, "Render sql does not match", w.render, got)
+				}
+				got, params, err := d.RenderParam(tc.input)
+				if err != nil {
+					t.Fatalf("RenderParam: unexpected error: %v", err)
+				}
+				if got != w.param {
+					t.Fatalf(errTemplate, "RenderParam sql does not match", w.param, got)
+				}
+				if len(params) != len(w.params) || (len(params) > 0 && !reflect.DeepEqual(params, w.params)) {
+					t.Fatalf("want params %#v, got %#v", w.params, params)
+				}
+			})
+		}
+	}
+}
+
 // TestRenderSafeValueBoundary pins inputs on the safe side of the checks
 // above, so tightening them does not start rejecting valid ASTs, and shows
 // how each dialect escapes the strings that do get written into SQL.
@@ -466,10 +607,6 @@ func TestRenderSafeValueBoundary(t *testing.T) {
 		"bool_range": {
 			input: expr.Rang("a", false, true, true),
 			want:  want{`"a" BETWEEN false AND true`, "`a` BETWEEN FALSE AND TRUE", `"a" BETWEEN 0 AND 1`},
-		},
-		"column_range": {
-			input: expr.Rang("a", expr.Column("lo"), expr.Column("hi"), true),
-			want:  want{`"a" BETWEEN "lo" AND "hi"`, "`a` BETWEEN `lo` AND `hi`", `"a" BETWEEN "lo" AND "hi"`},
 		},
 		"regexp_range": {
 			input: expr.Rang("a", expr.REGEXP("/x/"), expr.REGEXP("/y/"), true),

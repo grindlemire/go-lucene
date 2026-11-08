@@ -101,7 +101,8 @@ func validateRenderWith(t *testing.T, d driver.PostgresDriver, e *expr.Expressio
 	}
 	for i, param := range params {
 		switch param.(type) {
-		case *expr.Expression, expr.Expression, *expr.RangeBoundary, expr.RangeBoundary:
+		case *expr.Expression, expr.Expression, []*expr.Expression, []expr.Expression,
+			*expr.RangeBoundary, expr.RangeBoundary:
 			t.Fatalf("param %d is an AST node, not a value: %#v (sql: %s)", i, param, p)
 		}
 	}
