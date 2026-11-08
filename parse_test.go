@@ -1252,6 +1252,8 @@ func TestParseNonDecimalNumberIsTerm(t *testing.T) {
 		"boost_inf":          {`a:b^inf`, expr.AND(expr.BOOST(expr.Eq("a", "b"), 1.0), "inf")},
 		"boost_quoted":       {`a:b^"5"`, expr.AND(expr.BOOST(expr.Eq("a", "b"), 1.0), "5")},
 		"fuzzy_separator":    {`a:b~1_0`, expr.AND(expr.FUZZY(expr.Eq("a", "b"), 1), "1_0")},
+		"fuzzy_quoted":       {`a:b~"2"`, expr.AND(expr.FUZZY(expr.Eq("a", "b"), 1), "2")},
+		"fuzzy_escaped":      {`a:b~\2`, expr.AND(expr.FUZZY(expr.Eq("a", "b"), 1), "2")},
 	}
 
 	for name, tc := range tcs {
@@ -1311,6 +1313,7 @@ func TestParseDecimalNumberForms(t *testing.T) {
 		"boost_exponent":      {`a:b^1e1`, expr.BOOST(expr.Eq("a", "b"), 10.0)},
 		"boost_fraction":      {`a:b^0.5`, expr.BOOST(expr.Eq("a", "b"), 0.5)},
 		"fuzzy_leading_zero":  {`a:b~02`, expr.FUZZY(expr.Eq("a", "b"), 2)},
+		"fuzzy_whole_float":   {`a:b~2.0`, expr.FUZZY(expr.Eq("a", "b"), 2)},
 	}
 
 	for name, tc := range tcs {
