@@ -332,9 +332,10 @@ func (p JSONPath) MarshalJSON() ([]byte, error) {
 
 // String renders the path in lucene dot syntax, e.g. labels.category. A name
 // that does not lex as one word, such as labels.a b, is quoted as a phrase:
-// "labels.a b". A dot inside the column or a key is written as \., which
-// Parse rejects for a JSON column, because a dot always separates keys and
-// the name has no spelling that reads back as the same path.
+// "labels.a b". A dot inside the column or a key has no spelling that reads
+// back as the same path, because a dot always separates keys. It is written
+// as \., so the field does not read back as a different path: Parse rejects
+// labels.a\.b for a JSON column labels.
 func (p JSONPath) String() string {
 	names := make([]string, 0, len(p.Path)+1)
 	for _, name := range append([]string{string(p.Column)}, p.Path...) {
