@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -192,6 +193,15 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		}
 	}
 
+	var pattern string
+	var hasPattern bool
+	if e.Op == expr.Like {
+		pattern, hasPattern, err = likeOperand(e.Right)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+
 	right, rparams, err := b.serializeParams(e.Right)
 	if err != nil {
 		return s, params, err
@@ -214,8 +224,8 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
 			isRegex = true
 		}
-		if !isRegex && len(rparams) > 0 {
-			transformed, useRegex := d.PrepareLikePattern(rparams[0].(string))
+		if hasPattern && len(rparams) == 1 {
+			transformed, useRegex := d.PrepareLikePattern(pattern)
 			rparams[0] = transformed
 			if useRegex {
 				isRegex = true
@@ -341,6 +351,15 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		}
 	}
 
+	var pattern string
+	var hasPattern bool
+	if e.Op == expr.Like {
+		pattern, hasPattern, err = likeOperand(e.Right)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	right, err := b.serialize(e.Right)
 	if err != nil {
 		return s, err
@@ -354,16 +373,18 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 
 	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect transform
 	// the pattern and optionally flip to the regex path. Positioned before
-	// paren-wrap to stay symmetric with RenderParam.
+	// paren-wrap to stay symmetric with RenderParam. The dialect transforms
+	// the raw pattern, the same text RenderParam binds, and the result is
+	// escaped afterwards: escaping first would leave any backslash the
+	// transform adds (MySQL's \. in the regex fallback) unescaped.
 	isRegex := false
 	if e.Op == expr.Like {
 		if rightExpr, ok := e.Right.(*expr.Expression); ok && rightExpr.Op == expr.Regexp {
 			isRegex = true
 		}
-		if !isRegex && len(right) >= 2 && right[0] == '\'' && right[len(right)-1] == '\'' {
-			inner := right[1 : len(right)-1]
-			transformed, useRegex := d.PrepareLikePattern(inner)
-			right = "'" + transformed + "'"
+		if hasPattern {
+			transformed, useRegex := d.PrepareLikePattern(pattern)
+			right = d.EscapeStringLiteral(transformed)
 			if useRegex {
 				isRegex = true
 			}
@@ -438,16 +459,117 @@ func (b Base) serialize(in any) (s string, err error) {
 		}
 		return strings.Join(strs, ", "), nil
 	case expr.Column:
-		if len(v) == 0 {
-			return "", fmt.Errorf("column name is empty")
-		}
-		return b.dialect().QuoteColumn(string(v))
+		return b.quoteColumn(v)
 	case string:
+		if err := validateStringLiteral(v); err != nil {
+			return "", err
+		}
 		return b.dialect().EscapeStringLiteral(v), nil
 	case bool:
 		return b.dialect().SerializeBool(v), nil
 	default:
-		return fmt.Sprintf("%v", v), nil
+		if s, ok, err := formatNumber(v, 'g'); ok {
+			return s, err
+		}
+		return "", fmt.Errorf("unsupported value of type %T", v)
+	}
+}
+
+// quoteColumn checks a column name and quotes it for the dialect. Column names
+// are always written into the SQL, so they get the same NUL and UTF-8 checks
+// as string literals.
+func (b Base) quoteColumn(c expr.Column) (string, error) {
+	if len(c) == 0 {
+		return "", fmt.Errorf("column name is empty")
+	}
+	if err := validateStringLiteral(string(c)); err != nil {
+		return "", err
+	}
+	return b.dialect().QuoteColumn(string(c))
+}
+
+// formatNumber renders a Go integer or float as a SQL numeric literal, using
+// floatFmt as the strconv format for floats. ok is false when v is not a
+// number. NaN and the infinities are rejected: they would print as NaN or
+// +Inf, which SQL reads as column references.
+func formatNumber(v any, floatFmt byte) (s string, ok bool, err error) {
+	switch n := v.(type) {
+	case int:
+		return strconv.Itoa(n), true, nil
+	case int8:
+		return strconv.FormatInt(int64(n), 10), true, nil
+	case int16:
+		return strconv.FormatInt(int64(n), 10), true, nil
+	case int32:
+		return strconv.FormatInt(int64(n), 10), true, nil
+	case int64:
+		return strconv.FormatInt(n, 10), true, nil
+	case uint:
+		return strconv.FormatUint(uint64(n), 10), true, nil
+	case uint8:
+		return strconv.FormatUint(uint64(n), 10), true, nil
+	case uint16:
+		return strconv.FormatUint(uint64(n), 10), true, nil
+	case uint32:
+		return strconv.FormatUint(uint64(n), 10), true, nil
+	case uint64:
+		return strconv.FormatUint(n, 10), true, nil
+	case float32:
+		return formatFloat(float64(n), floatFmt, 32)
+	case float64:
+		return formatFloat(n, floatFmt, 64)
+	default:
+		return "", false, nil
+	}
+}
+
+func formatFloat(f float64, floatFmt byte, bitSize int) (string, bool, error) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return "", true, fmt.Errorf("%v has no SQL literal form; pass it as a parameter instead", f)
+	}
+	return strconv.FormatFloat(f, floatFmt, -1, bitSize), true, nil
+}
+
+// likeOperand checks the right side of a LIKE and returns its raw pattern.
+// The right side must be one term: a wildcard or literal holding a string
+// (hasPattern is true), a regexp holding a string, or a literal column,
+// which is compared as-is. Anything else, such as a number or a compound
+// expression, has no pattern text to translate and is an error.
+func likeOperand(right any) (pattern string, hasPattern bool, err error) {
+	switch v := right.(type) {
+	case string:
+		return v, true, nil
+	case expr.Column:
+		return "", false, nil
+	case *expr.Expression:
+		switch v.Op {
+		case expr.Wild, expr.Literal, expr.Regexp:
+		default:
+			return "", false, fmt.Errorf("LIKE pattern must be a single term, not a %s expression", v.Op)
+		}
+		switch left := v.Left.(type) {
+		case string:
+			return left, v.Op != expr.Regexp, nil
+		case expr.Column:
+			if v.Op == expr.Literal {
+				return "", false, nil
+			}
+		}
+		return "", false, fmt.Errorf("LIKE pattern must be a string, not %T", v.Left)
+	default:
+		return "", false, fmt.Errorf("LIKE pattern must be a single term, not %T", right)
+	}
+}
+
+// isUnbindable reports whether v is a piece of an AST or a container left
+// over from JSON decoding. Neither is a value: binding one as a parameter
+// would send the database a Go struct, map, or slice instead of a term.
+func isUnbindable(v any) bool {
+	switch v.(type) {
+	case nil, *expr.Expression, expr.Expression, *expr.RangeBoundary, expr.RangeBoundary, map[string]any, []any:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -479,10 +601,7 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 		}
 		return strings.Join(strs, ", "), params, nil
 	case expr.Column:
-		if len(v) == 0 {
-			return "", params, fmt.Errorf("column name is empty")
-		}
-		quoted, err := b.dialect().QuoteColumn(string(v))
+		quoted, err := b.quoteColumn(v)
 		if err != nil {
 			return "", params, err
 		}
@@ -499,40 +618,54 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 		// escape single quotes with double single quotes
 		return "?", []any{v}, nil
 	default:
+		if isUnbindable(v) {
+			return "", nil, fmt.Errorf("unsupported value of type %T", v)
+		}
 		return "?", []any{v}, nil
 	}
 }
 
 // extractBoundValue unwraps a range boundary value from its Expression wrapper.
-// Returns the raw Go value (int, float64, string) and whether the bound is unbounded (*).
+// Returns the bound's Go value, which can be any non-AST, non-container value, and whether the bound is unbounded (*).
+// A bound must be a single term. Render does not run Validate, so a hand-built
+// or JSON-decoded AST can still carry a compound bound here.
 func extractBoundValue(bound any) (val any, unbounded bool, err error) {
-	e, ok := bound.(*expr.Expression)
-	if !ok {
-		return bound, false, nil
+	val = bound
+	if e, ok := bound.(*expr.Expression); ok {
+		switch e.Op {
+		case expr.Null:
+			return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
+		case expr.Wild:
+			return nil, true, nil
+		case expr.Literal, expr.Regexp:
+			val = e.Left
+		default:
+			return nil, false, fmt.Errorf("range bound must be a single term, not a %s expression", e.Op)
+		}
 	}
-	if e.Op == expr.Null {
-		return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
+	if isUnbindable(val) {
+		return nil, false, fmt.Errorf("range bound must be a single term, not %T", val)
 	}
-	if e.Op == expr.Wild {
-		return nil, true, nil
-	}
-	return e.Left, false, nil
+	return val, false, nil
 }
 
 // formatRangeValue renders a range bound value as a SQL literal.
 func (b Base) formatRangeValue(val any) (string, error) {
 	switch v := val.(type) {
-	case int:
-		return strconv.Itoa(v), nil
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64), nil
 	case string:
+		if err := validateStringLiteral(v); err != nil {
+			return "", err
+		}
 		return b.dialect().EscapeStringLiteral(v), nil
+	case bool:
+		return b.dialect().SerializeBool(v), nil
 	case expr.Column:
-		return b.dialect().QuoteColumn(string(v))
-	default:
-		return fmt.Sprintf("%v", v), nil
+		return b.quoteColumn(v)
 	}
+	if s, ok, err := formatNumber(val, 'f'); ok {
+		return s, err
+	}
+	return "", fmt.Errorf("unsupported range bound value of type %T", val)
 }
 
 // isNumericBound checks whether a range bound value is numeric.

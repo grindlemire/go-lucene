@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -467,6 +468,82 @@ func TestNullJSONRoundTrip(t *testing.T) {
 			t.Fatalf("round-trip mismatch:\n  want %#v\n  got  %#v\n  json: %s",
 				original, &round, raw)
 		}
+	}
+}
+
+// TestValidateRangeBounds checks that Validate only accepts a single term
+// (a scalar, or a literal, wildcard, regexp, or null expression) on each side
+// of a range. Compound bounds used to render partially into SQL (issue #68).
+func TestValidateRangeBounds(t *testing.T) {
+	rangeOf := func(min, max any) *Expression {
+		return &Expression{
+			Left:  Lit(Column("a")),
+			Op:    Range,
+			Right: &RangeBoundary{Min: min, Max: max, Inclusive: true},
+		}
+	}
+
+	valid := map[string]*Expression{
+		"helper_ints":    Rang("a", 1, 2, true),
+		"helper_strings": Rang("a", "x", "y", false),
+		"helper_wild":    Rang("a", "*", "y", true),
+		"raw_scalars":    rangeOf(1, "z"),
+		"raw_bool":       rangeOf(true, false),
+		"regexp_bounds":  rangeOf(REGEXP("/x/"), REGEXP("/y/")),
+		"null_bound":     rangeOf(NULL(), Lit(3)),
+		"time_bounds":    Rang("a", time.Unix(0, 0), time.Unix(60, 0), true),
+		"int8_bounds":    Rang("a", int8(1), int8(2), true),
+	}
+	for name, e := range valid {
+		t.Run("valid/"+name, func(t *testing.T) {
+			if err := Validate(e); err != nil {
+				t.Fatalf("expected %#v to validate, got: %v", e, err)
+			}
+		})
+	}
+
+	invalid := map[string]*Expression{
+		"and_min":        rangeOf(AND(Lit(1), Lit(2)), Lit(3)),
+		"or_max":         rangeOf(Lit(1), OR(Lit(3), Lit(4))),
+		"not_min":        rangeOf(NOT(Lit(1)), Lit(3)),
+		"must_min":       rangeOf(MUST(Lit(1)), Lit(3)),
+		"must_not_min":   rangeOf(MUSTNOT(Lit(1)), Lit(3)),
+		"equals_min":     rangeOf(Eq("b", "c"), Lit(3)),
+		"fuzzy_max":      rangeOf(Lit(1), FUZZY(Lit(3))),
+		"boost_max":      rangeOf(Lit(1), BOOST(Lit(3), 2.0)),
+		"range_max":      rangeOf(Lit(1), Rang("b", 1, 2, true)),
+		"list_max":       rangeOf(Lit(1), LIST(Lit(3), Lit(4))),
+		"nested_literal": rangeOf(Lit(Lit("x")), Lit(3)),
+		"map_literal":    rangeOf(Lit(map[string]any{"x": "1"}), Lit(3)),
+		"nil_literal":    rangeOf(&Expression{Op: Literal}, Lit(3)),
+		"raw_map":        rangeOf(map[string]any{"x": "1"}, 3),
+		"raw_slice":      rangeOf([]any{"x"}, 3),
+	}
+	for name, e := range invalid {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			if err := Validate(e); err == nil {
+				t.Fatalf("expected %#v to fail validation", e)
+			}
+		})
+	}
+
+	// Bounds decoded from JSON skip the parser, so the validator is the only
+	// check before render. Objects and arrays decode to map/slice values.
+	jsonInvalid := map[string]string{
+		"object_min": `{"left":"a","operator":"RANGE","right":{"min":{"x":"1') OR 1=1 --"},"max":2,"inclusive":true}}`,
+		"array_max":  `{"left":"a","operator":"RANGE","right":{"min":1,"max":["1') OR 1=1 --"],"inclusive":true}}`,
+		"null_min":   `{"left":"a","operator":"RANGE","right":{"min":null,"max":2,"inclusive":true}}`,
+	}
+	for name, raw := range jsonInvalid {
+		t.Run("json/"+name, func(t *testing.T) {
+			var e Expression
+			if err := json.Unmarshal([]byte(raw), &e); err != nil {
+				t.Fatalf("unmarshal failed: %v", err)
+			}
+			if err := Validate(&e); err == nil {
+				t.Fatalf("expected %#v to fail validation", &e)
+			}
+		})
 	}
 }
 

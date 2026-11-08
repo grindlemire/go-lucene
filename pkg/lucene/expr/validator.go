@@ -145,7 +145,40 @@ func validateRange(e *Expression) (err error) {
 		return errors.New("RANGE validation: range boundary must have a maximum")
 	}
 
-	return nil
+	if err := validateRangeBound("minimum", boundary.Min); err != nil {
+		return err
+	}
+
+	return validateRangeBound("maximum", boundary.Max)
+}
+
+// validateRangeBound checks that a range bound is a single term, using the
+// same rules the driver applies when it renders the bound. Null and wildcard
+// expressions are accepted; Null is let through so the renderer can return
+// its dedicated error for it. A literal or regexp expression is checked by the
+// value it holds, and any other expression is rejected. The value itself may
+// be any Go value except a piece of an AST (an Expression or RangeBoundary) or
+// a map or slice left over from JSON decoding, so named numeric types and
+// time.Time bounds are accepted for the parameterized renderers.
+func validateRangeBound(side string, bound any) error {
+	val := bound
+	if e, ok := bound.(*Expression); ok {
+		switch e.Op {
+		case Null, Wild:
+			return nil
+		case Literal, Regexp:
+			val = e.Left
+		default:
+			return fmt.Errorf("RANGE validation: range %s must be a single term, not a %s expression; quote a bound that contains spaces or ':'", side, e.Op)
+		}
+	}
+
+	switch val.(type) {
+	case nil, *Expression, Expression, *RangeBoundary, RangeBoundary, map[string]any, []any:
+		return fmt.Errorf("RANGE validation: range %s must be a single term, not %T", side, val)
+	default:
+		return nil
+	}
 }
 
 func validateMust(e *Expression) (err error) {
