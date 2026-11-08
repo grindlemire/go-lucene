@@ -58,7 +58,6 @@ func TestStringOperators(t *testing.T) {
 		"greater_word":     {`a:>foo`, `a:>foo`},
 		"greater_phrase":   {`a:>"foo bar"`, `a:>"foo bar"`},
 		"less_eq_null":     {`a:<=null`, `a:<=null`},
-		"greater_group":    {`a:>(x OR c)`, `a:>(x OR c)`},
 		"numeric_field":    {`0:>1`, `0:>1`},
 		"must_not_greater": {`-a:>5`, `-a:>5`},
 		"compare_and":      {`a:<22 AND b:>=33`, `a:<22 AND b:>=33`},
@@ -245,18 +244,21 @@ func TestStringKeepsNumberType(t *testing.T) {
 	})
 }
 
-// TestStringFieldGroup checks that a field group around a field expression
-// keeps its parentheses. a:b:c does not parse.
+// TestStringFieldGroup checks how a field group prints once its field has been
+// applied. A term inside the group with its own field keeps it, as in Lucene,
+// so the group's field drops out of a:(b:c), and each other term prints with
+// the group's field.
 func TestStringFieldGroup(t *testing.T) {
 	runStringCases(t, map[string]stringCase{
-		"field":          {`a:(b:c)`, `a:(b:c)`},
-		"range":          {`a:(b:[1 TO 5])`, `a:(b:[1 TO 5])`},
-		"compare":        {`a:(b:>5)`, `a:(b:>5)`},
-		"wildcard":       {`a:(b:fo*)`, `a:(b:fo*)`},
-		"in":             {`a:(b:(c OR d))`, `a:(b:(c OR d))`},
-		"must_not":       {`-a:(b:c)`, `-a:(b:c)`},
-		"boost":          {`a:(b:c)^2`, `a:(b:c)^2.0`},
-		"compare_field":  {`a:>(b:c)`, `a:>(b:c)`},
+		"field":          {`a:(b:c)`, `b:c`},
+		"range":          {`a:(b:[1 TO 5])`, `b:[1 TO 5]`},
+		"compare":        {`a:(b:>5)`, `b:>5`},
+		"wildcard":       {`a:(b:fo*)`, `b:fo*`},
+		"in":             {`a:(b:(c OR d))`, `b:(c OR d)`},
+		"must_not":       {`-a:(b:c)`, `-b:c`},
+		"boost":          {`a:(b:c)^2`, `b:c^2.0`},
+		"mixed":          {`a:(b:c OR d)`, `b:c OR a:d`},
+		"and":            {`a:(x AND -y)`, `a:x AND -a:y`},
 		"must_not_plain": {`-a:b`, `-a:b`},
 	})
 }
