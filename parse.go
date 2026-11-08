@@ -473,7 +473,7 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	// which mark the characters it matches literally, as in fo\*bar*. A term
 	// whose only * and ? are escaped, like fo\*, is a plain term.
 	if wildcard.HasWildcard(token.Val) {
-		return expr.WILD(token.Val), nil
+		return expr.WILD(escapePlus(token.Val)), nil
 	}
 
 	// Drop the escapes. An escaped backslash stays: foo\\bar is foo\bar.
@@ -482,6 +482,20 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	}
 
 	return expr.Lit(token.Val), nil
+}
+
+// escapePlus escapes each unescaped + in a wildcard's text. The lexer keeps
+// the + of an exponent in a word, as in 1e+5*, and a + there is a literal
+// character. In a pattern built in code, an unescaped + is a SIMILAR TO
+// operator, so the parser's must be escaped to stay literal.
+func escapePlus(text string) string {
+	chars := wildcard.Split(text)
+	for i, c := range chars {
+		if c.Text == "+" {
+			chars[i].Escaped = true
+		}
+	}
+	return wildcard.Join(chars)
 }
 
 // decimalNumber matches a plain decimal number: an optional sign, digits with

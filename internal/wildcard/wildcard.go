@@ -48,6 +48,19 @@ func Split(pattern string) []Char {
 	return chars
 }
 
+// Join writes chars back as a pattern, with a backslash before each escaped
+// character.
+func Join(chars []Char) string {
+	var b strings.Builder
+	for _, c := range chars {
+		if c.Escaped {
+			b.WriteByte('\\')
+		}
+		b.WriteString(c.Text)
+	}
+	return b.String()
+}
+
 // HasWildcard reports whether pattern has an unescaped * or ?.
 func HasWildcard(pattern string) bool {
 	for _, c := range Split(pattern) {
