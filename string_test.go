@@ -195,16 +195,17 @@ func TestStringQuotesFields(t *testing.T) {
 // TestParseBoostAndFuzzyParams pins how the parser reads a boost power or
 // fuzzy distance written as a quoted or float literal. The reducers used to
 // read it through String(), so a change to how literals print must not
-// change what these parse to.
+// change what these parse to. A quoted power or distance is text, not a
+// number, so it is a separate term.
 func TestParseBoostAndFuzzyParams(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 		want  *expr.Expression
 	}{
-		"fuzzy_quoted":   {`a~"2"`, expr.FUZZY(expr.Lit("a"), 2)},
+		"fuzzy_quoted":   {`a~"2"`, expr.AND(expr.FUZZY(expr.Lit("a"), 1), expr.Lit("2"))},
 		"fuzzy_float":    {`a~2.0`, expr.FUZZY(expr.Lit("a"), 2)},
-		"boost_quoted":   {`a^"2"`, expr.BOOST(expr.Lit("a"), 2.0)},
-		"boost_quoted_f": {`a^"0.5"`, expr.BOOST(expr.Lit("a"), 0.5)},
+		"boost_quoted":   {`a^"2"`, expr.AND(expr.BOOST(expr.Lit("a"), 1.0), expr.Lit("2"))},
+		"boost_quoted_f": {`a^"0.5"`, expr.AND(expr.BOOST(expr.Lit("a"), 1.0), expr.Lit("0.5"))},
 		"boost_float":    {`a^2.5`, expr.BOOST(expr.Lit("a"), 2.5)},
 		// A negated group is not a distance. This used to parse as a fuzzy
 		// distance of -2, read through MUST_NOT(2).String().
