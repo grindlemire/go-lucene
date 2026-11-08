@@ -22,10 +22,33 @@ func WithDefaultField(field string) Opt {
 	}
 }
 
+// WithCaseInsensitiveFields makes string matches on the listed fields ignore
+// case: equality, phrases, IN lists and wildcards. The SQL wraps the column
+// and the value in LOWER(). Numbers, regexes, ranges, comparisons, field:*
+// and null checks render as without the option. Field names match exactly.
+// Calling it more than once adds to the list.
+//
+// The ToPostgres, ToSQLite, ToMySQL and ToMariaDB functions (and their
+// parameterized forms) read this option. Parse ignores it: the expression it
+// returns is the same. When rendering a parsed expression with a driver
+// yourself, set driver.Base.CaseInsensitiveFields on the driver instead.
+func WithCaseInsensitiveFields(fields ...string) Opt {
+	return func(p *parser) {
+		p.caseInsensitiveFields = append(p.caseInsensitiveFields, fields...)
+	}
+}
+
 // Parse will parse a lucene expression string using a buffer and the shift reduce algorithm. The returned expression
 // is an AST that can be rendered to a variety of different formats.
 func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
-	p := &parser{
+	e, _, err = parseWithOptions(input, opts...)
+	return e, err
+}
+
+// parseWithOptions parses input and also returns the parser, so the render
+// functions can read options that apply at render time.
+func parseWithOptions(input string, opts ...Opt) (e *expr.Expression, p *parser, err error) {
+	p = &parser{
 		lex:          lex.Lex(input),
 		stack:        []any{},
 		nonTerminals: []lex.Token{{Typ: lex.TStart}},
@@ -37,15 +60,15 @@ func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
 
 	ex, err := p.parse()
 	if err != nil {
-		return e, err
+		return e, p, err
 	}
 
 	err = expr.Validate(ex)
 	if err != nil {
-		return e, err
+		return e, p, err
 	}
 
-	return ex, nil
+	return ex, p, nil
 }
 
 type parser struct {
@@ -54,6 +77,9 @@ type parser struct {
 	nonTerminals []lex.Token
 
 	defaultField string
+
+	// caseInsensitiveFields is read by the render functions, not the parser.
+	caseInsensitiveFields []string
 }
 
 func (p *parser) parse() (e *expr.Expression, err error) {
