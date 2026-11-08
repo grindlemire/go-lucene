@@ -3,10 +3,14 @@ package driver
 import (
 	"fmt"
 	"math"
+	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
+	"github.com/grindlemire/go-lucene/pkg/lucene/reduce"
 )
 
 // stripRegexpDelimiters removes surrounding /.../ delimiters from a Lucene
@@ -119,6 +123,11 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return "", nil, fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
+	e, err = fieldShape(e)
+	if err != nil {
+		return "", nil, err
+	}
+
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
 	// parameterized value. This mirrors what serializeParams does for nested
 	// Regexp sub-expressions.
@@ -129,6 +138,13 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 			return "", nil, err
 		}
 		return "?", []any{s}, nil
+	}
+
+	// A number that a float64 can't hold goes into the SQL as written. No Go
+	// value the drivers bind holds it: a float64 rounds it, and a string is
+	// compared as text against a JSON value in MySQL and SQLite.
+	if text, ok := lostDigits(e); ok {
+		return string(text), nil, nil
 	}
 
 	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
@@ -310,6 +326,11 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return "", fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
+	e, err = fieldShape(e)
+	if err != nil {
+		return "", err
+	}
+
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
 	// single-quoted literal. This mirrors what serialize does for nested
 	// Regexp sub-expressions.
@@ -320,6 +341,10 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 			return "", err
 		}
 		return b.dialect().EscapeStringLiteral(s), nil
+	}
+
+	if text, ok := lostDigits(e); ok {
+		return string(text), nil
 	}
 
 	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
@@ -497,6 +522,94 @@ func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string
 	return str, nil
 }
 
+// fieldShape checks that a field operator has a field and a value it can
+// compare, and spreads a field over a group of terms. Render does not run
+// expr.Validate, so a tree built in code or read from JSON can hold a group
+// where the parser only puts a single term.
+//
+// An EQUALS whose value is not a single term goes through reduce.FieldGroup,
+// as the parser's a:(...) does, so it renders as the parsed query does. A
+// group gets the field on every term in it, as in a:(x AND y), and a value
+// with a field of its own keeps it, so expr.Eq("a", expr.Eq("b", 1)) is
+// b = 1, as a:(b:1) is. A comparison, an IN list item and a field compare
+// one value, so anything but a single term there is an error, as
+// a:>(x OR y) is for the parser and expr.Validate. The right side of an IN
+// must be a LIST. A LIKE pattern is checked by likeOperand.
+func fieldShape(e *expr.Expression) (*expr.Expression, error) {
+	switch e.Op {
+	case expr.Equals, expr.Like, expr.In, expr.Range, expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+	default:
+		return e, nil
+	}
+
+	if e.Left == nil {
+		if e.Op == expr.Range {
+			return nil, fmt.Errorf("a range needs a field, as in field:[a TO b]")
+		}
+		return nil, fmt.Errorf("%s %s needs a field, as in %s", article(e.Op), e.Op, fieldExamples[e.Op])
+	}
+	if field, ok := e.Left.(*expr.Expression); ok && !isSingleTerm(field) {
+		return nil, fmt.Errorf("the field of %s %s must be a single term, not %s %s expression", article(e.Op), e.Op, article(field.Op), field.Op)
+	}
+
+	value, ok := e.Right.(*expr.Expression)
+	if !ok {
+		return e, nil
+	}
+	switch e.Op {
+	case expr.Equals:
+		if isSingleTerm(value) {
+			return e, nil
+		}
+		if value.Op == expr.List {
+			return nil, fmt.Errorf("the value in an EQUALS must be a single term, not a LIST expression")
+		}
+		field, ok := e.Left.(*expr.Expression)
+		if !ok {
+			field = &expr.Expression{Op: expr.Literal, Left: e.Left}
+		}
+		return reduce.FieldGroup(field, value), nil
+	case expr.In:
+		if value.Op != expr.List {
+			return nil, fmt.Errorf("the right side of an IN must be a LIST, not %s %s expression", article(value.Op), value.Op)
+		}
+		items, _ := value.Left.([]*expr.Expression)
+		for _, item := range items {
+			if item != nil && !isSingleTerm(item) {
+				return nil, fmt.Errorf("an IN list item must be a single term, not %s %s expression", article(item.Op), item.Op)
+			}
+		}
+	case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+		if !isSingleTerm(value) {
+			return nil, fmt.Errorf("the value in %s %s comparison must be a single term, not %s %s expression", article(e.Op), e.Op, article(value.Op), value.Op)
+		}
+	}
+	return e, nil
+}
+
+// fieldExamples shows each field operator with its field, for the error when
+// the field is missing.
+var fieldExamples = map[expr.Operator]string{
+	expr.Equals:    "field:value",
+	expr.Like:      "field:value*",
+	expr.In:        "field:(a OR b)",
+	expr.Greater:   "field:>value",
+	expr.Less:      "field:<value",
+	expr.GreaterEq: "field:>=value",
+	expr.LessEq:    "field:<=value",
+}
+
+// isSingleTerm reports whether e is a word, phrase, number, wildcard, regex or
+// null. An empty expression also counts, so it renders as it did before.
+func isSingleTerm(e *expr.Expression) bool {
+	switch e.Op {
+	case expr.Undefined, expr.Literal, expr.Wild, expr.Regexp, expr.Null:
+		return true
+	default:
+		return false
+	}
+}
+
 func (b Base) isSimple(in any) bool {
 	switch v := in.(type) {
 	case *expr.Expression:
@@ -601,9 +714,70 @@ func formatNumber(v any, floatFmt byte) (s string, ok bool, err error) {
 		return formatFloat(float64(n), floatFmt, 32)
 	case float64:
 		return formatFloat(n, floatFmt, 64)
+	case numberText:
+		return string(n), true, nil
 	default:
 		return "", false, nil
 	}
+}
+
+// numberText is the text a number was written as, for a number that its Go
+// value does not hold. lostDigits only returns one that is a plain decimal
+// number, so it is safe to write into the SQL.
+type numberText string
+
+// plainDecimal matches a plain decimal number, with an optional minus, digits
+// with an optional dot or a dot and digits, and an optional exponent, such as
+// -1.5 or 9223372036854775808. That is SQL's numeric literal syntax, so text
+// that matches it reads as one number in the SQL.
+var plainDecimal = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+
+// lostDigits returns the text that e, a number literal, was written as when
+// its float value is a different number. A float64 holds
+// 9223372036854775808 as 9223372036854776000, for example, and
+// 0.1000000000000000055511151231257827 as 0.1. Such a number has to reach
+// the database as its text for the database to compare it as written.
+//
+// The text goes into the SQL unquoted, so lostDigits checks it here rather
+// than relying on NumberLit: it must be a plain decimal number, and it must
+// still parse to the value, which a caller can change after NumberLit
+// checked it.
+func lostDigits(e *expr.Expression) (numberText, bool) {
+	text := e.NumberText()
+	if e.Op != expr.Literal || text == "" || !plainDecimal.MatchString(text) {
+		return "", false
+	}
+	var held string
+	switch f := e.Left.(type) {
+	case float64:
+		parsed, err := strconv.ParseFloat(text, 64)
+		if err != nil || parsed != f || f == 0 {
+			return "", false
+		}
+		held = strconv.FormatFloat(f, 'g', -1, 64)
+	case float32:
+		parsed, err := strconv.ParseFloat(text, 32)
+		if err != nil || float32(parsed) != f || f == 0 {
+			return "", false
+		}
+		held = strconv.FormatFloat(float64(f), 'g', -1, 32)
+	default:
+		// An integer renders as its own digits, so its text never reaches
+		// the SQL.
+		return "", false
+	}
+	// The text parsed to a float that is neither 0 nor infinite, so its
+	// magnitude is within a float's range, and parsing it exactly costs time
+	// in proportion to its length.
+	written, ok := new(big.Rat).SetString(text)
+	if !ok {
+		return "", false
+	}
+	value, ok := new(big.Rat).SetString(held)
+	if !ok || written.Cmp(value) == 0 {
+		return "", false
+	}
+	return numberText(text), true
 }
 
 func formatFloat(f float64, floatFmt byte, bitSize int) (string, bool, error) {
@@ -628,7 +802,7 @@ func likeOperand(right any) (pattern string, hasPattern bool, err error) {
 		switch v.Op {
 		case expr.Wild, expr.Literal, expr.Regexp:
 		default:
-			return "", false, fmt.Errorf("LIKE pattern must be a single term, not a %s expression", v.Op)
+			return "", false, fmt.Errorf("LIKE pattern must be a single term, not %s %s expression", article(v.Op), v.Op)
 		}
 		switch left := v.Left.(type) {
 		case string:
@@ -703,6 +877,7 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 
 // extractBoundValue unwraps a range boundary value from its Expression wrapper.
 // Returns the bound's Go value, which can be any non-AST, non-container value, and whether the bound is unbounded (*).
+// A number that its Go value does not hold is returned as its numberText.
 // A bound must be a single term. Render does not run Validate, so a hand-built
 // or JSON-decoded AST can still carry a compound bound here.
 func extractBoundValue(bound any) (val any, unbounded bool, err error) {
@@ -713,13 +888,21 @@ func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 			return nil, false, fmt.Errorf("null is not allowed as a range bound; use field:null for IS NULL")
 		case expr.Wild:
 			// Only a bare * leaves this side open. Any other wildcard bound,
-			// such as ab*, is literal text, as in Lucene.
-			if s, ok := e.Left.(string); ok && s == "*" {
+			// such as ab*, is literal text, as in Lucene, so its escapes are
+			// dropped: f\o* is fo*.
+			s, ok := e.Left.(string)
+			if ok && s == "*" {
 				return nil, true, nil
 			}
 			val = e.Left
+			if ok {
+				val = wildcard.Unescape(s)
+			}
 		case expr.Literal, expr.Regexp:
 			val = e.Left
+			if text, ok := lostDigits(e); ok {
+				val = text
+			}
 		default:
 			return nil, false, fmt.Errorf("range bound must be a single term, not %s %s expression", article(e.Op), e.Op)
 		}
@@ -761,7 +944,7 @@ func (b Base) formatRangeValue(val any) (string, error) {
 // isNumericBound checks whether a range bound value is numeric.
 func isNumericBound(val any) bool {
 	switch val.(type) {
-	case int, float64:
+	case int, float64, numberText:
 		return true
 	default:
 		return false
@@ -884,12 +1067,16 @@ func (b Base) renderRangeParam(left string, boundary *expr.RangeBoundary) (strin
 
 // rangeParam renders one range bound for the parameterized path. A column is
 // written into the SQL as a quoted identifier, as Render does, so both modes
-// compare against the column; anything else becomes a placeholder and is
-// appended to params.
+// compare against the column. So is a number that its Go value does not hold,
+// as RenderParam does for one outside a range. Anything else becomes a
+// placeholder and is appended to params.
 func (b Base) rangeParam(val any, params []any) (string, []any, error) {
-	if c, ok := val.(expr.Column); ok {
-		quoted, err := b.quoteColumn(c)
+	switch v := val.(type) {
+	case expr.Column:
+		quoted, err := b.quoteColumn(v)
 		return quoted, params, err
+	case numberText:
+		return string(v), params, nil
 	}
 	return "?", append(params, val), nil
 }
