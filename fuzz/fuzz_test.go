@@ -30,6 +30,10 @@ func FuzzPostgresDriver(f *testing.F) {
 		`a:{"x y" TO *}`,
 		`a:inf OR b:[NaN TO 1]`,
 		`0:1 AND 1.5:>2 AND 007:[1 TO *]`,
+		// null is rejected at render time in these positions
+		`a:[null TO 1]`,
+		`a:>null`,
+		`null`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
@@ -64,6 +68,9 @@ func validateRender(t *testing.T, e *expr.Expression) {
 			strings.Contains(err.Error(), "literal contains null byte") ||
 			strings.Contains(err.Error(), "column name contains a double quote") ||
 			strings.Contains(err.Error(), "column name is empty") ||
+			strings.Contains(err.Error(), "null is not allowed as a range bound") ||
+			strings.Contains(err.Error(), "cannot be used with null") ||
+			strings.Contains(err.Error(), "null cannot be rendered as a standalone value") ||
 			strings.Contains(err.Error(), "the BETWEEN operator needs a two item list in the right hand side") {
 			return
 		}
@@ -73,11 +80,12 @@ func validateRender(t *testing.T, e *expr.Expression) {
 
 	requireSingleSelect(t, f)
 
+	// Render accepted this expression, so RenderParam must too: the two
+	// renderers share their validation, and a mismatch means one of them
+	// is checking something the other is not.
 	p, params, err := driver.NewPostgresDriver().RenderParam(e)
 	if err != nil {
-		// Render already accepted this expression; the error filter above
-		// covers what RenderParam rejects too.
-		return
+		t.Fatalf("RenderParam failed after Render succeeded: %v (sql: %s)", err, f)
 	}
 	for i, param := range params {
 		switch param.(type) {
