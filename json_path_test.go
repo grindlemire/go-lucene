@@ -436,6 +436,26 @@ func TestNumberKeepsWrittenTextOnlyWhenItDiffers(t *testing.T) {
 			t.Errorf("Parse(%q): want number text %q, got %#v", input, text, e.Right)
 		}
 	}
+
+	// Text that is not a decimal number equal to the value is dropped, so
+	// String can never print it as another query.
+	for _, tc := range []struct {
+		v    any
+		text string
+	}{
+		{1, "1 OR b:c"},
+		{1, "2"},
+		{1.5, "1.50x"},
+		{1.5, "+1.5"},
+		{"x", "1"},
+	} {
+		if text := expr.NumberLit(tc.v, tc.text).NumberText(); text != "" {
+			t.Errorf("NumberLit(%#v, %q): want no text, got %q", tc.v, tc.text, text)
+		}
+	}
+	if text := expr.NumberLit(int64(5), "05").NumberText(); text != "05" {
+		t.Errorf(`NumberLit(int64(5), "05"): want text "05", got %q`, text)
+	}
 }
 
 func TestJSONPathFoldsCaseByDottedName(t *testing.T) {
@@ -538,6 +558,8 @@ func TestJSONPathJSONRejectsMalformedLeaf(t *testing.T) {
 		"number_int_text":    `{"left":"a","operator":"EQUALS","right":{"number":{"value":1.5,"text":"02"}}}`,
 		"number_extra_keys":  `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"1.0"},"operator":"AND"}}`,
 		"number_in_list":     `{"left":"a","operator":"IN","right":{"left":[{"number":{"value":1}}],"operator":"LIST"}}`,
+		"number_injection":   `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"1 OR b:c"}}}`,
+		"number_mismatch":    `{"left":"a","operator":"EQUALS","right":{"number":{"value":1,"text":"2.0"}}}`,
 		"number_range_bound": `{"left":"a","operator":"RANGE","right":{"min":{"number":{"value":1}},"max":2,"inclusive":true}}`,
 	}
 	for name, raw := range tcs {

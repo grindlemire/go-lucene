@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -81,15 +82,59 @@ func Lit(in any) *Expression {
 }
 
 // NumberLit returns a literal for the number v, written as text in the query,
-// such as 1.0 or 02134. A driver that compares the number as text uses text.
-// text is kept only when it differs from how v prints, so NumberLit(5, "5")
-// equals Lit(5).
+// such as 1.0 or 02134. A driver that compares the number as text uses text,
+// and String prints it. text is kept only when it differs from how v prints,
+// so NumberLit(5, "5") equals Lit(5). It is also dropped when it is not a
+// plain decimal number equal to v, so it can never print as another query.
 func NumberLit(v any, text string) *Expression {
 	e := Lit(v)
-	if text != numberString(v) {
+	if text != numberString(v) && spellsNumber(text, v) {
 		e.numberText = text
 	}
 	return e
+}
+
+// numberSpelling matches a number as the lexer reads it: an optional minus,
+// digits with an optional dot or a dot and digits, and an optional exponent.
+var numberSpelling = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+
+// spellsNumber reports whether text is a plain decimal number equal to v.
+func spellsNumber(text string, v any) bool {
+	if !numberSpelling.MatchString(text) {
+		return false
+	}
+	f, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return false
+	}
+	switch n := v.(type) {
+	case int:
+		return f == float64(n)
+	case int8:
+		return f == float64(n)
+	case int16:
+		return f == float64(n)
+	case int32:
+		return f == float64(n)
+	case int64:
+		return f == float64(n)
+	case uint:
+		return f == float64(n)
+	case uint8:
+		return f == float64(n)
+	case uint16:
+		return f == float64(n)
+	case uint32:
+		return f == float64(n)
+	case uint64:
+		return f == float64(n)
+	case float32:
+		return float32(f) == n
+	case float64:
+		return f == n
+	default:
+		return false
+	}
 }
 
 // numberString prints v the way the SQL drivers print a number as text.
@@ -614,18 +659,28 @@ func unmarshalNumber(raw json.RawMessage, keys int) (*Expression, error) {
 	if n.Text == "" {
 		return nil, fmt.Errorf("invalid number: text must not be empty")
 	}
+	if !numberSpelling.MatchString(n.Text) {
+		return nil, fmt.Errorf("invalid number: text %q is not a decimal number", n.Text)
+	}
 	if _, err := strconv.Atoi(n.Text); err == nil {
 		i, err := strconv.Atoi(n.Value.String())
 		if err != nil {
 			return nil, fmt.Errorf("invalid number: value %q is not an int", n.Value)
 		}
-		return NumberLit(i, n.Text), nil
+		return checkedNumberLit(i, n.Text)
 	}
 	f, err := n.Value.Float64()
 	if err != nil {
 		return nil, fmt.Errorf("invalid number: %w", err)
 	}
-	return NumberLit(f, n.Text), nil
+	return checkedNumberLit(f, n.Text)
+}
+
+func checkedNumberLit(v any, text string) (*Expression, error) {
+	if !spellsNumber(text, v) {
+		return nil, fmt.Errorf("invalid number: text %q does not equal value %v", text, v)
+	}
+	return NumberLit(v, text), nil
 }
 
 // unmarshalBound turns a range bound decoded into an any back into a literal.

@@ -244,6 +244,7 @@ func TestStringKeepsNumberType(t *testing.T) {
 		"trailing_dot":   {`a:0.`, `a:0.`},
 		"big_whole":      {`a:20000000022222200000`, `a:20000000022222200000`},
 		"small_digits":   {`a:0.00001`, `a:0.00001`},
+		"must_not_dot":   {`- .5`, `-(.5)`},
 	})
 	runStringCases(t, map[string]stringCase{
 		"default_field": {`0.`, `default:0.`},

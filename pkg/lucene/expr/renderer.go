@@ -134,9 +134,10 @@ func renderMustNot(e *Expression, verbose bool) string {
 		return fmt.Sprintf("%s(%#v)", toString[e.Op], e.Left)
 	}
 	s := wrap(e.Left, prefixOps)
-	// A minus right before a digit lexes as part of a negative number, so
-	// -5 would parse as the number -5 rather than MUST_NOT(5).
-	if r, _ := utf8.DecodeRuneInString(s); unicode.IsDigit(r) {
+	// A minus right before a digit, or before a dot and a digit, lexes as
+	// part of a negative number, so -5 and -.5 would parse as numbers rather
+	// than MUST_NOT(5) and MUST_NOT(.5).
+	if r, _ := utf8.DecodeRuneInString(strings.TrimPrefix(s, ".")); unicode.IsDigit(r) {
 		s = "(" + s + ")"
 	}
 	return "-" + s
