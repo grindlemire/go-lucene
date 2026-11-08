@@ -106,6 +106,26 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 	}
 }
 
+// TestRangeBoundErrorArticle checks the driver's compound-bound error uses
+// "an" before an operator name that starts with a vowel.
+func TestRangeBoundErrorArticle(t *testing.T) {
+	tcs := map[string]struct {
+		bound any
+		want  string
+	}{
+		"and": {expr.AND(expr.Lit(1), expr.Lit(2)), "range bound must be a single term, not an AND expression"},
+		"not": {expr.NOT(expr.Lit(1)), "range bound must be a single term, not a NOT expression"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewPostgresDriver().Render(rangeOf(tc.bound, expr.Lit(3)))
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("\nwant %s\ngot  %v", tc.want, err)
+			}
+		})
+	}
+}
+
 // TestRenderRejectsUnsupportedValues covers values that serialize used to
 // print with %v: AST nodes in a value position, JSON containers, Go types
 // with no SQL literal form, and non-finite floats.

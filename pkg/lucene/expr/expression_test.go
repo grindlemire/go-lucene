@@ -564,6 +564,47 @@ func TestValidateRangeBounds(t *testing.T) {
 	}
 }
 
+// TestRangeBoundErrorMessage pins the compound-bound error. The quoting hint
+// only appears for AND, OR and EQUALS, the shapes an unquoted space or colon
+// in a bound produces.
+func TestRangeBoundErrorMessage(t *testing.T) {
+	const prefix = "RANGE validation: range minimum must be a single term, not "
+	const hint = "; quote a bound that contains spaces or ':'"
+
+	tcs := map[string]struct {
+		bound any
+		want  string
+	}{
+		"and":      {AND(Lit(1), Lit(2)), prefix + "an AND expression" + hint},
+		"or":       {OR(Lit(1), Lit(2)), prefix + "an OR expression" + hint},
+		"equals":   {Eq("b", "c"), prefix + "an EQUALS expression" + hint},
+		"not":      {NOT(Lit(1)), prefix + "a NOT expression"},
+		"must":     {MUST(Lit(1)), prefix + "a MUST expression"},
+		"must_not": {MUSTNOT(Lit(1)), prefix + "a MUST_NOT expression"},
+		"boost":    {BOOST(Lit(1), 2.0), prefix + "a BOOST expression"},
+		"fuzzy":    {FUZZY(Lit(1)), prefix + "a FUZZY expression"},
+		"range":    {Rang("b", 1, 2, true), prefix + "a RANGE expression"},
+		"in":       {IN("b", LIST(Lit(1))), prefix + "an IN expression"},
+		"list":     {LIST(Lit(1)), prefix + "a LIST expression"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			e := &Expression{
+				Left:  Lit(Column("a")),
+				Op:    Range,
+				Right: &RangeBoundary{Min: tc.bound, Max: Lit(3), Inclusive: true},
+			}
+			err := Validate(e)
+			if err == nil {
+				t.Fatalf("expected %#v to fail validation", e)
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("\nwant %s\ngot  %s", tc.want, err.Error())
+			}
+		})
+	}
+}
+
 func jsonEqual(got string, want string) bool {
 	return stripWhitespace(got) == stripWhitespace(want)
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 type validator = func(*Expression) (err error)
@@ -168,7 +169,13 @@ func validateRangeBound(side string, bound any) error {
 		case Literal, Regexp:
 			val = e.Left
 		default:
-			return fmt.Errorf("RANGE validation: range %s must be a single term, not a %s expression; quote a bound that contains spaces or ':'", side, e.Op)
+			// An unquoted space or colon inside a bound is what produces an
+			// AND, OR or EQUALS here, so only those get the quoting hint.
+			hint := ""
+			if e.Op == And || e.Op == Or || e.Op == Equals {
+				hint = "; quote a bound that contains spaces or ':'"
+			}
+			return fmt.Errorf("RANGE validation: range %s must be a single term, not %s %s expression%s", side, article(e.Op), e.Op, hint)
 		}
 	}
 
@@ -176,6 +183,15 @@ func validateRangeBound(side string, bound any) error {
 		return fmt.Errorf("RANGE validation: range %s must be a single term, not %T", side, val)
 	}
 	return nil
+}
+
+// article returns "an" for an operator name that starts with a vowel and
+// "a" otherwise.
+func article(op Operator) string {
+	if name := op.String(); name != "" && strings.ContainsRune("AEIOU", rune(name[0])) {
+		return "an"
+	}
+	return "a"
 }
 
 func validateMust(e *Expression) (err error) {

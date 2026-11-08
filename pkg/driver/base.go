@@ -630,13 +630,22 @@ func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 		case expr.Literal, expr.Regexp:
 			val = e.Left
 		default:
-			return nil, false, fmt.Errorf("range bound must be a single term, not a %s expression", e.Op)
+			return nil, false, fmt.Errorf("range bound must be a single term, not %s %s expression", article(e.Op), e.Op)
 		}
 	}
 	if expr.IsASTOrJSONContainer(val) {
 		return nil, false, fmt.Errorf("range bound must be a single term, not %T", val)
 	}
 	return val, false, nil
+}
+
+// article returns "an" for an operator name that starts with a vowel and
+// "a" otherwise.
+func article(op expr.Operator) string {
+	if name := op.String(); name != "" && strings.ContainsRune("AEIOU", rune(name[0])) {
+		return "an"
+	}
+	return "a"
 }
 
 // formatRangeValue renders a range bound value as a SQL literal.
