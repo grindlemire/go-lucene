@@ -783,6 +783,28 @@ func TestNonDecimalNumbersRenderAsStrings(t *testing.T) {
 	})
 }
 
+// TestPlusInsideTermRenders checks that a + inside a term stays in it. a:be+3
+// used to parse as a:be AND +3 and render ("a" = 'be') AND (3), and a:c++
+// failed to parse. 1+2 is text, not a number.
+func TestPlusInsideTermRenders(t *testing.T) {
+	tcs := map[string]struct {
+		input      string
+		want       map[string]string
+		wantParams []any
+	}{
+		"after_word":   {`a:be+3`, sameSQL(`"a" = 'be+3'`), []any{"be+3"}},
+		"after_number": {`a:1+2`, sameSQL(`"a" = '1+2'`), []any{"1+2"}},
+		"at_end":       {`a:c++`, sameSQL(`"a" = 'c++'`), []any{"c++"}},
+		"in_field":     {`a+b:c`, sameSQL(`"a+b" = 'c'`), []any{"c"}},
+		"leading_plus": {`a:b +c:d`, sameSQL(`("a" = 'b') AND ("c" = 'd')`), []any{"b", "d"}},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			checkNumberRendering(t, tc.input, tc.want, tc.wantParams)
+		})
+	}
+}
+
 // TestDecimalNumberFormsRender pins the SQL for each spelling of a plain
 // decimal number, in both render modes. Leading zeros are dropped, an exponent
 // is folded into the value.

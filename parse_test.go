@@ -1240,9 +1240,20 @@ func TestParseNumberSpellings(t *testing.T) {
 		"dot_word":            {`a:.foo`, expr.Eq("a", ".foo")},
 		"dot_field":           {`.5:x`, expr.Eq(".5", "x")},
 		"minus_dot_word":      {`-.foo`, expr.MUSTNOT(expr.Lit(".foo"))},
-		// Unchanged: + outside an exponent still means MUST.
-		"plus_after_word": {`a:be+3`, expr.AND(expr.Eq("a", "be"), expr.MUST(expr.Lit(3)))},
-		"exponent_minus":  {`a:1e-3`, expr.Eq("a", expr.NumberLit(0.001, "1e-3"))},
+		"exponent_minus":      {`a:1e-3`, expr.Eq("a", expr.NumberLit(0.001, "1e-3"))},
+
+		// A + inside a term is part of it, as in Lucene and like -. These
+		// used to split at the +, so a:be+3 parsed as a:be AND +3.
+		"plus_after_word":   {`a:be+3`, expr.Eq("a", "be+3")},
+		"plus_after_number": {`a:1+2`, expr.Eq("a", "1+2")},
+		"plus_at_end":       {`a:c++`, expr.Eq("a", "c++")},
+		"plus_no_exponent":  {`a:1e+`, expr.Eq("a", "1e+")},
+		"plus_in_field":     {`a+b:c`, expr.Eq("a+b", "c")},
+		"plus_in_range":     {`a:[a+b TO c+d]`, expr.Rang("a", "a+b", "c+d", true)},
+		"plus_in_group":     {`a:(c++ OR b)`, expr.IN("a", expr.LIST(expr.Lit("c++"), expr.Lit("b")))},
+		// A + that starts a term still means MUST.
+		"plus_after_space": {`a:b +c:d`, expr.AND(expr.Eq("a", "b"), expr.MUST(expr.Eq("c", "d")))},
+		"plus_after_paren": {`(a:b)+c:d`, expr.AND(expr.Eq("a", "b"), expr.MUST(expr.Eq("c", "d")))},
 	}
 
 	for name, tc := range tcs {
@@ -1259,9 +1270,7 @@ func TestParseNumberSpellings(t *testing.T) {
 
 	// A term can't start with +, so a:+5 stays an error, as in Lucene and
 	// like a:-x. Escape it to search for the text: a:\+5.
-	// A + with no digit after it is not an exponent sign, even at the end
-	// of the query, so a:1e+ fails like a:1e+ with a trailing space.
-	for _, input := range []string{`a:+5`, `a:+.5`, `a:1e+`, `a:1e+ `, `1e+`} {
+	for _, input := range []string{`a:+5`, `a:+.5`, `a: +b`} {
 		t.Run("error/"+input, func(t *testing.T) {
 			if got, err := Parse(input); err == nil {
 				t.Fatalf("expected an error, got %#v", got)
