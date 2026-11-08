@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 )
 
 // Lucene Grammar:
@@ -155,9 +157,22 @@ func (e *Expression) NumberText() string {
 	return e.numberText
 }
 
-// WILD represents a literal wildcard expression
+// WILD represents a literal wildcard expression. Its value uses Lucene
+// wildcard syntax: * matches any run of characters, ? matches one character,
+// and a backslash makes the next character literal, so fo\*bar* matches text
+// that starts with fo*bar.
 func WILD(in any) *Expression {
 	return Expr(in, Wild)
+}
+
+// EscapeWildcard returns a wildcard pattern that matches the text s and
+// nothing else, for building a pattern in code from text such as user input.
+// It puts a backslash before each backslash, * and ?, and before each of
+// | ( ) [ ] { } and +, which keep their SIMILAR TO meaning in a pattern built
+// in code. Add wildcards around the result, as in
+// LIKE("name", EscapeWildcard(prefix)+"*").
+func EscapeWildcard(s string) string {
+	return wildcard.Escape(s)
 }
 
 // REGEXP represents a literal regular expression
@@ -194,7 +209,8 @@ func LESSEQ(a any, b any) *Expression {
 	return Expr(a, LessEq, b)
 }
 
-// LIKE creates a LIKE expression. b uses Lucene wildcard syntax (* and ?, not SQL % and _).
+// LIKE creates a LIKE expression. b uses Lucene wildcard syntax (* and ?, not
+// SQL % and _), with a backslash before a * or ? that should match itself.
 func LIKE(a any, b any) *Expression {
 	return Expr(a, Like, b)
 }
@@ -472,6 +488,11 @@ func (e Expression) MarshalJSON() (out []byte, err error) {
 	if e.Op == Literal && e.numberText != "" {
 		return json.Marshal(numberLeaf{Number: numberFields{Value: e.Left, Text: e.numberText}})
 	}
+	if s, ok := e.Left.(string); ok {
+		if key, tagged := termKeys[e.Op]; tagged && literalToExpr(s).Op != e.Op {
+			return json.Marshal(map[string]string{key: s})
+		}
+	}
 	if e.Op == Literal || e.Op == Wild || e.Op == Regexp || e.Op == Null {
 		return json.Marshal(e.Left)
 	}
@@ -537,6 +558,13 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 			return err
 		}
 		*e = *n
+		return nil
+	}
+	if t, ok, err := unmarshalTerm(keys); ok || err != nil {
+		if err != nil {
+			return err
+		}
+		*e = *t
 		return nil
 	}
 
@@ -683,11 +711,40 @@ func checkedNumberLit(v any, text string) (*Expression, error) {
 	return NumberLit(v, text), nil
 }
 
+// termKeys gives the JSON key of each kind of string term that has an object
+// form. A term is written as a plain JSON string when that string decodes
+// back to the same kind of term, and as {"<key>": "<value>"} otherwise: the
+// literal fo* is {"literal":"fo*"}, because the string "fo*" decodes as a
+// wildcard.
+var termKeys = map[Operator]string{
+	Literal: "literal",
+}
+
+// unmarshalTerm decodes the object form of a string term. ok is false when
+// keys holds none of the term keys.
+func unmarshalTerm(keys map[string]json.RawMessage) (e *Expression, ok bool, err error) {
+	for op, key := range termKeys {
+		raw, found := keys[key]
+		if !found {
+			continue
+		}
+		if len(keys) != 1 {
+			return nil, true, fmt.Errorf("%s must be the only key of its object", key)
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, true, fmt.Errorf("invalid %s: %w", key, err)
+		}
+		return Expr(s, op), true, nil
+	}
+	return nil, false, nil
+}
+
 // unmarshalBound turns a range bound decoded into an any back into a literal.
 // Any other object stays a map, which Validate rejects.
 func unmarshalBound(in any) (*Expression, error) {
 	m, isObject := in.(map[string]any)
-	if _, isNumber := m["number"]; !isObject || !isNumber {
+	if !isObject || !isLeafObject(m) {
 		return literalToExpr(toIntIfNecessary(in)), nil
 	}
 	raw, err := json.Marshal(m)
@@ -697,10 +754,24 @@ func unmarshalBound(in any) (*Expression, error) {
 	return unmarshalLiteral(raw)
 }
 
+// isLeafObject reports whether m is the object form of a single term: a
+// number that keeps its text, or a string term.
+func isLeafObject(m map[string]any) bool {
+	if _, ok := m["number"]; ok {
+		return true
+	}
+	for _, key := range termKeys {
+		if _, ok := m[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 	e = ptr(empty())
 
-	// a number that keeps the text it was written as
+	// a number that keeps the text it was written as, or a string term
 	if isJSONObject(in) {
 		var keys map[string]json.RawMessage
 		if err := json.Unmarshal(in, &keys); err != nil {
@@ -708,6 +779,9 @@ func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 		}
 		if raw, ok := keys["number"]; ok {
 			return unmarshalNumber(raw, len(keys))
+		}
+		if t, ok, err := unmarshalTerm(keys); ok || err != nil {
+			return t, err
 		}
 	}
 
@@ -780,8 +854,9 @@ func literalToExpr(in any) *Expression {
 		return REGEXP(s)
 	}
 
-	// if it contains a * or ? then it probably is a wildcard expression
-	// TODO this should probably check for escaping
+	// A string with a * or ? is a wildcard pattern, even when they are all
+	// escaped: the backslashes are part of the pattern, so fo\* matches the
+	// text fo*.
 	if strings.ContainsAny(s, "*?") {
 		return WILD(s)
 	}

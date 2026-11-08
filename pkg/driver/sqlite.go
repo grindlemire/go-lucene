@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
@@ -12,9 +13,8 @@ import (
 // Notable differences from the Postgres driver:
 //   - Wildcards render as GLOB (case-sensitive, Unix glob syntax).
 //     Lucene's * and ? map 1:1 to GLOB's * and ?.
-//   - GLOB has no escape mechanism, so a literal * or ? inside a wildcard
-//     pattern cannot be matched. Use the regex form (field:/.../) if you
-//     need to match those characters literally.
+//   - GLOB has no escape character, so an escaped \* \? or \[ in a
+//     wildcard is written as the bracket expression [*], [?] or [[].
 //   - Regex (/pattern/) renders as REGEXP. SQLite does not define regexp()
 //     by default — the caller must register a regexp() function on their
 //     connection (see modernc.org/sqlite.RegisterDeterministicScalarFunction
@@ -56,14 +56,27 @@ func (sqliteDialect) RenderStandaloneWild(left string) (string, error) {
 	return fmt.Sprintf("%s IS NOT NULL", left), nil
 }
 
-// PrepareLikePattern is the identity function for SQLite. Lucene's wildcard
-// syntax (* and ?) is already the same as GLOB's, so no translation is needed,
-// and SQLite never falls back to regex based on pattern content.
-// Note that GLOB has no escape mechanism — patterns containing a literal * or ?
-// cannot be expressed via the wildcard form; users must fall back to the regex
-// form for that.
+// PrepareLikePattern writes a Lucene wildcard pattern for GLOB. Lucene's
+// wildcards (* and ?) are the same as GLOB's, so they stay as they are, and
+// SQLite never falls back to regex based on pattern content. GLOB has no
+// escape character, so a literal *, ? or [ is written as a bracket
+// expression that holds only that character: [*], [?] or [[]. An unescaped
+// [ in a pattern built in code still starts a GLOB character class.
 func (sqliteDialect) PrepareLikePattern(pattern string) (string, bool) {
-	return pattern, false
+	var b strings.Builder
+	b.Grow(len(pattern))
+	chars := wildcard.Split(pattern)
+	inBrackets := wildcard.InBrackets(chars)
+	for i, c := range chars {
+		// Inside a bracket expression * ? and [ are already members of the
+		// set. GLOB has no way to escape ^, - or ] there.
+		if c.Escaped && c.In("*?[") && !inBrackets[i] {
+			b.WriteString("[" + c.Text + "]")
+			continue
+		}
+		b.WriteString(c.Text)
+	}
+	return b.String(), false
 }
 
 func (sqliteDialect) EscapeStringLiteral(s string) string {
