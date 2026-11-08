@@ -154,11 +154,18 @@ func renderRange(e *Expression, verbose bool) string {
 
 		return fmt.Sprintf("%#v:{%#v TO %#v}", e.Left, boundary.Min, boundary.Max)
 	}
+
+	// The parser builds a range before it knows the field, so a parse error
+	// can print one without a field.
+	field := ""
+	if e.Left != nil {
+		field = fmt.Sprintf("%s:", e.Left)
+	}
 	if boundary.Inclusive {
-		return fmt.Sprintf("%s:[%s TO %s]", e.Left, boundary.Min, boundary.Max)
+		return fmt.Sprintf("%s[%s TO %s]", field, boundary.Min, boundary.Max)
 	}
 
-	return fmt.Sprintf("%s:{%s TO %s}", e.Left, boundary.Min, boundary.Max)
+	return fmt.Sprintf("%s{%s TO %s}", field, boundary.Min, boundary.Max)
 }
 
 func renderList(e *Expression, verbose bool) string {

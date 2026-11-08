@@ -118,7 +118,7 @@ func validateRange(e *Expression) (err error) {
 	}
 
 	if e.Left == nil {
-		return errors.New("RANGE validation: term value must not be nil")
+		return errors.New("RANGE validation: a range needs a field, as in field:[a TO b]")
 	}
 
 	if e.Right == nil {

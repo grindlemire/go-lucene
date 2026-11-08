@@ -426,6 +426,20 @@ func TestRenderLiteralQuoteEscaping(t *testing.T) {
 	}
 }
 
+// TestRenderRangeWithoutField checks that a range the parser has not given a
+// field yet prints as a bare range. It shows up in parse error messages.
+func TestRenderRangeWithoutField(t *testing.T) {
+	if got, want := Rang(nil, 1, 5, true).String(), `[1 TO 5]`; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if got, want := Rang(nil, 1, 5, false).String(), `{1 TO 5}`; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+	if got, want := Rang("a", 1, 5, true).String(), `a:[1 TO 5]`; got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+}
+
 func TestNullValidation(t *testing.T) {
 	if err := Validate(NULL()); err != nil {
 		t.Fatalf("Validate(NULL()) returned err: %v", err)
