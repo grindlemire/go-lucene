@@ -65,8 +65,12 @@ func (sqliteDialect) RenderStandaloneWild(left string) (string, error) {
 func (sqliteDialect) PrepareLikePattern(pattern string) (string, bool) {
 	var b strings.Builder
 	b.Grow(len(pattern))
-	for _, c := range wildcard.Split(pattern) {
-		if c.Escaped && c.In("*?[") {
+	chars := wildcard.Split(pattern)
+	inBrackets := wildcard.InBrackets(chars)
+	for i, c := range chars {
+		// Inside a bracket expression * ? and [ are already members of the
+		// set. GLOB has no way to escape ^, - or ] there.
+		if c.Escaped && c.In("*?[") && !inBrackets[i] {
 			b.WriteString("[" + c.Text + "]")
 			continue
 		}

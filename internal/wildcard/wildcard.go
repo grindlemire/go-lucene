@@ -61,6 +61,54 @@ func Join(chars []Char) string {
 	return b.String()
 }
 
+// escaper puts a backslash before each character a pattern built in code
+// gives a meaning to: the escape itself, the wildcards, and the SIMILAR TO
+// operators.
+var escaper = strings.NewReplacer(
+	`\`, `\\`, `*`, `\*`, `?`, `\?`,
+	`|`, `\|`, `(`, `\(`, `)`, `\)`, `[`, `\[`, `]`, `\]`, `{`, `\{`, `}`, `\}`, `+`, `\+`,
+)
+
+// Escape returns a pattern that matches the text s and nothing else.
+func Escape(s string) string {
+	return escaper.Replace(s)
+}
+
+// InBrackets reports, for each character, whether it sits inside a bracket
+// expression: between an unescaped [ and the unescaped ] that closes it,
+// not counting those two. As in POSIX, a ] right after the [ or [^ is a
+// member of the set. A [ with no ] to close it starts no bracket expression.
+// Only a pattern built in code has one, since the lexer splits a word at [.
+func InBrackets(chars []Char) []bool {
+	in := make([]bool, len(chars))
+	bare := func(i int, text string) bool {
+		return i < len(chars) && !chars[i].Escaped && chars[i].Text == text
+	}
+	for i := 0; i < len(chars); i++ {
+		if !bare(i, "[") {
+			continue
+		}
+		end := i + 1
+		if bare(end, "^") {
+			end++
+		}
+		if bare(end, "]") {
+			end++
+		}
+		for end < len(chars) && !bare(end, "]") {
+			end++
+		}
+		if end == len(chars) {
+			continue
+		}
+		for k := i + 1; k < end; k++ {
+			in[k] = true
+		}
+		i = end
+	}
+	return in
+}
+
 // HasWildcard reports whether pattern has an unescaped * or ?.
 func HasWildcard(pattern string) bool {
 	for _, c := range Split(pattern) {

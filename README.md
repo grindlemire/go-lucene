@@ -113,9 +113,18 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 
 ### Wildcards built in code
 
-`expr.LIKE` and `expr.WILD` take a pattern in Lucene wildcard syntax, as in a query: `*` and `?` are wildcards, and a backslash makes the next character literal. ``expr.LIKE("name", `fo\*bar*`)`` matches text that starts with `fo*bar`.
+`expr.LIKE` and `expr.WILD` take a pattern in Lucene wildcard syntax, as in a query: `*` and `?` are wildcards, and a backslash makes the next character literal. ``expr.LIKE("name", `fo\*bar*`)`` matches text that starts with `fo*bar`, and a literal backslash is written `\\`. The same goes for a pattern read from JSON.
 
-`String()` prints the pattern as a query term, with a backslash before each character the parser would split the term on or read differently. `expr.LIKE("name", "foo bar*").String()` is `name:foo\ bar*`. On Postgres and MySQL a pattern built in code can also use the SIMILAR TO operators `|`, `()`, `[]`, `{}` and `+`. Lucene has no syntax for them, so `String()` escapes them too, and the printed query matches them as literal characters.
+Earlier versions passed a backslash in a pattern built in code to MySQL and SQLite as a literal backslash. Code that puts text such as `C:\Users\` into a pattern now needs to escape it, and `expr.EscapeWildcard` turns any text into a pattern that matches only that text:
+
+```go
+// Names that start with the user's text, whatever characters it holds.
+e := expr.LIKE("name", expr.EscapeWildcard(userText)+"*")
+```
+
+It escapes the backslash, `*` and `?`, and also `|`, `()`, `[]`, `{}` and `+`. In a pattern built in code those keep their SIMILAR TO meaning on Postgres and MySQL (MySQL falls back to `REGEXP` for them), and `[...]` is a character set on SQLite too. Inside a set, an escaped `^`, `-`, `]`, `[` or `\` is a member of the set on Postgres and on MySQL 8.0 and MariaDB 10.5+. MySQL 5.7 and older MariaDB also add the backslash to the set, and GLOB has no way to escape `^`, `-` or `]` inside one.
+
+`String()` prints the pattern as a query term, with a backslash before each character the parser would split the term on or read differently. `expr.LIKE("name", "foo bar*").String()` is `name:foo\ bar*`. Lucene has no syntax for the SIMILAR TO operators, so `String()` escapes them too, and the printed query matches them as literal characters.
 
 ## Null handling
 

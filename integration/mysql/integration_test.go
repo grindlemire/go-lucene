@@ -551,7 +551,7 @@ func TestMySQLIntegrationEscapedWildcards(t *testing.T) {
 			(11, 'a*b'), (12, 'axb'), (13, 'a?b'), (14, 'a%b'), (15, 'a_b'),
 			(16, 'a[b'), (17, 'a\\b'), (18, 'a#b'), (19, 'a]b'), (20, 'a.b'),
 			(21, 'a b'), (22, 'a(b'), (23, 'a|b'), (24, 'a+b'), (25, 'a{b'),
-			(26, 'ab');
+			(26, 'ab'), (27, 'a^b'), (28, 'a-b');
 	`
 	if _, err := db.Exec(rows); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -576,7 +576,7 @@ func TestMySQLIntegrationEscapedWildcards(t *testing.T) {
 		{name: "escaped_pipe", lucene: `name:a\|*`, wantIDs: []int{23}},
 		{name: "escaped_plus", lucene: `name:a\+*`, wantIDs: []int{24}},
 		{name: "escaped_brace", lucene: `name:a\{*`, wantIDs: []int{25}},
-		{name: "single_char", lucene: `name:a?b`, wantIDs: []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}},
+		{name: "single_char", lucene: `name:a?b`, wantIDs: []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -600,6 +600,52 @@ func TestMySQLIntegrationEscapedWildcards(t *testing.T) {
 		})
 	}
 
+	// expr.EscapeWildcard turns any text into a pattern that matches only
+	// that text, and only text that starts with it once a * follows.
+	names := map[int]string{}
+	nameRows, err := db.Query("SELECT id, name FROM items WHERE id >= 11")
+	if err != nil {
+		t.Fatalf("query names: %v", err)
+	}
+	for nameRows.Next() {
+		var id int
+		var name string
+		if err := nameRows.Scan(&id, &name); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		names[id] = name
+	}
+	if err := nameRows.Close(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	for id, name := range names {
+		t.Run(fmt.Sprintf("escape_wildcard_%d", id), func(t *testing.T) {
+			for _, tc := range []struct {
+				pattern string
+				want    []int
+			}{
+				{expr.EscapeWildcard(name), []int{id}},
+				{expr.EscapeWildcard(name) + "*", []int{id}},
+			} {
+				e := expr.LIKE("name", tc.pattern)
+				where, params, err := driver.NewMySQLDriver().RenderParam(e)
+				if err != nil {
+					t.Fatalf("render param: %v", err)
+				}
+				if got := queryIDs(t, db, where, params...); !equalInts(got, tc.want) {
+					t.Fatalf("name=%q where=%s params=%v\n  want ids %v\n  got  ids %v", name, where, params, tc.want, got)
+				}
+				where, err = driver.NewMySQLDriver().Render(e)
+				if err != nil {
+					t.Fatalf("render: %v", err)
+				}
+				if got := queryIDs(t, db, where); !equalInts(got, tc.want) {
+					t.Fatalf("name=%q where=%s\n  want ids %v\n  got  ids %v", name, where, tc.want, got)
+				}
+			}
+		})
+	}
+
 	// The | below sends these patterns down the REGEXP fallback. The
 	// escaped characters next to it must still match only themselves.
 	drv := driver.NewMySQLDriver()
@@ -614,9 +660,21 @@ func TestMySQLIntegrationEscapedWildcards(t *testing.T) {
 		{name: "fallback_escaped_pipe", pattern: `(a\||zz)b`, wantIDs: []int{23}},
 		{name: "fallback_escaped_bracket", pattern: `(a\[|zz)b`, wantIDs: []int{16}},
 		{name: "fallback_dot", pattern: `(a.|zz)b`, wantIDs: []int{20}},
+		// Inside brackets an escaped ^, -, ] or [ is a member of the set.
+		// MySQL 5.7 reads the backslash as a member too, so these run on
+		// 8.0 and MariaDB 10.5+ only.
+		{name: "bracket_escaped_caret", pattern: `a[\^x]b`, wantIDs: []int{12, 27}},
+		{name: "bracket_escaped_dash", pattern: `a[x\-z]b`, wantIDs: []int{12, 28}},
+		{name: "bracket_escaped_close", pattern: `a[\]x]b`, wantIDs: []int{12, 19}},
+		{name: "bracket_escaped_open", pattern: `a[\[x]b`, wantIDs: []int{12, 16}},
+		{name: "bracket_escaped_backslash", pattern: `a[\\x]b`, wantIDs: []int{12, 17}},
+		{name: "bracket_wildcard_chars", pattern: `a[*?]b`, wantIDs: []int{11, 13}},
 	}
 	for _, tc := range fallback {
 		t.Run(tc.name, func(t *testing.T) {
+			if is57() && strings.HasPrefix(tc.name, "bracket_escaped") {
+				t.Skip("MySQL 5.7 reads a backslash inside brackets as a member")
+			}
 			e := expr.LIKE("name", tc.pattern)
 			where, err := drv.Render(e)
 			if err != nil {

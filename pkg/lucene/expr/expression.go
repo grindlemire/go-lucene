@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/grindlemire/go-lucene/internal/wildcard"
 )
 
 // Lucene Grammar:
@@ -161,6 +163,16 @@ func (e *Expression) NumberText() string {
 // that starts with fo*bar.
 func WILD(in any) *Expression {
 	return Expr(in, Wild)
+}
+
+// EscapeWildcard returns a wildcard pattern that matches the text s and
+// nothing else, for building a pattern in code from text such as user input.
+// It puts a backslash before each backslash, * and ?, and before each of
+// | ( ) [ ] { } and +, which keep their SIMILAR TO meaning in a pattern built
+// in code. Add wildcards around the result, as in
+// LIKE("name", EscapeWildcard(prefix)+"*").
+func EscapeWildcard(s string) string {
+	return wildcard.Escape(s)
 }
 
 // REGEXP represents a literal regular expression

@@ -2,6 +2,7 @@ package wildcard
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,33 @@ func TestJoin(t *testing.T) {
 	for in, want := range tcs {
 		if got := Join(Split(in)); got != want {
 			t.Errorf("Join(Split(%q)) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestInBrackets(t *testing.T) {
+	tcs := map[string]string{
+		"x[ab]y":  "..11..",
+		`x[a\]]y`: "..11..",
+		"x[]a]y":  "..11..",
+		"x[^]a]y": "..111..",
+		"x[ab":    "....",
+		`x\[ab]`:  ".....",
+		"[a][b]":  ".1..1.",
+		"[*?]*":   ".11..",
+		"":        "",
+	}
+	for in, want := range tcs {
+		var got strings.Builder
+		for _, in := range InBrackets(Split(in)) {
+			if in {
+				got.WriteByte('1')
+			} else {
+				got.WriteByte('.')
+			}
+		}
+		if got.String() != want {
+			t.Errorf("InBrackets(Split(%q)) = %s, want %s", in, got.String(), want)
 		}
 	}
 }

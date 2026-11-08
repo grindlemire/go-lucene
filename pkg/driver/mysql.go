@@ -115,8 +115,17 @@ func luceneWildcardToLike(chars []wildcard.Char) string {
 func luceneWildcardToRegex(chars []wildcard.Char) string {
 	var b strings.Builder
 	b.WriteString("^(")
-	for _, c := range chars {
+	inBrackets := wildcard.InBrackets(chars)
+	for i, c := range chars {
 		switch {
+		// Inside a bracket expression every character is a member of the
+		// set, so only the bracket's own metacharacters keep a backslash.
+		// MySQL 5.7 and MariaDB before 10.5 read a backslash inside
+		// brackets as a member, so there the escape also adds \ to the set.
+		case inBrackets[i] && c.Escaped && c.In(bracketMetachars):
+			b.WriteString(`\` + c.Text)
+		case inBrackets[i]:
+			b.WriteString(c.Text)
 		case c.IsWildcard() && c.Text == "*":
 			b.WriteString(".*")
 		case c.IsWildcard():
