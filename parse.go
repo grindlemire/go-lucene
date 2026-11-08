@@ -484,9 +484,9 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	return expr.Lit(token.Val), nil
 }
 
-// escapePlus escapes each unescaped + in a wildcard's text. The lexer keeps
-// the + of an exponent in a word, as in 1e+5*, and a + there is a literal
-// character. In a pattern built in code, an unescaped + is a SIMILAR TO
+// escapePlus escapes each unescaped + in a wildcard's text. The lexer keeps a
+// + after the first character of a word, as in c++* or 1e+5*, and a + there
+// is a literal character. In a pattern built in code, an unescaped + is a SIMILAR TO
 // operator, so the parser's must be escaped to stay literal.
 func escapePlus(text string) string {
 	chars := wildcard.Split(text)

@@ -355,26 +355,64 @@ func TestLex(t *testing.T) {
 				tok(TRSquare, "]"),
 			},
 		},
-		// Anywhere else + still starts a new token.
+		// A + after the first character of a term is part of the term, as
+		// in Lucene and like -, so c++ and a+b are single terms. These used
+		// to split at the +, which then meant MUST.
 		"plus_after_word": {
 			in:       `be+3`,
-			expected: []Token{tok(TLiteral, "be"), tok(TPlus, "+"), tok(TLiteral, "3")},
+			expected: []Token{tok(TLiteral, "be+3")},
 		},
 		"plus_after_hex": {
 			in:       `0x1e+3`,
-			expected: []Token{tok(TLiteral, "0x1e"), tok(TPlus, "+"), tok(TLiteral, "3")},
+			expected: []Token{tok(TLiteral, "0x1e+3")},
 		},
 		"plus_without_exponent_digits": {
 			in:       `1e+x`,
-			expected: []Token{tok(TLiteral, "1e"), tok(TPlus, "+"), tok(TLiteral, "x")},
+			expected: []Token{tok(TLiteral, "1e+x")},
 		},
 		"plus_at_end_of_input": {
 			in:       `1e+`,
-			expected: []Token{tok(TLiteral, "1e"), tok(TPlus, "+")},
+			expected: []Token{tok(TLiteral, "1e+")},
 		},
 		"plus_after_number": {
 			in:       `1+2`,
-			expected: []Token{tok(TLiteral, "1"), tok(TPlus, "+"), tok(TLiteral, "2")},
+			expected: []Token{tok(TLiteral, "1+2")},
+		},
+		"plus_at_end_of_word": {
+			in:       `a:c++`,
+			expected: []Token{tok(TLiteral, "a"), tok(TColon, ":"), tok(TLiteral, "c++")},
+		},
+		"plus_in_field": {
+			in:       `a+b:c`,
+			expected: []Token{tok(TLiteral, "a+b"), tok(TColon, ":"), tok(TLiteral, "c")},
+		},
+		"plus_after_minus_in_word": {
+			in:       `-1+2`,
+			expected: []Token{tok(TLiteral, "-1+2")},
+		},
+		// A + that starts a term still means MUST.
+		"plus_starts_query": {
+			in:       `+a:b`,
+			expected: []Token{tok(TPlus, "+"), tok(TLiteral, "a"), tok(TColon, ":"), tok(TLiteral, "b")},
+		},
+		"plus_after_space": {
+			in: `a:b +c:d`,
+			expected: []Token{
+				tok(TLiteral, "a"), tok(TColon, ":"), tok(TLiteral, "b"),
+				tok(TPlus, "+"), tok(TLiteral, "c"), tok(TColon, ":"), tok(TLiteral, "d"),
+			},
+		},
+		"plus_after_paren": {
+			in:       `(a)+b`,
+			expected: []Token{tok(TLParen, "("), tok(TLiteral, "a"), tok(TRParen, ")"), tok(TPlus, "+"), tok(TLiteral, "b")},
+		},
+		"plus_after_phrase": {
+			in:       `"a"+b`,
+			expected: []Token{tok(TQuoted, `"a"`), tok(TPlus, "+"), tok(TLiteral, "b")},
+		},
+		"minus_then_plus": {
+			in:       `-+a`,
+			expected: []Token{tok(TMinus, "-"), tok(TPlus, "+"), tok(TLiteral, "a")},
 		},
 		// A term can start with a dot, as in Lucene, so .5 is one term. It
 		// used to be a lexer error.

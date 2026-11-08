@@ -49,6 +49,8 @@ func FuzzStringRoundTrip(f *testing.F) {
 		`a:(x AND -y) OR a:(x OR [1 TO 5]) OR a:(b:c OR d*)`,
 		`x OR null OR foo* OR /re/ OR [1 TO 5]`,
 		`a:1E+3 OR a:[-.5 TO .5] OR a:.5e+1`,
+		// + inside a term is part of it
+		`a:c++ OR a+b:1+2 OR (x)+y:[a+ TO b+c] OR -1+2 OR a:"+x"`,
 	}
 	for _, tc := range tcs {
 		f.Add(tc)
