@@ -230,10 +230,10 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 
 	const labels = `
         ALTER TABLE items ADD COLUMN labels TEXT;
-        UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes", "n": 10}' WHERE id = 1;
-        UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}, "n": "abc"}' WHERE id = 2;
-        UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}, "n": null}' WHERE id = 3;
-        UPDATE items SET labels = '{"color": "green", "n": true}' WHERE id = 4;
+        UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes", "n": 10, "v": "2"}' WHERE id = 1;
+        UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}, "n": "abc", "v": 2}' WHERE id = 2;
+        UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}, "n": null, "v": 2.0}' WHERE id = 3;
+        UPDATE items SET labels = '{"color": "green", "n": true, "v": "abc"}' WHERE id = 4;
     `
 	if _, err := db.Exec(labels); err != nil {
 		t.Fatalf("seed labels: %v", err)
@@ -268,6 +268,15 @@ func TestSQLiteIntegrationJSONPath(t *testing.T) {
 		{"text_value", `labels.n:abc`, []int{2}},
 		{"not_numeric_keeps_non_numbers", `-labels.n:>5`, []int{2, 4}},
 		{"not_equal_number", `-labels.n:7`, []int{1, 2, 4}},
+		// v is "2", 2, 2.0 and "abc" in rows 1-4.
+		{"number_matches_text_form", `labels.v:2`, []int{1, 2, 3}},
+		{"not_number_or_text_form", `-labels.v:2`, []int{4}},
+		{"in_numbers_match_text_form", `labels.v:(2 OR 7)`, []int{1, 2, 3}},
+		{"greater_skips_text_form", `labels.v:>1`, []int{2, 3}},
+		{"mixed_in_compares_text", `labels.v:(2 OR abc)`, []int{1, 2, 4}},
+		{"mixed_range_compares_text", `labels.v:{2 TO abc}`, []int{3}},
+		{"quoted_number_matches_number", `labels.stock.count:"10"`, []int{1}},
+		{"bool_text", `labels.n:true`, []int{4}},
 	}
 
 	opt := lucene.WithJSONFields("labels")

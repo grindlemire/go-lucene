@@ -229,6 +229,10 @@ func validateLiteral(e *Expression) (err error) {
 		return fmt.Errorf("LITERAL validation: value must be a literal, not %s", reflect.TypeOf(e.Left))
 	}
 
+	if p, ok := e.Left.(JSONPath); ok {
+		return p.Validate()
+	}
+
 	return nil
 }
 

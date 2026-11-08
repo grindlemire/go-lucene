@@ -133,20 +133,22 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return fmt.Sprintf("%s IS NOT NULL", col), cparams, nil
 	}
 
-	d := b.dialect()
+	if p, ok := jsonPathLeft(e); ok {
+		return b.renderJSONPathCompare(e, p, b.renderCompareParam)
+	}
 
-	left, nullLeft, guard, isPath, err := b.renderLeft(e)
+	left, lparams, err := b.serializeParams(e.Left)
 	if err != nil {
 		return s, params, err
 	}
-	var lparams []any
-	if !isPath {
-		left, lparams, err = b.serializeParams(e.Left)
-		if err != nil {
-			return s, params, err
-		}
-		nullLeft = left
-	}
+	str, rparams, err := b.renderCompareParam(e, left, left)
+	return str, append(lparams, rparams...), err
+}
+
+// renderCompareParam renders e once its left side is rendered. nullLeft is the
+// left side for an IS NULL test.
+func (b Base) renderCompareParam(e *expr.Expression, left, nullLeft string) (s string, params []any, err error) {
+	d := b.dialect()
 
 	// Range: access typed boundary directly, skip serializing right side
 	if e.Op == expr.Range {
@@ -158,7 +160,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		if err != nil {
 			return "", nil, err
 		}
-		return guard(str), append(lparams, rangeParams...), nil
+		return str, rangeParams, nil
 	}
 
 	// Null right-hand side handling. Intercept before serializing the right
@@ -166,7 +168,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	if isNullExpr(e.Right) {
 		switch e.Op {
 		case expr.Equals:
-			return fmt.Sprintf("%s IS NULL", nullLeft), lparams, nil
+			return fmt.Sprintf("%s IS NULL", nullLeft), nil, nil
 		case expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
 			return "", nil, fmt.Errorf(
 				"comparison operator %s cannot be used with null; use field:null for IS NULL",
@@ -181,14 +183,14 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		if ok && nullCount > 0 {
 			switch len(nonNulls) {
 			case 0:
-				return fmt.Sprintf("%s IS NULL", nullLeft), lparams, nil
+				return fmt.Sprintf("%s IS NULL", nullLeft), nil, nil
 			case 1:
 				rhs, rparams, err := b.serializeParams(nonNulls[0])
 				if err != nil {
 					return "", nil, err
 				}
-				return fmt.Sprintf("(%s OR %s IS NULL)", guard(left+" = "+rhs), nullLeft),
-					append(lparams, rparams...), nil
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, nullLeft),
+					rparams, nil
 			default:
 				// Hand-roll the List rather than calling expr.LIST: that constructor
 				// takes ...any and would require boxing the []*expr.Expression slice.
@@ -197,8 +199,8 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 				if err != nil {
 					return "", nil, err
 				}
-				return fmt.Sprintf("(%s OR %s IS NULL)", guard(left+" IN "+inStr), nullLeft),
-					append(lparams, inParams...), nil
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, nullLeft),
+					inParams, nil
 			}
 		}
 	}
@@ -212,7 +214,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	// dialect so each database can decide how to represent "any value".
 	if right == "'*'" && e.Op == expr.Like {
 		str, err := d.RenderStandaloneWild(left)
-		return str, lparams, err
+		return str, nil, err
 	}
 
 	// Detect regex (Lucene /regex/) vs. wildcard and let the dialect escape
@@ -234,7 +236,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		}
 	}
 
-	params = append(lparams, rparams...)
+	params = rparams
 
 	if e.Op != expr.Not &&
 		e.Op != expr.List &&
@@ -264,7 +266,7 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	if err != nil {
 		return "", nil, err
 	}
-	return guard(str), params, nil
+	return str, params, nil
 }
 
 // Render will render the expression based on the renderFNs provided by the driver.
@@ -299,19 +301,29 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return fmt.Sprintf("%s IS NOT NULL", col), nil
 	}
 
-	d := b.dialect()
+	if p, ok := jsonPathLeft(e); ok {
+		str, _, err := b.renderJSONPathCompare(e, p, b.renderCompareInline)
+		return str, err
+	}
 
-	left, nullLeft, guard, isPath, err := b.renderLeft(e)
+	left, err := b.serialize(e.Left)
 	if err != nil {
 		return s, err
 	}
-	if !isPath {
-		left, err = b.serialize(e.Left)
-		if err != nil {
-			return s, err
-		}
-		nullLeft = left
-	}
+	return b.renderCompare(e, left, left)
+}
+
+// renderCompareInline adapts renderCompare to the signature that
+// renderJSONPathCompare shares with renderCompareParam.
+func (b Base) renderCompareInline(e *expr.Expression, left, nullLeft string) (string, []any, error) {
+	s, err := b.renderCompare(e, left, nullLeft)
+	return s, nil, err
+}
+
+// renderCompare renders e once its left side is rendered. nullLeft is the left
+// side for an IS NULL test.
+func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string, err error) {
+	d := b.dialect()
 
 	// Range: access typed boundary directly, skip serializing right side
 	if e.Op == expr.Range {
@@ -323,7 +335,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		if err != nil {
 			return "", err
 		}
-		return guard(str), nil
+		return str, nil
 	}
 
 	// Null right-hand side handling. Intercept before serializing the right
@@ -352,7 +364,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("(%s OR %s IS NULL)", guard(left+" = "+rhs), nullLeft), nil
+				return fmt.Sprintf("(%s = %s OR %s IS NULL)", left, rhs, nullLeft), nil
 			default:
 				// Hand-roll the List rather than calling expr.LIST: that constructor
 				// takes ...any and would require boxing the []*expr.Expression slice.
@@ -361,7 +373,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 				if err != nil {
 					return "", err
 				}
-				return fmt.Sprintf("(%s OR %s IS NULL)", guard(left+" IN "+inStr), nullLeft), nil
+				return fmt.Sprintf("(%s IN %s OR %s IS NULL)", left, inStr, nullLeft), nil
 			}
 		}
 	}
@@ -422,7 +434,7 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return guard(str), nil
+	return str, nil
 }
 
 func (b Base) isSimple(in any) bool {

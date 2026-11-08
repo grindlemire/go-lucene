@@ -24,13 +24,19 @@ func WithDefaultField(field string) Opt {
 // WithJSONFields marks columns that hold JSON. A dotted field on one of these
 // columns, such as labels.category, parses to an expr.JSONPath and the SQL drivers
 // render it with the dialect's JSON accessor. Dotted fields on other columns
-// keep their current meaning: a column whose name contains a dot.
+// keep their current meaning: a column whose name contains a dot. A column
+// name that is empty or contains a dot makes Parse return an error, because the
+// first dot of a field always ends the column name.
 func WithJSONFields(columns ...string) Opt {
 	return func(p *parser) {
 		if p.jsonFields == nil {
 			p.jsonFields = map[string]bool{}
 		}
 		for _, c := range columns {
+			if c == "" || strings.Contains(c, ".") {
+				p.optErr = fmt.Errorf("WithJSONFields: column name %q must be non-empty and must not contain a dot", c)
+				return
+			}
 			p.jsonFields[c] = true
 		}
 	}
@@ -47,6 +53,9 @@ func Parse(input string, opts ...Opt) (e *expr.Expression, err error) {
 
 	for _, opt := range opts {
 		opt(p)
+	}
+	if p.optErr != nil {
+		return e, p.optErr
 	}
 
 	ex, err := p.parse()
@@ -73,6 +82,7 @@ type parser struct {
 
 	defaultField string
 	jsonFields   map[string]bool
+	optErr       error
 }
 
 // toJSONPaths replaces each column named "<json column>.<path>" with an expr.JSONPath.

@@ -3,9 +3,8 @@ package driver
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
@@ -22,9 +21,12 @@ type JSONPathDialect interface {
 	RenderJSONPath(column string, path []string) (JSONPathSQL, error)
 }
 
-// JSONPathSQL is the SQL that reads one key inside a JSON column.
+// JSONPathSQL is the SQL that reads one key inside a JSON column. Every field
+// must be set; rendering returns an error for an empty one.
 type JSONPathSQL struct {
-	// Text reads the value as text. It is NULL for a missing key or a JSON null.
+	// Text reads the value as text: a string as itself, a number as its digits
+	// and a boolean as true or false. It is NULL for a missing key or a JSON
+	// null.
 	Text string
 	// IsNumber is true when the value is a JSON number.
 	IsNumber string
@@ -53,68 +55,116 @@ func dollarJSONPath(path []string) string {
 	return b.String()
 }
 
-func validateJSONPathSegment(seg string) error {
-	switch {
-	case seg == "":
-		return fmt.Errorf("json path has an empty segment")
-	case !utf8.ValidString(seg):
-		return fmt.Errorf("json path segment is not valid UTF-8: %q", seg)
-	case strings.ContainsAny(seg, `"\`):
-		return fmt.Errorf("json path segment contains a double quote or backslash: %q", seg)
-	case strings.ContainsFunc(seg, unicode.IsControl):
-		return fmt.Errorf("json path segment contains a control character: %q", seg)
-	}
-	return nil
-}
-
 func (b Base) renderJSONPath(p expr.JSONPath) (JSONPathSQL, error) {
 	jd, ok := b.dialect().(JSONPathDialect)
 	if !ok {
 		return JSONPathSQL{}, fmt.Errorf("dialect %T does not support json paths (%s)", b.dialect(), p)
 	}
-	if len(p.Column) == 0 {
-		return JSONPathSQL{}, fmt.Errorf("column name is empty")
-	}
-	if len(p.Path) == 0 {
-		return JSONPathSQL{}, fmt.Errorf("json path on column %q is empty", p.Column)
-	}
-	for _, seg := range p.Path {
-		if err := validateJSONPathSegment(seg); err != nil {
-			return JSONPathSQL{}, err
-		}
+	if err := p.Validate(); err != nil {
+		return JSONPathSQL{}, err
 	}
 	col, err := b.dialect().QuoteColumn(string(p.Column))
 	if err != nil {
 		return JSONPathSQL{}, err
 	}
-	return jd.RenderJSONPath(col, p.Path)
+	sql, err := jd.RenderJSONPath(col, p.Path)
+	if err != nil {
+		return JSONPathSQL{}, err
+	}
+	for _, f := range []struct{ name, sql string }{{"Text", sql.Text}, {"IsNumber", sql.IsNumber}, {"Number", sql.Number}} {
+		if strings.TrimSpace(f.sql) == "" {
+			return JSONPathSQL{}, fmt.Errorf("dialect %T returned an empty %s for json path %s", b.dialect(), f.name, p)
+		}
+	}
+	return sql, nil
 }
 
-func noGuard(cmp string) string { return cmp }
-
-// renderLeft renders the left side of e when it is a JSON path. nullLeft is the
-// text read for an IS NULL test. When e compares with a number, which only the
-// full expression can tell, left reads the value as a number and guard wraps
-// the rendered comparison: it holds only for a JSON number, it is FALSE for any
-// other present value (so NOT matches it), and it is NULL for a missing key or
-// a JSON null, the same as for a NULL column.
-func (b Base) renderLeft(e *expr.Expression) (left, nullLeft string, guard func(string) string, isPath bool, err error) {
+// jsonPathLeft returns the JSON path on the left side of e, if there is one.
+func jsonPathLeft(e *expr.Expression) (expr.JSONPath, bool) {
 	lit, ok := e.Left.(*expr.Expression)
 	if !ok || lit.Op != expr.Literal {
-		return "", "", noGuard, false, nil
+		return expr.JSONPath{}, false
 	}
 	p, ok := lit.Left.(expr.JSONPath)
-	if !ok {
-		return "", "", noGuard, false, nil
-	}
+	return p, ok
+}
+
+type compareFunc func(e *expr.Expression, left, nullLeft string) (string, []any, error)
+
+// renderJSONPathCompare renders e, whose left side is the JSON path p.
+//
+// A comparison with text, or a range or IN list that mixes numbers and text,
+// compares the value as text, with any number written as text.
+//
+// Equality and IN with numbers match a JSON number by value and any other
+// value by its text, so labels.version:2 matches both 2 and "2".
+//
+// A numeric comparison (>, <, a numeric range) holds only for a JSON number.
+// It is FALSE for any other present value, so NOT matches it, and NULL for a
+// missing key or a JSON null, the same as for a NULL column.
+func (b Base) renderJSONPathCompare(e *expr.Expression, p expr.JSONPath, compare compareFunc) (string, []any, error) {
 	sql, err := b.renderJSONPath(p)
-	if err != nil || !comparesNumber(e) {
-		return sql.Text, sql.Text, noGuard, true, err
+	if err != nil {
+		return "", nil, err
 	}
-	guard = func(cmp string) string {
-		return fmt.Sprintf("CASE WHEN %s THEN %s WHEN %s IS NOT NULL THEN FALSE END", sql.IsNumber, cmp, sql.Text)
+	asText := numbersAsText(e)
+	if !comparesNumber(e) {
+		return compare(asText, sql.Text, sql.Text)
 	}
-	return sql.Number, sql.Text, guard, true, nil
+	num, params, err := compare(e, sql.Number, sql.Text)
+	if err != nil {
+		return "", nil, err
+	}
+	if e.Op != expr.Equals && e.Op != expr.In {
+		return fmt.Sprintf("CASE WHEN %s THEN %s WHEN %s IS NOT NULL THEN FALSE END", sql.IsNumber, num, sql.Text), params, nil
+	}
+	text, textParams, err := compare(asText, sql.Text, sql.Text)
+	if err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", sql.IsNumber, num, text), append(params, textParams...), nil
+}
+
+// numbersAsText returns a copy of e with each number on its right side, in a
+// literal, a range bound or an IN list, replaced by its text.
+func numbersAsText(e *expr.Expression) *expr.Expression {
+	c := *e
+	switch r := e.Right.(type) {
+	case *expr.RangeBoundary:
+		rb := *r
+		rb.Min, rb.Max = numberAsText(r.Min), numberAsText(r.Max)
+		c.Right = &rb
+	case *expr.Expression:
+		if items, ok := r.Left.([]*expr.Expression); ok && r.Op == expr.List {
+			list := *r
+			texts := make([]*expr.Expression, len(items))
+			for i, item := range items {
+				texts[i] = numberAsText(item).(*expr.Expression)
+			}
+			list.Left = texts
+			c.Right = &list
+		} else {
+			c.Right = numberAsText(r)
+		}
+	}
+	return &c
+}
+
+func numberAsText(in any) any {
+	lit, ok := in.(*expr.Expression)
+	if !ok || lit.Op != expr.Literal {
+		return in
+	}
+	c := *lit
+	switch v := lit.Left.(type) {
+	case int:
+		c.Left = strconv.Itoa(v)
+	case float64:
+		c.Left = strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return in
+	}
+	return &c
 }
 
 // comparesNumber reports whether e compares its left side with a number.

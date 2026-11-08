@@ -91,15 +91,18 @@ func (sqliteDialect) QuoteColumn(name string) (string, error) {
 	return `"` + name + `"`, nil
 }
 
-// RenderJSONPath uses json_extract, which returns JSON strings as text and JSON
-// numbers as numbers. The type check matters for numbers, because SQLite orders
-// every text value above every number.
+// RenderJSONPath reads the value as text, so a text comparison matches the
+// same rows as on Postgres and MySQL: json_extract alone returns a JSON number
+// as a number and true/false as 1/0. The numeric read is json_extract, and the
+// type check matters for it, because SQLite orders every text value above every
+// number.
 func (d sqliteDialect) RenderJSONPath(column string, path []string) (JSONPathSQL, error) {
 	jsonPath := d.EscapeStringLiteral(dollarJSONPath(path))
 	value := fmt.Sprintf("json_extract(%s, %s)", column, jsonPath)
+	jsonType := fmt.Sprintf("json_type(%s, %s)", column, jsonPath)
 	return JSONPathSQL{
-		Text:     value,
-		IsNumber: fmt.Sprintf("json_type(%s, %s) IN ('integer', 'real')", column, jsonPath),
+		Text:     fmt.Sprintf("CASE %s WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(%s AS TEXT) END", jsonType, value),
+		IsNumber: fmt.Sprintf("%s IN ('integer', 'real')", jsonType),
 		Number:   value,
 	}, nil
 }

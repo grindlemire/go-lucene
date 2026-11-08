@@ -69,9 +69,6 @@ func validateRender(t *testing.T, e *expr.Expression) {
 			strings.Contains(err.Error(), "literal contains null byte") ||
 			strings.Contains(err.Error(), "column name contains a double quote") ||
 			strings.Contains(err.Error(), "column name is empty") ||
-			strings.Contains(err.Error(), "json path segment contains") ||
-			strings.Contains(err.Error(), "json path segment is not valid UTF-8") ||
-			strings.Contains(err.Error(), "json path has an empty segment") ||
 			strings.Contains(err.Error(), "the BETWEEN operator needs a two item list in the right hand side") {
 			return
 		}

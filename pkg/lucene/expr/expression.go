@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Lucene Grammar:
@@ -245,6 +247,31 @@ func (p JSONPath) String() string {
 // GoString is a debug print for the json path type
 func (p JSONPath) GoString() string {
 	return fmt.Sprintf("JSON_PATH(%s)", p)
+}
+
+// Validate reports whether the path can be rendered. The column must be
+// non-empty, and each path segment non-empty valid UTF-8 without a double
+// quote, backslash or control character.
+func (p JSONPath) Validate() error {
+	if len(p.Column) == 0 {
+		return fmt.Errorf("json path column name is empty")
+	}
+	if len(p.Path) == 0 {
+		return fmt.Errorf("json path on column %q is empty", p.Column)
+	}
+	for _, seg := range p.Path {
+		switch {
+		case seg == "":
+			return fmt.Errorf("json path has an empty segment: %q", p.String())
+		case !utf8.ValidString(seg):
+			return fmt.Errorf("json path segment is not valid UTF-8: %q", seg)
+		case strings.ContainsAny(seg, `"\`):
+			return fmt.Errorf("json path segment contains a double quote or backslash: %q", seg)
+		case strings.ContainsFunc(seg, unicode.IsControl):
+			return fmt.Errorf("json path segment contains a control character: %q", seg)
+		}
+	}
+	return nil
 }
 
 // Expr creates a general new expression. The other public functions are just helpers that call this
@@ -498,8 +525,8 @@ func unmarshalJSONPath(raw json.RawMessage, keys int) (JSONPath, error) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return JSONPath{}, fmt.Errorf("invalid json_path: %w", err)
 	}
-	if p.Column == "" || len(p.Path) == 0 {
-		return JSONPath{}, fmt.Errorf("json_path needs a column and a non-empty path")
+	if err := JSONPath(p).Validate(); err != nil {
+		return JSONPath{}, fmt.Errorf("invalid json_path: %w", err)
 	}
 	return JSONPath(p), nil
 }

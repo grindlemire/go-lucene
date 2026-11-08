@@ -537,10 +537,10 @@ func TestMySQLIntegrationJSONPath(t *testing.T) {
 
 	const labels = `
 		ALTER TABLE items ADD COLUMN labels JSON;
-		UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes", "n": 10}' WHERE id = 1;
-		UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}, "n": "abc"}' WHERE id = 2;
-		UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}, "n": null}' WHERE id = 3;
-		UPDATE items SET labels = '{"color": "green", "n": true}' WHERE id = 4;
+		UPDATE items SET labels = '{"color": "red", "stock": {"count": 10}, "it''s": "yes", "n": 10, "v": "2"}' WHERE id = 1;
+		UPDATE items SET labels = '{"color": "yellow", "stock": {"count": 3}, "n": "abc", "v": 2}' WHERE id = 2;
+		UPDATE items SET labels = '{"color": "orange", "stock": {"count": 25}, "n": null, "v": 2.0}' WHERE id = 3;
+		UPDATE items SET labels = '{"color": "green", "n": true, "v": "abc"}' WHERE id = 4;
 	`
 	if _, err := db.Exec(labels); err != nil {
 		t.Fatalf("seed labels: %v", err)
@@ -571,6 +571,15 @@ func TestMySQLIntegrationJSONPath(t *testing.T) {
 		{name: "text_value", lucene: `labels.n:abc`, wantIDs: []int{2}},
 		{name: "not_numeric_keeps_non_numbers", lucene: `-labels.n:>5`, wantIDs: []int{2, 4}},
 		{name: "not_equal_number", lucene: `-labels.n:7`, wantIDs: []int{1, 2, 4}},
+		// v is "2", 2, 2.0 and "abc" in rows 1-4.
+		{name: "number_matches_text_form", lucene: `labels.v:2`, wantIDs: []int{1, 2, 3}},
+		{name: "not_number_or_text_form", lucene: `-labels.v:2`, wantIDs: []int{4}},
+		{name: "in_numbers_match_text_form", lucene: `labels.v:(2 OR 7)`, wantIDs: []int{1, 2, 3}},
+		{name: "greater_skips_text_form", lucene: `labels.v:>1`, wantIDs: []int{2, 3}},
+		{name: "mixed_in_compares_text", lucene: `labels.v:(2 OR abc)`, wantIDs: []int{1, 2, 4}},
+		{name: "mixed_range_compares_text", lucene: `labels.v:{2 TO abc}`, wantIDs: []int{3}},
+		{name: "quoted_number_matches_number", lucene: `labels.stock.count:"10"`, wantIDs: []int{1}},
+		{name: "bool_text", lucene: `labels.n:true`, wantIDs: []int{4}},
 	}
 
 	opt := lucene.WithJSONFields("labels")
