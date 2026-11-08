@@ -154,9 +154,10 @@ func TestMySQLDriver(t *testing.T) {
 			input: expr.Eq("a b", 1),
 			want:  "`a b` = 1",
 		},
+		// The value has a field of its own, which it keeps, as in a:(b:1).
 		"equals_in_equals": {
 			input: expr.Eq("a", expr.Eq("b", 1)),
-			want:  "`a` = (`b` = 1)",
+			want:  "`b` = 1",
 		},
 		"regexp": {
 			input: expr.REGEXP("/b*ar/"),

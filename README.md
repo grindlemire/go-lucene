@@ -114,6 +114,8 @@ Output below is Postgres. See [SQLite](#sqlite) and [MySQL](#mysql) for where th
 | `(a:1 OR b:2) AND c:3` | `(("a" = 1) OR ("b" = 2)) AND ("c" = 3)` | Grouping |
 | `field:(a AND -b)` | `("field" = 'a') AND (NOT("field" = 'b'))` | A field group applies its field to every term inside. A term with its own field keeps it |
 
+An expression built in code or read from JSON renders the same way. `expr.Eq("field", expr.AND("a", expr.MUSTNOT(expr.Lit("b"))))` renders as `field:(a AND -b)` does, and `expr.Eq("field", expr.Eq("other", 1))` renders as `field:(other:1)` does, which is `"other" = 1`. The value of a comparison, an `IN` list item, a `LIKE` pattern and the field itself must each be a single term, and anything else is an error, as `field:>(a OR b)` is for the parser. A field operator with no field is an error too.
+
 ### Wildcards built in code
 
 `expr.LIKE` and `expr.WILD` take a pattern in Lucene wildcard syntax, as in a query: `*` and `?` are wildcards, and a backslash makes the next character literal. ``expr.LIKE("name", `fo\*bar*`)`` matches text that starts with `fo*bar`, and a literal backslash is written `\\`. The same goes for a pattern read from JSON.

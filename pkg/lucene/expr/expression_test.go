@@ -491,6 +491,39 @@ func TestNullJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFieldlessJSONRoundTrip checks that a field operator with no field, such
+// as a range inside a field group, comes back from JSON with no field. Its
+// "left":null used to come back as a NULL expression, which the drivers then
+// rendered as a standalone null and failed on.
+func TestFieldlessJSONRoundTrip(t *testing.T) {
+	fieldless := Rang(nil, 1, 5, true)
+	cases := map[string]*Expression{
+		"range":          fieldless,
+		"range_in_group": Eq("a", OR(fieldless, "x")),
+		"equals":         Eq(nil, "x"),
+		"greater":        GREATER(nil, 1),
+		// A null on its own, or under NOT or -, is still a NULL expression.
+		"not_null":      NOT(NULL()),
+		"must_not_null": MUSTNOT(NULL()),
+	}
+
+	for name, original := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(original)
+			if err != nil {
+				t.Fatalf("marshal failed: %v", err)
+			}
+			var round Expression
+			if err := json.Unmarshal(raw, &round); err != nil {
+				t.Fatalf("unmarshal failed: %v (json was: %s)", err, raw)
+			}
+			if !reflect.DeepEqual(original, &round) {
+				t.Fatalf("round-trip mismatch:\n  want %#v\n  got  %#v\n  json: %s", original, &round, raw)
+			}
+		})
+	}
+}
+
 // TestValidateRangeBounds checks that Validate only accepts a single term
 // (a scalar, or a literal, wildcard, regexp, or null expression) on each side
 // of a range. Compound bounds used to render partially into SQL (issue #68).

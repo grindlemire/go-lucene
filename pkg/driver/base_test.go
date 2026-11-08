@@ -759,15 +759,15 @@ func TestRenderSafeValueBoundary(t *testing.T) {
 			input: expr.LIKE("a", expr.REGEXP(`/x'\d/`)),
 			want:  want{`"a" ~ 'x''\d'`, "`a` REGEXP 'x''\\\\d'", `"a" REGEXP 'x''\d'`},
 		},
-		// A hand-built EQUALS whose value is an AND renders as an equality
-		// against a boolean expression. The parser no longer builds one,
-		// but the SQL for it is still escaped.
+		// A hand-built EQUALS whose value is an AND gets its field on each
+		// term, as a:(x AND y) does, and each term is still escaped. It used
+		// to render as "a" = ('x'' OR 1=1 --' AND 'y').
 		"compound_equals_right": {
 			input: expr.Eq("a", expr.AND(expr.Lit(`x' OR 1=1 --`), expr.Lit("y"))),
 			want: want{
-				`"a" = ('x'' OR 1=1 --' AND 'y')`,
-				"`a` = ('x'' OR 1=1 --' AND 'y')",
-				`"a" = ('x'' OR 1=1 --' AND 'y')`,
+				`("a" = 'x'' OR 1=1 --') AND ("a" = 'y')`,
+				"(`a` = 'x'' OR 1=1 --') AND (`a` = 'y')",
+				`("a" = 'x'' OR 1=1 --') AND ("a" = 'y')`,
 			},
 		},
 		"column_with_other_quote_chars": {
