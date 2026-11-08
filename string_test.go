@@ -1,9 +1,11 @@
 package lucene
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
+	"github.com/grindlemire/go-lucene/pkg/driver"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
 )
 
@@ -324,4 +326,184 @@ func TestStringEscapedWildcardChars(t *testing.T) {
 		"backslash_term":     {`a:foo\\bar`, `a:"foo\\bar"`},
 		"exponent_plus":      {`a:1e+5*`, `a:1e\+5*`},
 	})
+}
+
+// TestStringBuiltWildcard checks String() on wildcards and regexes built in
+// code, which hold only their value. String() escapes each character the
+// lexer would split off or read differently, and keeps the * and ? that are
+// wildcards, so the text parses back to a term that renders the same SQL.
+// expr.LIKE("a", "foo bar*") used to print a:foo bar*, which parses as
+// a:foo AND bar*.
+func TestStringBuiltWildcard(t *testing.T) {
+	tcs := map[string]struct {
+		input *expr.Expression
+		want  string
+	}{
+		"space":              {expr.LIKE("a", "foo bar*"), `a:foo\ bar*`},
+		"colon":              {expr.LIKE("a", "x:y*"), `a:x\:y*`},
+		"comma":              {expr.LIKE("a", "x,y*"), `a:x\,y*`},
+		"tab":                {expr.LIKE("a", "x\ty*"), "a:x\\\ty*"},
+		"quotes":             {expr.LIKE("a", `it's "x"*`), `a:it\'s\ \"x\"*`},
+		"slashes":            {expr.LIKE("a", expr.WILD("/x*/")), `a:\/x*\/`},
+		"escaped_star":       {expr.LIKE("a", `fo\*bar*`), `a:fo\*bar*`},
+		"escaped_backslash":  {expr.LIKE("a", `fo\\*`), `a:fo\\*`},
+		"escaped_letter":     {expr.LIKE("a", `f\oo*`), `a:f\oo*`},
+		"trailing_backslash": {expr.LIKE("a", `a*\`), `a:a*\\`},
+		"leading_minus":      {expr.LIKE("a", "-x*"), `a:\-x*`},
+		"negative_number":    {expr.LIKE("a", "-5*"), `a:-5*`},
+		"negative_fraction":  {expr.LIKE("a", "-.5*"), `a:-.5*`},
+		"inner_minus":        {expr.LIKE("a", "x-y*"), `a:x-y*`},
+		"leading_dot":        {expr.LIKE("a", ".x*"), `a:.x*`},
+		"leading_bang":       {expr.LIKE("a", "!x*"), `a:\!x*`},
+		"literal_chars":      {expr.LIKE("a", "50%_@#$*"), `a:50%_@#$*`},
+		"keyword":            {expr.LIKE("a", "AND*"), `a:AND*`},
+		"unicode_letter":     {expr.LIKE("a", "é*"), `a:é*`},
+		"unicode_symbol":     {expr.LIKE("a", "€*"), `a:\€*`},
+		"range_bound":        {expr.Rang("a", expr.WILD("f o*"), "z", true), `a:[f\ o* TO z]`},
+		"in_must_not":        {expr.MUSTNOT(expr.LIKE("a", "x y*")), `-a:x\ y*`},
+		// A LIKE renders a literal on its right as a pattern, so String()
+		// prints it as one. It used to print a:"fo*", an exact match.
+		"like_literal":        {expr.LIKE("a", expr.Lit("fo*")), `a:fo*`},
+		"like_literal_space":  {expr.LIKE("a", expr.Lit("x y?")), `a:x\ y?`},
+		"like_literal_escape": {expr.LIKE("a", expr.Lit(`fo\*bar*`)), `a:fo\*bar*`},
+		"like_literal_json":   {mustDecode(t, `{"left":"a","operator":"LIKE","right":{"literal":"fo*"}}`), `a:fo*`},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got := tc.input.String()
+			if got != tc.want {
+				t.Fatalf("String():\n got: %s\nwant: %s", got, tc.want)
+			}
+			parsed, err := Parse(got)
+			if err != nil {
+				t.Fatalf("String() of %#v is %q, which does not parse: %v", tc.input, got, err)
+			}
+			assertSameSQL(t, tc.input, parsed)
+		})
+	}
+}
+
+// TestStringBuiltWildcardWithoutWildcard checks a wildcard built in code with
+// no unescaped * or ?. No wildcard term can hold it, so String() prints the
+// text it matches as a plain term.
+func TestStringBuiltWildcardWithoutWildcard(t *testing.T) {
+	runBuilt(t, map[string]builtCase{
+		"word":         {expr.LIKE("a", expr.WILD("foo")), `a:foo`, expr.Eq("a", "foo")},
+		"space":        {expr.LIKE("a", expr.WILD("foo bar")), `a:"foo bar"`, expr.Eq("a", "foo bar")},
+		"keyword":      {expr.LIKE("a", expr.WILD("AND")), `a:"AND"`, expr.Eq("a", "AND")},
+		"number":       {expr.LIKE("a", expr.WILD("5")), `a:"5"`, expr.Eq("a", "5")},
+		"only_escaped": {expr.LIKE("a", expr.WILD(`fo\*`)), `a:"fo*"`, expr.Eq("a", expr.Lit("fo*"))},
+		"empty":        {expr.LIKE("a", expr.WILD("")), `a:""`, expr.Eq("a", "")},
+		// A LIKE reads the backslash in a literal on its right as an escape.
+		"like_literal": {expr.LIKE("a", expr.Lit(`a\b`)), `a:ab`, expr.Eq("a", "ab")},
+	})
+}
+
+// TestStringBuiltWildcardWithoutField checks a wildcard with no field, which
+// the parser reads as a bare term.
+func TestStringBuiltWildcardWithoutField(t *testing.T) {
+	runBuilt(t, map[string]builtCase{
+		"space": {expr.WILD("foo bar*"), `foo\ bar*`, expr.WILD(`foo\ bar*`)},
+		"or":    {expr.OR(expr.WILD("x y*"), expr.Lit("z")), `x\ y* OR z`, expr.OR(expr.WILD(`x\ y*`), expr.Lit("z"))},
+	})
+}
+
+// TestStringBuiltPatternOperators checks a pattern built in code that uses
+// SIMILAR TO operators such as | and (). Lucene has no syntax for them, so
+// String() escapes them and they parse back as literal characters.
+func TestStringBuiltPatternOperators(t *testing.T) {
+	runBuilt(t, map[string]builtCase{
+		"alternation": {expr.LIKE("a", "*(x|y)*"), `a:*\(x\|y\)*`, expr.LIKE("a", expr.WILD(`*\(x\|y\)*`))},
+		"class":       {expr.LIKE("a", "[xy]*"), `a:\[xy\]*`, expr.LIKE("a", expr.WILD(`\[xy\]*`))},
+		"plus":        {expr.LIKE("a", "x+*"), `a:x\+*`, expr.LIKE("a", expr.WILD(`x\+*`))},
+	})
+}
+
+// TestStringBuiltRegexp checks String() on regexes built in code. A regex
+// without its slashes gets them, and a slash inside one is escaped, so the
+// text parses back to a regex.
+func TestStringBuiltRegexp(t *testing.T) {
+	runBuilt(t, map[string]builtCase{
+		"no_slashes":        {expr.LIKE("a", expr.REGEXP("fo+")), `a:/fo+/`, expr.LIKE("a", expr.REGEXP("/fo+/"))},
+		"inner_slash":       {expr.LIKE("a", expr.REGEXP("/x/y/")), `a:/x\/y/`, expr.LIKE("a", expr.REGEXP(`/x\/y/`))},
+		"escaped_slash":     {expr.LIKE("a", expr.REGEXP(`/x\/y/`)), `a:/x\/y/`, expr.LIKE("a", expr.REGEXP(`/x\/y/`))},
+		"trailing_escape":   {expr.LIKE("a", expr.REGEXP(`/x\/`)), `a:/x\\/`, expr.LIKE("a", expr.REGEXP(`/x\\/`))},
+		"only_slash":        {expr.LIKE("a", expr.REGEXP("/")), `a:/\//`, expr.LIKE("a", expr.REGEXP(`/\//`))},
+		"space":             {expr.LIKE("a", expr.REGEXP("/x y/")), `a:/x y/`, expr.LIKE("a", expr.REGEXP("/x y/"))},
+		"no_field":          {expr.REGEXP("x/y"), `/x\/y/`, expr.REGEXP(`/x\/y/`)},
+		"escaped_backslash": {expr.LIKE("a", expr.REGEXP(`/x\\/`)), `a:/x\\/`, expr.LIKE("a", expr.REGEXP(`/x\\/`))},
+	})
+}
+
+func mustDecode(t *testing.T, raw string) *expr.Expression {
+	t.Helper()
+	var e expr.Expression
+	if err := json.Unmarshal([]byte(raw), &e); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	return &e
+}
+
+type builtCase struct {
+	input *expr.Expression
+	want  string
+	// parsed is what want parses to.
+	parsed *expr.Expression
+}
+
+func runBuilt(t *testing.T, tcs map[string]builtCase) {
+	t.Helper()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got := tc.input.String()
+			if got != tc.want {
+				t.Fatalf("String():\n got: %s\nwant: %s", got, tc.want)
+			}
+			parsed, err := Parse(got)
+			if err != nil {
+				t.Fatalf("String() of %#v is %q, which does not parse: %v", tc.input, got, err)
+			}
+			if !reflect.DeepEqual(parsed, tc.parsed) {
+				t.Fatalf(errTemplate, "String() parses to a different expression", tc.parsed, parsed)
+			}
+		})
+	}
+}
+
+// assertSameSQL checks that two expressions render the same SQL and
+// parameters on every driver.
+func assertSameSQL(t *testing.T, want, got *expr.Expression) {
+	t.Helper()
+	drivers := map[string]interface {
+		Render(*expr.Expression) (string, error)
+		RenderParam(*expr.Expression) (string, []any, error)
+	}{
+		"postgres": driver.NewPostgresDriver(),
+		"mysql":    driver.NewMySQLDriver(),
+		"sqlite":   driver.NewSQLiteDriver(),
+	}
+	for name, d := range drivers {
+		wantSQL, err := d.Render(want)
+		if err != nil {
+			t.Fatalf("%s: render %#v: %v", name, want, err)
+		}
+		gotSQL, err := d.Render(got)
+		if err != nil {
+			t.Fatalf("%s: render %#v: %v", name, got, err)
+		}
+		if gotSQL != wantSQL {
+			t.Fatalf("%s: the parsed String() renders different SQL:\n got: %s\nwant: %s", name, gotSQL, wantSQL)
+		}
+		_, wantParams, err := d.RenderParam(want)
+		if err != nil {
+			t.Fatalf("%s: render param %#v: %v", name, want, err)
+		}
+		_, gotParams, err := d.RenderParam(got)
+		if err != nil {
+			t.Fatalf("%s: render param %#v: %v", name, got, err)
+		}
+		if !reflect.DeepEqual(gotParams, wantParams) {
+			t.Fatalf("%s: the parsed String() renders different params:\n got: %#v\nwant: %#v", name, gotParams, wantParams)
+		}
+	}
 }

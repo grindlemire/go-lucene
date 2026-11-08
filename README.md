@@ -125,6 +125,8 @@ e := expr.LIKE("name", expr.EscapeWildcard(userText)+"*")
 
 It escapes the backslash, `*` and `?`, and also `|`, `()`, `[]`, `{}` and `+`. In a pattern built in code those keep their SIMILAR TO meaning on Postgres and MySQL (MySQL falls back to `REGEXP` for them), and `[...]` is a character set on SQLite too. Inside a set, an escaped `^`, `-`, `]`, `[` or `\` is a member of the set on Postgres and on MySQL 8.0 and MariaDB 10.5+. MySQL 5.7 and older MariaDB also add the backslash to the set, and GLOB has no way to escape `^`, `-` or `]` inside one.
 
+`String()` prints the pattern as a query term, with a backslash before each character the parser would split the term on or read differently. `expr.LIKE("name", "foo bar*").String()` is `name:foo\ bar*`. Lucene has no syntax for the SIMILAR TO operators, so `String()` escapes them too, and the printed query matches them as literal characters.
+
 ## Null handling
 
 `field:null` renders as `IS NULL` across every dialect. The keyword is case-insensitive, and the renderer also covers the cases where null appears inside a grouped expression, behind a `NOT`, or alongside other values in an OR-chain.
