@@ -1,7 +1,7 @@
 package reduce
 
 import (
-	"strconv"
+	"math"
 
 	"github.com/grindlemire/go-lucene/internal/lex"
 	"github.com/grindlemire/go-lucene/pkg/lucene/expr"
@@ -376,7 +376,7 @@ func fuzzy(elems []any, nonTerminals []lex.Token, defaultField string) ([]any, [
 
 	// We have 3+ elements. Check if elems[2] is a valid numeric distance
 	if distance, ok := elems[2].(*expr.Expression); ok {
-		if idistance, err := strconv.Atoi(distance.String()); err == nil {
+		if idistance, ok := wholeNumber(distance); ok {
 			return []any{expr.FUZZY(rest, idistance)}, drop(nonTerminals, 1), true
 		}
 		// elems[2] is an Expression but not a valid numeric distance
@@ -489,6 +489,25 @@ func positiveNumber(e *expr.Expression) (float64, bool) {
 		return float64(n), n > 0
 	case float64:
 		return n, n > 0
+	default:
+		return 0, false
+	}
+}
+
+// wholeNumber returns the value of a number literal with no fractional part,
+// such as 2 or 2.0. A quoted or escaped term like "2" is text, not a number.
+func wholeNumber(e *expr.Expression) (int, bool) {
+	if e.Op != expr.Literal {
+		return 0, false
+	}
+	switch n := e.Left.(type) {
+	case int:
+		return n, true
+	case float64:
+		if n != math.Trunc(n) || math.Abs(n) > math.MaxInt32 {
+			return 0, false
+		}
+		return int(n), true
 	default:
 		return 0, false
 	}
