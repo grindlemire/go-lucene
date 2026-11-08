@@ -399,3 +399,34 @@ func TestNonDecimalNumbersRenderAsStrings(t *testing.T) {
 		checkNumberRendering(t, `0x1p3`, sameSQL(`"f" = '0x1p3'`), []any{"0x1p3"}, WithDefaultField("f"))
 	})
 }
+
+// TestDecimalNumberFormsRender pins the SQL for each spelling of a plain
+// decimal number, in both render modes. Leading zeros are dropped, an exponent
+// is folded into the value.
+//
+// int_overflow pins a known limit, not a design choice: an integer too big
+// for an int renders as the nearest float64, which loses its low digits.
+func TestDecimalNumberFormsRender(t *testing.T) {
+	tcs := map[string]struct {
+		input      string
+		want       map[string]string
+		wantParams []any
+	}{
+		"negative_zero":  {`a:-0`, sameSQL(`"a" = 0`), []any{0}},
+		"leading_zeros":  {`a:007`, sameSQL(`"a" = 7`), []any{7}},
+		"trailing_dot":   {`a:5.`, sameSQL(`"a" = 5`), []any{5.0}},
+		"exponent":       {`a:1e3`, sameSQL(`"a" = 1000`), []any{1000.0}},
+		"upper_exponent": {`a:1E3`, sameSQL(`"a" = 1000`), []any{1000.0}},
+		"fraction":       {`a:1.5e-3`, sameSQL(`"a" = 0.0015`), []any{0.0015}},
+		"int_overflow":   {`a:9223372036854775808`, sameSQL(`"a" = 9.223372036854776e+18`), []any{9223372036854775808.0}},
+		"float_overflow": {`a:1e400`, sameSQL(`"a" = '1e400'`), []any{"1e400"}},
+		"hex_int":        {`sku:0x1F`, sameSQL(`"sku" = '0x1F'`), []any{"0x1F"}},
+		"escaped_digits": {`a:\007`, sameSQL(`"a" = '007'`), []any{"007"}},
+		"range":          {`a:[007 TO 1e3]`, sameSQL(`"a" >= 7 AND "a" <= 1000`), []any{7, 1000.0}},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			checkNumberRendering(t, tc.input, tc.want, tc.wantParams)
+		})
+	}
+}

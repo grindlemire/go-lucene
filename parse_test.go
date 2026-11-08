@@ -1287,6 +1287,45 @@ func TestParseNonDecimalNumberIsTerm(t *testing.T) {
 	}
 }
 
+// TestParseDecimalNumberForms pins which terms parse as numbers. Integers that
+// fit in an int are ints, other decimal numbers are float64s, and escaping or
+// quoting a number keeps its text. Spellings that print differently from how
+// they were written, like 007 or 1e3, are pinned in TestDecimalNumberFormsRender.
+func TestParseDecimalNumberForms(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"int":                 {`a:5`, expr.Eq("a", 5)},
+		"negative_int":        {`a:-5`, expr.Eq("a", -5)},
+		"float":               {`a:1.5`, expr.Eq("a", 1.5)},
+		"max_int":             {`a:9223372036854775807`, expr.Eq("a", 9223372036854775807)},
+		"float_overflow":      {`a:1e400`, expr.Eq("a", "1e400")},
+		"hex_int":             {`a:0x10`, expr.Eq("a", "0x10")},
+		"escaped_digits":      {`a:\007`, expr.Eq("a", "007")},
+		"quoted_digits":       {`a:"007"`, expr.Eq("a", "007")},
+		"escaped_plus":        {`a:\+5`, expr.Eq("a", "+5")},
+		"non_ascii_digits":    {`a:١٢٣`, expr.Eq("a", "١٢٣")},
+		"leading_zeros_field": {`007:5`, expr.Eq("007", 5)},
+		"hex_float_field":     {`0x1p3:5`, expr.Eq("0x1p3", 5)},
+		"boost_exponent":      {`a:b^1e1`, expr.BOOST(expr.Eq("a", "b"), 10.0)},
+		"boost_fraction":      {`a:b^0.5`, expr.BOOST(expr.Eq("a", "b"), 0.5)},
+		"fuzzy_leading_zero":  {`a:b~02`, expr.FUZZY(expr.Eq("a", "b"), 2)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+}
+
 // TestGroupingRoundTrip verifies that String() writes the parentheses that
 // grouping needs, and only those, so Parse -> String() -> Parse gives the same
 // expression and flat chains print without extra nesting (issue #64).
