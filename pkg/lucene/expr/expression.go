@@ -98,13 +98,18 @@ func NumberLit(v any, text string) *Expression {
 // digits with an optional dot or a dot and digits, and an optional exponent.
 var numberSpelling = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
 
-// spellsNumber reports whether text is a plain decimal number equal to v.
+// spellsNumber reports whether text is a plain decimal number equal to v. A
+// number too small for a float64, such as 1e-400, equals no value: it parses
+// to 0, but it is not 0.
 func spellsNumber(text string, v any) bool {
 	if !numberSpelling.MatchString(text) {
 		return false
 	}
 	f, err := strconv.ParseFloat(text, 64)
 	if err != nil {
+		return false
+	}
+	if mantissa, _, _ := strings.Cut(strings.ToLower(text), "e"); f == 0 && strings.ContainsAny(mantissa, "123456789") {
 		return false
 	}
 	switch n := v.(type) {
