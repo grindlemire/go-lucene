@@ -646,3 +646,111 @@ func TestNonFiniteWordsRenderAsStrings(t *testing.T) {
 		}
 	}
 }
+
+// paramRenderers lists the parameterized render entry points with their
+// bind parameters.
+var paramRenderers = map[string]func(string, ...Opt) (string, []any, error){
+	"param_postgres": ToParameterizedPostgres,
+	"param_mysql":    ToParameterizedMySQL,
+	"param_mariadb":  ToParameterizedMariaDB,
+	"param_sqlite":   ToParameterizedSQLite,
+}
+
+// checkNumberRendering renders input with every dialect, in both modes. want
+// maps the non-parameterized renderers to their SQL; every parameterized
+// renderer must bind wantParams.
+func checkNumberRendering(t *testing.T, input string, want map[string]string, wantParams []any, opts ...Opt) {
+	t.Helper()
+	for rname, wantSQL := range want {
+		got, err := renderers[rname](input, opts...)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", rname, err)
+			continue
+		}
+		if got != wantSQL {
+			t.Errorf("%s:\nwant %s\ngot  %s", rname, wantSQL, got)
+		}
+	}
+	for rname, render := range paramRenderers {
+		_, params, err := render(input, opts...)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", rname, err)
+			continue
+		}
+		if !reflect.DeepEqual(params, wantParams) {
+			t.Errorf("%s:\nwant params %#v\ngot  params %#v", rname, wantParams, params)
+		}
+	}
+}
+
+// sameSQL gives the expected SQL for each non-parameterized renderer, for SQL
+// where Postgres and SQLite agree and MySQL and MariaDB differ only in quoting
+// columns with backticks.
+func sameSQL(postgres string) map[string]string {
+	mysql := strings.ReplaceAll(postgres, `"`, "`")
+	return map[string]string{
+		"postgres": postgres,
+		"sqlite":   postgres,
+		"mysql":    mysql,
+		"mariadb":  mysql,
+	}
+}
+
+// TestNonDecimalNumbersRenderAsStrings is the end-to-end check for the rest of
+// issue #69: hex floats and underscore digit separators used to parse as
+// numbers, so a:0x1p3 rendered "a" = 8 and a:1_000 rendered "a" = 1000. They
+// now reach the SQL as the text the query wrote.
+func TestNonDecimalNumbersRenderAsStrings(t *testing.T) {
+	tcs := map[string]struct {
+		input      string
+		want       map[string]string
+		wantParams []any
+	}{
+		"hex_float":          {`a:0x1p3`, sameSQL(`"a" = '0x1p3'`), []any{"0x1p3"}},
+		"negative_hex_float": {`a:-0x1p-2`, sameSQL(`"a" = '-0x1p-2'`), []any{"-0x1p-2"}},
+		"digit_separator":    {`a:1_000`, sameSQL(`"a" = '1_000'`), []any{"1_000"}},
+		"range_bound":        {`a:[1 TO 1_000]`, sameSQL(`"a" >= 1 AND "a" <= '1_000'`), []any{1, "1_000"}},
+		"comparison":         {`a:>0x1p3`, sameSQL(`"a" > '0x1p3'`), []any{"0x1p3"}},
+		"in_list":            {`a:(1_000 OR 2)`, sameSQL(`"a" IN ('1_000', 2)`), []any{"1_000", 2}},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			checkNumberRendering(t, tc.input, tc.want, tc.wantParams)
+		})
+	}
+
+	t.Run("default_field", func(t *testing.T) {
+		checkNumberRendering(t, `0x1p3`, sameSQL(`"f" = '0x1p3'`), []any{"0x1p3"}, WithDefaultField("f"))
+	})
+}
+
+// TestDecimalNumberFormsRender pins the SQL for each spelling of a plain
+// decimal number, in both render modes. Leading zeros are dropped, an exponent
+// is folded into the value.
+//
+// int_overflow pins a known limit, not a design choice: an integer too big
+// for an int renders as the nearest float64, which loses its low digits.
+func TestDecimalNumberFormsRender(t *testing.T) {
+	tcs := map[string]struct {
+		input      string
+		want       map[string]string
+		wantParams []any
+	}{
+		"negative_zero":  {`a:-0`, sameSQL(`"a" = 0`), []any{0}},
+		"leading_zeros":  {`a:007`, sameSQL(`"a" = 7`), []any{7}},
+		"trailing_dot":   {`a:5.`, sameSQL(`"a" = 5`), []any{5.0}},
+		"exponent":       {`a:1e3`, sameSQL(`"a" = 1000`), []any{1000.0}},
+		"upper_exponent": {`a:1E3`, sameSQL(`"a" = 1000`), []any{1000.0}},
+		"fraction":       {`a:1.5e-3`, sameSQL(`"a" = 0.0015`), []any{0.0015}},
+		"int_overflow":   {`a:9223372036854775808`, sameSQL(`"a" = 9.223372036854776e+18`), []any{9223372036854775808.0}},
+		"float_overflow": {`a:1e400`, sameSQL(`"a" = '1e400'`), []any{"1e400"}},
+		"hex_int":        {`sku:0x1F`, sameSQL(`"sku" = '0x1F'`), []any{"0x1F"}},
+		"escaped_digits": {`a:\007`, sameSQL(`"a" = '007'`), []any{"007"}},
+		"range":          {`a:[007 TO 1e3]`, sameSQL(`"a" >= 7 AND "a" <= 1000`), []any{7, 1000.0}},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			checkNumberRendering(t, tc.input, tc.want, tc.wantParams)
+		})
+	}
+}
