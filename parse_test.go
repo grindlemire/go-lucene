@@ -1647,6 +1647,40 @@ func TestParseNumericFieldIsColumn(t *testing.T) {
 	}
 }
 
+// TestParseWildcardFieldIsColumn checks that a field name with a * or ? in it
+// is a column named by its text with the escapes removed, as a field with
+// only escaped wildcards is. It used to keep the escapes, so fo\*o*:x was the
+// column fo\*o* and 1e+5*:x was 1e\+5*.
+func TestParseWildcardFieldIsColumn(t *testing.T) {
+	tcs := map[string]struct {
+		input string
+		want  *expr.Expression
+	}{
+		"plain":            {input: `fo*:x`, want: expr.Eq("fo*", "x")},
+		"escaped_star":     {input: `fo\*o*:x`, want: expr.Eq("fo*o*", "x")},
+		"plus":             {input: `1e+5*:x`, want: expr.Eq("1e+5*", "x")},
+		"escaped_slash":    {input: `a\\b*:x`, want: expr.Eq(`a\b*`, "x")},
+		"question":         {input: `fo?:x`, want: expr.Eq("fo?", "x")},
+		"equals_sign":      {input: `a+b*=x`, want: expr.Eq("a+b*", "x")},
+		"paren":            {input: `(a+b*):x`, want: expr.Eq("a+b*", "x")},
+		"range":            {input: `a+b*:[1 TO 2]`, want: expr.Rang("a+b*", 1, 2, true)},
+		"wildcard_value":   {input: `a+b*:y*`, want: expr.LIKE("a+b*", expr.WILD("y*"))},
+		"value_stays_wild": {input: `a:1e+5*`, want: expr.LIKE("a", expr.WILD(`1e\+5*`))},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf(errTemplate, "parsed expression does not match", tc.want, got)
+			}
+		})
+	}
+}
+
 // TestParseNonFiniteNumberIsTerm checks that words like inf and NaN parse as
 // plain terms. strconv.ParseFloat accepts them, and the resulting +Inf/NaN
 // float used to render as a bare `+Inf` or `NaN`, which SQL reads as a column

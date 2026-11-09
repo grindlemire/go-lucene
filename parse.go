@@ -107,7 +107,7 @@ type parser struct {
 	nonTerminals []lex.Token
 
 	// numberText holds the text of each number literal as written, for
-	// numberFieldToColumn.
+	// fieldToColumn.
 	numberText map[*expr.Expression]string
 
 	defaultField string
@@ -248,7 +248,7 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 			}
 
 			if tok.Typ == lex.TColon || tok.Typ == lex.TEqual {
-				p.numberFieldToColumn()
+				p.fieldToColumn()
 			}
 
 			// push the token on the stack
@@ -334,11 +334,13 @@ func isPrefixOperator(tok lex.Token) bool {
 	return tok.Typ == lex.TMinus || tok.Typ == lex.TPlus || tok.Typ == lex.TNot
 }
 
-// numberFieldToColumn is called before a ':' or '=' is shifted. The left side
-// of field:value is always a column, even when it looks like a number, as in
-// 0:1, 1=1 or (0):*. So a number on top of the stack becomes a column, with
-// its text as written: 007:x is "007", not 7.
-func (p *parser) numberFieldToColumn() {
+// fieldToColumn is called before a ':' or '=' is shifted. The left side of
+// field:value is always a column, even when it looks like a number or a
+// wildcard. So a number on top of the stack becomes a column with its text as
+// written, as in 0:1, 1=1 or (0):*, where 007:x is "007", not 7. A wildcard
+// becomes a column with its escapes removed, since a column name is not a
+// pattern: fo\*o*:x is "fo*o*", as fo\*o:x is "fo*o".
+func (p *parser) fieldToColumn() {
 	top := len(p.stack) - 1
 	if top < 0 {
 		return
@@ -349,6 +351,10 @@ func (p *parser) numberFieldToColumn() {
 	}
 	if text, ok := p.numberText[lit]; ok {
 		p.stack[top] = expr.Lit(text)
+		return
+	}
+	if s, ok := lit.Left.(string); ok && lit.Op == expr.Wild {
+		p.stack[top] = expr.Lit(wildcard.Unescape(s))
 	}
 }
 
