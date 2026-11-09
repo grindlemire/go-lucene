@@ -75,6 +75,7 @@ func parseWithOptions(input string, opts ...Opt) (e *expr.Expression, p *parser,
 		stack:        []any{},
 		nonTerminals: []lex.Token{{Typ: lex.TStart}},
 		numberText:   map[*expr.Expression]string{},
+		escapedDots:  map[*expr.Expression]lex.Token{},
 	}
 
 	for _, opt := range opts {
@@ -107,8 +108,12 @@ type parser struct {
 	nonTerminals []lex.Token
 
 	// numberText holds the text of each number literal as written, for
-	// numberFieldToColumn.
+	// fieldToColumn.
 	numberText map[*expr.Expression]string
+
+	// escapedDots holds the token of each term with an escaped dot, for
+	// fieldToColumn to check with checkJSONField.
+	escapedDots map[*expr.Expression]lex.Token
 
 	defaultField string
 	jsonFields   map[string]bool
@@ -197,10 +202,8 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 				if isNumberLiteral(lit) {
 					p.numberText[lit.(*expr.Expression)] = tok.Val
 				}
-				if p.lex.Peek().Typ == lex.TColon {
-					if err := p.checkJSONField(tok); err != nil {
-						return e, err
-					}
+				if e, ok := lit.(*expr.Expression); ok && strings.Contains(tok.Val, `\.`) {
+					p.escapedDots[e] = tok
 				}
 
 				// we should always check if the current top of the stack is another token
@@ -248,7 +251,9 @@ func (p *parser) parse() (e *expr.Expression, err error) {
 			}
 
 			if tok.Typ == lex.TColon || tok.Typ == lex.TEqual {
-				p.numberFieldToColumn()
+				if err := p.fieldToColumn(); err != nil {
+					return e, err
+				}
 			}
 
 			// push the token on the stack
@@ -334,22 +339,35 @@ func isPrefixOperator(tok lex.Token) bool {
 	return tok.Typ == lex.TMinus || tok.Typ == lex.TPlus || tok.Typ == lex.TNot
 }
 
-// numberFieldToColumn is called before a ':' or '=' is shifted. The left side
-// of field:value is always a column, even when it looks like a number, as in
-// 0:1, 1=1 or (0):*. So a number on top of the stack becomes a column, with
-// its text as written: 007:x is "007", not 7.
-func (p *parser) numberFieldToColumn() {
+// fieldToColumn is called before a ':' or '=' is shifted. The left side of
+// field:value is always a column, even when it looks like a number or a
+// wildcard. So a number on top of the stack becomes a column with its text as
+// written, as in 0:1, 1=1 or (0):*, where 007:x is "007", not 7. A wildcard
+// becomes a column with its escapes removed, since a column name is not a
+// pattern: fo\*o*:x is "fo*o*", as fo\*o:x is "fo*o". A field on a JSON
+// column with an escaped dot is an error, from checkJSONField.
+func (p *parser) fieldToColumn() error {
 	top := len(p.stack) - 1
 	if top < 0 {
-		return
+		return nil
 	}
 	lit, ok := p.stack[top].(*expr.Expression)
 	if !ok {
-		return
+		return nil
+	}
+	if tok, ok := p.escapedDots[lit]; ok {
+		if err := p.checkJSONField(tok); err != nil {
+			return err
+		}
 	}
 	if text, ok := p.numberText[lit]; ok {
 		p.stack[top] = expr.Lit(text)
+		return nil
 	}
+	if s, ok := lit.Left.(string); ok && lit.Op == expr.Wild {
+		p.stack[top] = expr.Lit(wildcard.Unescape(s))
+	}
+	return nil
 }
 
 // isRangeStart returns true for the brackets that open a range.
