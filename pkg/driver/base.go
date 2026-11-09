@@ -25,14 +25,14 @@ func stripRegexpDelimiters(s string) string {
 // isNullExpr returns true if the value is a *expr.Expression with Op == Null.
 func isNullExpr(in any) bool {
 	e, ok := in.(*expr.Expression)
-	return ok && e.Op == expr.Null
+	return ok && e != nil && e.Op == expr.Null
 }
 
 // isNullEquals returns true if the value is an Expression of the form
 // Equals(left, Null). Used to collapse Not/MustNot wrappers into IS NOT NULL.
 func isNullEquals(in any) bool {
 	e, ok := in.(*expr.Expression)
-	if !ok || e.Op != expr.Equals {
+	if !ok || e == nil || e.Op != expr.Equals {
 		return false
 	}
 	return isNullExpr(e.Right)
@@ -123,9 +123,18 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return "", nil, fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
-	e, err = fieldShape(e)
+	if err := missingOperand(e); err != nil {
+		return "", nil, err
+	}
+	e = withoutNilOperands(e)
+
+	shaped, err := fieldShape(e)
 	if err != nil {
 		return "", nil, err
+	}
+	// A field spread over a group is a new tree, which gets every check.
+	if shaped != e {
+		return b.RenderParam(shaped)
 	}
 
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
@@ -150,6 +159,9 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
 	if (e.Op == expr.Not || e.Op == expr.MustNot) && isNullEquals(e.Left) {
 		inner, _ := e.Left.(*expr.Expression)
+		if _, err := fieldShape(inner); err != nil {
+			return "", nil, err
+		}
 		col, cparams, err := b.serializeParams(inner.Left)
 		if err != nil {
 			return "", cparams, err
@@ -326,9 +338,18 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return "", fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
-	e, err = fieldShape(e)
+	if err := missingOperand(e); err != nil {
+		return "", err
+	}
+	e = withoutNilOperands(e)
+
+	shaped, err := fieldShape(e)
 	if err != nil {
 		return "", err
+	}
+	// A field spread over a group is a new tree, which gets every check.
+	if shaped != e {
+		return b.Render(shaped)
 	}
 
 	// Standalone Regexp expression: strip /.../ delimiters and return as a
@@ -350,6 +371,9 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 	// Not/MustNot wrapping Equals(field, Null) -> IS NOT NULL.
 	if (e.Op == expr.Not || e.Op == expr.MustNot) && isNullEquals(e.Left) {
 		inner, _ := e.Left.(*expr.Expression)
+		if _, err := fieldShape(inner); err != nil {
+			return "", err
+		}
 		col, err := b.serialize(inner.Left)
 		if err != nil {
 			return "", err
@@ -522,6 +546,119 @@ func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string
 	return str, nil
 }
 
+// missingOperand reports an operand that e needs and does not have. The
+// parser always fills them in, but a tree built in code or read from JSON can
+// leave one out, as expr.Eq("a", nil) does, and would render as broken SQL
+// such as "a" = . A nil *expr.Expression counts as missing. A missing field is
+// reported by fieldShape.
+func missingOperand(e *expr.Expression) error {
+	// The case folding and JSON path renderers read a LIST's items before
+	// they are rendered.
+	if list, ok := e.Right.(*expr.Expression); ok && list != nil && list.Op == expr.List {
+		if err := missingOperand(list); err != nil {
+			return err
+		}
+	}
+	switch e.Op {
+	case expr.And, expr.Or:
+		if isNil(e.Left) || isNil(e.Right) {
+			return fmt.Errorf("%s %s needs an expression on each side", article(e.Op), e.Op)
+		}
+	case expr.Not, expr.Must, expr.MustNot, expr.Boost, expr.Fuzzy:
+		if isNil(e.Left) {
+			return fmt.Errorf("%s %s needs an expression", article(e.Op), e.Op)
+		}
+	case expr.Literal, expr.Wild, expr.Regexp:
+		if isNil(e.Left) {
+			return fmt.Errorf("%s %s needs a value", article(e.Op), e.Op)
+		}
+	case expr.Range:
+		if isNil(e.Right) {
+			return fmt.Errorf("a RANGE needs bounds, as in field:[a TO b]")
+		}
+	case expr.Equals, expr.Like, expr.In, expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+		if isNil(e.Right) {
+			return fmt.Errorf("%s %s needs a value, as in %s", article(e.Op), e.Op, fieldExamples[e.Op])
+		}
+
+	case expr.List:
+		items, ok := e.Left.([]*expr.Expression)
+		if !ok {
+			return fmt.Errorf("a LIST holds a []*expr.Expression, not %T", e.Left)
+		}
+		if len(items) == 0 {
+			return fmt.Errorf("a LIST needs at least one value")
+		}
+		for _, item := range items {
+			if item == nil {
+				return fmt.Errorf("a LIST item is nil")
+			}
+		}
+	}
+	return nil
+}
+
+// withoutNilOperands returns e with a nil *expr.Expression operand set to
+// nil, so the rest of rendering treats it as no operand, as missingOperand
+// does. e itself is not changed.
+func withoutNilOperands(e *expr.Expression) *expr.Expression {
+	left, lok := e.Left.(*expr.Expression)
+	right, rok := e.Right.(*expr.Expression)
+	if !(lok && left == nil) && !(rok && right == nil) {
+		return e
+	}
+	c := *e
+	if lok && left == nil {
+		c.Left = nil
+	}
+	if rok && right == nil {
+		c.Right = nil
+	}
+	return &c
+}
+
+// missingOperandIn runs missingOperand on e and on every expression under it.
+func missingOperandIn(e *expr.Expression) error {
+	if err := missingOperand(e); err != nil {
+		return err
+	}
+	switch v := e.Left.(type) {
+	case *expr.Expression:
+		if v != nil {
+			if err := missingOperandIn(v); err != nil {
+				return err
+			}
+		}
+	case []*expr.Expression:
+		for _, item := range v {
+			if item != nil {
+				if err := missingOperandIn(item); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if v, ok := e.Right.(*expr.Expression); ok && v != nil {
+		return missingOperandIn(v)
+	}
+	return nil
+}
+
+// isNil reports whether in is nil or a nil *expr.Expression or
+// *expr.RangeBoundary.
+func isNil(in any) bool {
+	switch v := in.(type) {
+	case nil:
+		return true
+	case *expr.Expression:
+		return v == nil
+	case *expr.RangeBoundary:
+		return v == nil
+	default:
+		return false
+	}
+}
+
 // fieldShape checks that a field operator has a field and a value it can
 // compare, and spreads a field over a group of terms. Render does not run
 // expr.Validate, so a tree built in code or read from JSON can hold a group
@@ -554,6 +691,9 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 
 	value, ok := e.Right.(*expr.Expression)
 	if !ok {
+		if e.Op == expr.In {
+			return nil, fmt.Errorf("the right side of an IN must be a LIST, not %T", e.Right)
+		}
 		return e, nil
 	}
 	switch e.Op {
@@ -563,6 +703,12 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 		}
 		if value.Op == expr.List {
 			return nil, fmt.Errorf("the value in an EQUALS must be a single term, not a LIST expression")
+		}
+		// The group is rebuilt with the field on each term, so check the
+		// whole group first: a missing operand in it would be dropped or
+		// panic on the way.
+		if err := missingOperandIn(value); err != nil {
+			return nil, err
 		}
 		field, ok := e.Left.(*expr.Expression)
 		if !ok {
@@ -633,6 +779,9 @@ func (b Base) serialize(in any) (s string, err error) {
 	switch v := in.(type) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
+			if err := missingOperand(v); err != nil {
+				return "", err
+			}
 			s, _ := v.Left.(string)
 			s = stripRegexpDelimiters(s)
 			if err := validateStringLiteral(s); err != nil {
@@ -826,6 +975,9 @@ func (b Base) serializeParams(in any) (s string, params []any, err error) {
 	switch v := in.(type) {
 	case *expr.Expression:
 		if v.Op == expr.Regexp {
+			if err := missingOperand(v); err != nil {
+				return "", nil, err
+			}
 			s, _ := v.Left.(string)
 			s = stripRegexpDelimiters(s)
 			if err := validateStringLiteral(s); err != nil {
@@ -906,6 +1058,9 @@ func extractBoundValue(bound any) (val any, unbounded bool, err error) {
 		default:
 			return nil, false, fmt.Errorf("range bound must be a single term, not %s %s expression", article(e.Op), e.Op)
 		}
+	}
+	if isNil(val) {
+		return nil, false, fmt.Errorf("a range bound is missing")
 	}
 	if expr.IsASTOrJSONContainer(val) {
 		return nil, false, fmt.Errorf("range bound must be a single term, not %T", val)

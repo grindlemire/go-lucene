@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -45,6 +46,10 @@ func validateEquals(e *Expression) (err error) {
 		return errors.New("EQUALS validation: left value must be a literal expression")
 	}
 
+	if isNil(e.Right) {
+		return errors.New("EQUALS validation: right value must not be nil")
+	}
+
 	return nil
 }
 
@@ -61,6 +66,10 @@ func validateCompare(e *Expression) (err error) {
 		return errors.New("COMPARE validation: left value must be a literal expression")
 	}
 
+	if isNil(e.Right) {
+		return errors.New("COMPARE validation: right value must not be nil")
+	}
+
 	// A comparison takes one term, as in a:>5. Neither Lucene nor
 	// Elasticsearch gives a meaning to a:>(x OR y) or a:>[1 TO 5].
 	if right, ok := e.Right.(*Expression); ok && !isLiteralExpr(right) {
@@ -75,11 +84,11 @@ func validateAnd(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("AND validation: left value must not be nil")
 	}
 
-	if e.Right == nil {
+	if isNil(e.Right) {
 		return errors.New("AND validation: right value must not be nil")
 	}
 
@@ -91,11 +100,11 @@ func validateOr(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("OR validation: left value must not be nil")
 	}
 
-	if e.Right == nil {
+	if isNil(e.Right) {
 		return errors.New("OR validation: right value must not be nil")
 	}
 
@@ -107,11 +116,11 @@ func validateNot(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("NOT validation: sub expression must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("NOT validation: must not have two sub expressions")
 	}
 
@@ -123,11 +132,11 @@ func validateRange(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("RANGE validation: a range needs a field, as in field:[a TO b]")
 	}
 
-	if e.Right == nil {
+	if isNil(e.Right) {
 		return errors.New("RANGE validation: boundary value must not be nil")
 	}
 
@@ -144,11 +153,11 @@ func validateRange(e *Expression) (err error) {
 		return errors.New("RANGE validation: range boundary must not be nil")
 	}
 
-	if boundary.Min == nil {
+	if isNil(boundary.Min) {
 		return errors.New("RANGE validation: range boundary must have a minimum")
 	}
 
-	if boundary.Max == nil {
+	if isNil(boundary.Max) {
 		return errors.New("RANGE validation: range boundary must have a maximum")
 	}
 
@@ -186,6 +195,9 @@ func validateRangeBound(side string, bound any) error {
 		}
 	}
 
+	if isNil(val) {
+		return fmt.Errorf("RANGE validation: range boundary must have a %s", side)
+	}
 	if IsASTOrJSONContainer(val) {
 		return fmt.Errorf("RANGE validation: range %s must be a single term, not %T", side, val)
 	}
@@ -206,11 +218,11 @@ func validateMust(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("MUST validation: sub expression must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("MUST validation: must not have two sub expressions")
 	}
 
@@ -222,11 +234,11 @@ func validateMustNot(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("MUST_NOT validation: sub expression must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("MUST_NOT validation: must not have two sub expressions")
 	}
 
@@ -238,11 +250,11 @@ func validateBoost(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("BOOST validation: sub expression must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("BOOST validation: must not have two sub expressions")
 	}
 
@@ -254,11 +266,11 @@ func validateFuzzy(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("FUZZY validation: sub expression must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("FUZZY validation: must not have two sub expressions")
 	}
 
@@ -270,11 +282,11 @@ func validateLiteral(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("LITERAL validation: value must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("LITERAL validation: must not have two values")
 	}
 
@@ -294,11 +306,11 @@ func validateWild(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("WILDCARD validation: value must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("WILDCARD validation: must not have two values")
 	}
 
@@ -314,11 +326,11 @@ func validateRegexp(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("REGEXP validation: value must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("REGEXP validation: must not have two values")
 	}
 
@@ -336,7 +348,7 @@ func validateNull(e *Expression) (err error) {
 	if e.Left != nil {
 		return errors.New("NULL validation: must not have a left value")
 	}
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("NULL validation: must not have a right value")
 	}
 	return nil
@@ -347,7 +359,7 @@ func validateLike(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("LIKE validation: column must not be nil")
 	}
 
@@ -355,7 +367,7 @@ func validateLike(e *Expression) (err error) {
 		return fmt.Errorf("LIKE validation: value must be a literal, not %s", reflect.TypeOf(e.Left))
 	}
 
-	if e.Right == nil {
+	if isNil(e.Right) {
 		return errors.New("LIKE validation: must have two values")
 	}
 
@@ -376,7 +388,7 @@ func validateIn(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("IN validation: column must not be nil")
 	}
 
@@ -384,7 +396,7 @@ func validateIn(e *Expression) (err error) {
 		return fmt.Errorf("IN validation: value must be a literal, not %s", reflect.TypeOf(e.Left))
 	}
 
-	if e.Right == nil {
+	if isNil(e.Right) {
 		return errors.New("IN validation: must have two values")
 	}
 
@@ -405,12 +417,28 @@ func validateList(e *Expression) (err error) {
 		return nil
 	}
 
-	if e.Left == nil {
+	if isNil(e.Left) {
 		return errors.New("LIST validation: value must not be nil")
 	}
 
-	if e.Right != nil {
+	if !isNil(e.Right) {
 		return errors.New("LIST validation: must not have two values")
+	}
+
+	if items, ok := e.Left.([]*Expression); ok && len(items) == 0 {
+		return errors.New("LIST validation: must have at least one value")
+	}
+
+	if items, ok := e.Left.([]*Expression); ok && slices.Contains(items, nil) {
+		return errors.New("LIST validation: item must not be nil")
+	}
+
+	if items, ok := e.Left.([]*Expression); ok {
+		for _, item := range items {
+			if !isLiteralExpr(item) {
+				return fmt.Errorf("LIST validation: item must be a literal, not %#v", item)
+			}
+		}
 	}
 
 	if !isListOfLiteralExprs(e.Left) {
@@ -433,9 +461,23 @@ func isListOfLiteralExprs(in any) bool {
 	return true
 }
 
+// isNil reports whether in is nil or a nil *Expression or *RangeBoundary.
+func isNil(in any) bool {
+	switch v := in.(type) {
+	case nil:
+		return true
+	case *Expression:
+		return v == nil
+	case *RangeBoundary:
+		return v == nil
+	default:
+		return false
+	}
+}
+
 func isLiteralExpr(in any) bool {
 	e, isExpr := in.(*Expression)
-	if !isExpr {
+	if !isExpr || e == nil {
 		return false
 	}
 	if e.Op == Null {

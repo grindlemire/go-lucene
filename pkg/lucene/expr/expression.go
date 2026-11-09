@@ -316,7 +316,7 @@ func IsASTOrJSONContainer(v any) bool {
 // Validate validates the expression is correctly structured.
 func Validate(in any) (err error) {
 	e, isExpr := in.(*Expression)
-	if !isExpr {
+	if !isExpr || e == nil {
 		// if we don't have an expression we must be in a leaf node
 		return nil
 	}
@@ -420,6 +420,13 @@ func (p JSONPath) Validate() error {
 // Expr creates a general new expression. The other public functions are just helpers that call this
 // function underneath.
 func Expr(left any, op Operator, right ...any) *Expression {
+	// A nil *Expression is no expression at all, so it is stored as nil, the
+	// same as an untyped nil: Validate and the drivers report it as missing.
+	left = untypedNil(left)
+	for i := range right {
+		right[i] = untypedNil(right[i])
+	}
+
 	// A bare null literal in column position (e.g. `null:foo`) is a column
 	// named "null", not a SQL NULL. Demote it to a literal column.
 	if e, ok := left.(*Expression); ok && e.Op == Null && operatesOnColumn(op) {
@@ -473,26 +480,17 @@ func Expr(left any, op Operator, right ...any) *Expression {
 		return e
 	}
 
-	// support passing a slice to an IN operator
-	if op == In && len(right) > 0 {
-		e.Right = right[0].(*Expression)
+	// The right side of an IN is stored as given. Validate and the drivers
+	// report anything but a LIST there.
+	if op == In {
+		if len(right) > 0 {
+			e.Right = right[0]
+		}
 		return e
 	}
 
 	if op == List {
-		// super gross but this is how go handles any types that are slices
-		slice, isSlice := left.([]any)[0].([]*Expression)
-		if isSlice {
-			e.Left = slice
-			return e
-		}
-
-		l := left.([]any)
-		vals := []*Expression{}
-		for _, v := range l {
-			vals = append(vals, v.(*Expression))
-		}
-		e.Left = vals
+		e.Left = listItems(left)
 		return e
 	}
 
@@ -506,6 +504,42 @@ func Expr(left any, op Operator, right ...any) *Expression {
 	}
 
 	return e
+}
+
+// untypedNil returns nil for a nil *Expression and in otherwise.
+func untypedNil(in any) any {
+	if e, ok := in.(*Expression); ok && e == nil {
+		return nil
+	}
+	return in
+}
+
+// listItems builds the items of a LIST from the arguments to LIST: one
+// []*Expression, or values that are each an expression or a value such as "x"
+// or 5. An IN matches its items exactly, so a value becomes a literal, even
+// one with a * in it. A nil stays a nil item, which Validate and the drivers
+// report.
+func listItems(in any) []*Expression {
+	args, _ := in.([]any)
+	if len(args) == 1 {
+		if items, ok := args[0].([]*Expression); ok {
+			return items
+		}
+	}
+	items := make([]*Expression, 0, len(args))
+	for _, v := range args {
+		v = untypedNil(v)
+		if v == nil {
+			items = append(items, nil)
+			continue
+		}
+		if e, ok := v.(*Expression); ok {
+			items = append(items, e)
+			continue
+		}
+		items = append(items, Lit(v))
+	}
+	return items
 }
 
 type jsonExpression struct {

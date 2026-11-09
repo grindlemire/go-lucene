@@ -65,14 +65,11 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 		"unbounded_and":  rangeOf(expr.WILD("*"), expr.AND(expr.Lit("x"), expr.Lit("y"))),
 		"ast_slice":      expr.Rang("a", expr.Lit([]*expr.Expression{expr.Lit("x")}), 5, true),
 		"ast_value_list": rangeOf(expr.Lit([]expr.Expression{*expr.Lit("x")}), expr.Lit(5)),
-		"typed_nil_min":  rangeOf((*expr.Expression)(nil), expr.Lit(3)),
-		"typed_nil_max":  rangeOf(expr.Lit(1), (*expr.Expression)(nil)),
 	}
 
 	jsonBounds := map[string]string{
 		"json_object_min": `{"left":"a","operator":"RANGE","right":{"min":{"x":"1') OR 1=1 --"},"max":2,"inclusive":true}}`,
 		"json_array_max":  `{"left":"a","operator":"RANGE","right":{"min":1,"max":["1') OR 1=1 --"],"inclusive":true}}`,
-		"json_null_min":   `{"left":"a","operator":"RANGE","right":{"min":null,"max":2,"inclusive":true}}`,
 	}
 	for name, raw := range jsonBounds {
 		bounds[name] = mustUnmarshal(t, raw)
@@ -99,6 +96,31 @@ func TestRenderRejectsNonTermRangeBound(t *testing.T) {
 					}
 					if !strings.Contains(err.Error(), "must be a single term") {
 						t.Fatalf("expected a single-term range bound error, got: %v", err)
+					}
+				})
+			})
+		}
+	}
+}
+
+// TestRenderMissingRangeBound covers a range bound that is nil, a nil
+// *expr.Expression, a literal with no value or a JSON null.
+func TestRenderMissingRangeBound(t *testing.T) {
+	bounds := map[string]*expr.Expression{
+		"typed_nil_min": rangeOf((*expr.Expression)(nil), expr.Lit(3)),
+		"typed_nil_max": rangeOf(expr.Lit(1), (*expr.Expression)(nil)),
+		"helper_nil":    expr.Rang("a", nil, 3, true),
+		"json_null_min": mustUnmarshal(t, `{"left":"a","operator":"RANGE","right":{"min":null,"max":2,"inclusive":true}}`),
+	}
+	for name, e := range bounds {
+		for dname, d := range allDrivers {
+			t.Run(name+"/"+dname, func(t *testing.T) {
+				noPanic(t, func() {
+					if _, err := d.Render(e); err == nil || err.Error() != "a range bound is missing" {
+						t.Fatalf("Render: expected a missing bound error, got: %v", err)
+					}
+					if _, _, err := d.RenderParam(e); err == nil || err.Error() != "a range bound is missing" {
+						t.Fatalf("RenderParam: expected a missing bound error, got: %v", err)
 					}
 				})
 			})
@@ -149,7 +171,7 @@ func TestRenderRejectsUnsupportedValues(t *testing.T) {
 		},
 		"json_in_boundary": {
 			mustUnmarshal(t, `{"left":"a","operator":"IN","right":{"min":"x","max":"z","inclusive":true}}`),
-			boundaryValue,
+			"the right side of an IN must be a LIST, not *expr.RangeBoundary",
 		},
 		"json_like_boundary": {
 			mustUnmarshal(t, `{"left":"a","operator":"LIKE","right":{"min":"x","max":"z","inclusive":true}}`),

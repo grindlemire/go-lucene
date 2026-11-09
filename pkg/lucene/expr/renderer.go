@@ -14,6 +14,13 @@ import (
 
 type renderer func(e *Expression, verbose bool) string
 
+// asExpr returns in as an expression, with ok false when it is not one or is
+// a nil *Expression.
+func asExpr(in any) (e *Expression, ok bool) {
+	e, ok = in.(*Expression)
+	return e, ok && e != nil
+}
+
 var renderers = map[Operator]renderer{
 	Equals:    renderField,
 	And:       renderBasic,
@@ -57,7 +64,7 @@ func renderField(e *Expression, verbose bool) string {
 	// The drivers read a string literal on the right of a LIKE as a pattern,
 	// so it prints as a wildcard term. As a phrase it would parse back as an
 	// exact match.
-	if r, ok := e.Right.(*Expression); ok && e.Op == Like && r.Op == Literal {
+	if r, ok := asExpr(e.Right); ok && e.Op == Like && r.Op == Literal {
 		if s, ok := r.Left.(string); ok {
 			return fmt.Sprintf("%s:%s", e.Left, wildcardTerm(s))
 		}
@@ -69,7 +76,7 @@ func renderField(e *Expression, verbose bool) string {
 // prints as is. Anything else was a group in the query and keeps its
 // parentheses: "a:b:c" does not parse and "a:b AND c" is (a:b) AND c.
 func fieldValue(in any) string {
-	if e, ok := in.(*Expression); ok {
+	if e, ok := asExpr(in); ok {
 		switch e.Op {
 		case Literal, Wild, Regexp, Null, List:
 		default:
@@ -104,7 +111,7 @@ func binds(op Operator) int {
 // parser would group it differently without them: on the left when it binds
 // looser than its parent, on the right when it binds looser or the same.
 func binaryOperand(in any, parent Operator, right bool) string {
-	if e, ok := in.(*Expression); ok && (e.Op == And || e.Op == Or) {
+	if e, ok := asExpr(in); ok && (e.Op == And || e.Op == Or) {
 		child, outer := binds(e.Op), binds(parent)
 		if child < outer || (right && child == outer) {
 			return fmt.Sprintf("(%s)", e)
@@ -123,7 +130,7 @@ var (
 )
 
 func wrap(in any, ops []Operator) string {
-	if e, ok := in.(*Expression); ok {
+	if e, ok := asExpr(in); ok {
 		for _, op := range ops {
 			if e.Op == op {
 				return fmt.Sprintf("(%s)", e)
@@ -196,7 +203,13 @@ func renderFuzzy(e *Expression, verbose bool) string {
 }
 
 func renderRange(e *Expression, verbose bool) string {
-	boundary := e.Right.(*RangeBoundary)
+	boundary, ok := e.Right.(*RangeBoundary)
+	if !ok || boundary == nil {
+		if verbose {
+			return fmt.Sprintf("%s(%#v, %#v)", toString[e.Op], e.Left, e.Right)
+		}
+		return fmt.Sprintf("%s(%v, %v)", toString[e.Op], e.Left, e.Right)
+	}
 
 	// The parser builds a range before it knows the field, so a parse error
 	// can print one without a field.
@@ -223,9 +236,17 @@ func renderRange(e *Expression, verbose bool) string {
 }
 
 func renderList(e *Expression, verbose bool) string {
-	vals := e.Left.([]*Expression)
+	vals, _ := e.Left.([]*Expression)
 	strs := []string{}
 	for _, v := range vals {
+		if verbose && v == nil {
+			strs = append(strs, "<nil>")
+			continue
+		}
+		if verbose && v.Op == Null {
+			strs = append(strs, "NULL")
+			continue
+		}
 		if verbose {
 			strs = append(strs, fmt.Sprintf("%#v", v.Left))
 			continue
