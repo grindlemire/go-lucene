@@ -130,3 +130,18 @@ func TestScansMatchSplit(t *testing.T) {
 		}
 	}
 }
+
+// The parser calls both on every term, so neither may allocate a slice per
+// character. A term without a backslash unescapes to itself.
+func TestScansDoNotAllocate(t *testing.T) {
+	escaped := `0190a1b2\-c3d4\-7e5f\-8a9b\-0c1d2e3f4a5b`
+	if n := testing.AllocsPerRun(100, func() { HasWildcard(escaped) }); n != 0 {
+		t.Errorf("HasWildcard allocates %v times, want 0", n)
+	}
+	if n := testing.AllocsPerRun(100, func() { Unescape("plain-term") }); n != 0 {
+		t.Errorf("Unescape of a term without escapes allocates %v times, want 0", n)
+	}
+	if n := testing.AllocsPerRun(100, func() { Unescape(escaped) }); n > 1 {
+		t.Errorf("Unescape allocates %v times, want at most 1", n)
+	}
+}
