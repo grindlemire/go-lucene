@@ -195,6 +195,9 @@ func validateRangeBound(side string, bound any) error {
 		}
 	}
 
+	if isNil(val) {
+		return fmt.Errorf("RANGE validation: range boundary must have a %s", side)
+	}
 	if IsASTOrJSONContainer(val) {
 		return fmt.Errorf("RANGE validation: range %s must be a single term, not %T", side, val)
 	}
@@ -428,6 +431,14 @@ func validateList(e *Expression) (err error) {
 
 	if items, ok := e.Left.([]*Expression); ok && slices.Contains(items, nil) {
 		return errors.New("LIST validation: item must not be nil")
+	}
+
+	if items, ok := e.Left.([]*Expression); ok {
+		for _, item := range items {
+			if !isLiteralExpr(item) {
+				return fmt.Errorf("LIST validation: item must be a literal, not %#v", item)
+			}
+		}
 	}
 
 	if !isListOfLiteralExprs(e.Left) {

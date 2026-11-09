@@ -168,7 +168,7 @@ func termAsText(in any) any {
 	v := in
 	lit, isLit := in.(*expr.Expression)
 	if isLit {
-		if lit.Op != expr.Literal {
+		if lit == nil || lit.Op != expr.Literal {
 			return in
 		}
 		v = lit.Left

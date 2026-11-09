@@ -568,7 +568,6 @@ func TestValidateRangeBounds(t *testing.T) {
 		"list_max":       rangeOf(Lit(1), LIST(Lit(3), Lit(4))),
 		"nested_literal": rangeOf(Lit(Lit("x")), Lit(3)),
 		"map_literal":    rangeOf(Lit(map[string]any{"x": "1"}), Lit(3)),
-		"nil_literal":    rangeOf(&Expression{Op: Literal}, Lit(3)),
 		"raw_map":        rangeOf(map[string]any{"x": "1"}, 3),
 		"raw_slice":      rangeOf([]any{"x"}, 3),
 		"ast_slice":      rangeOf(Lit([]*Expression{Lit("x")}), 5),
@@ -598,6 +597,15 @@ func TestValidateRangeBounds(t *testing.T) {
 	}{
 		"typed_nil_min": {rangeOf((*Expression)(nil), Lit(3)), "must have a minimum"},
 		"typed_nil_max": {rangeOf(Lit(1), (*Expression)(nil)), "must have a maximum"},
+		"nil_literal":   {rangeOf(&Expression{Op: Literal}, Lit(3)), "must have a minimum"},
+		"helper_nil":    {Rang("a", 1, nil, true), "must have a maximum"},
+		"json_null_min": {func() *Expression {
+			var e Expression
+			if err := json.Unmarshal([]byte(`{"left":"a","operator":"RANGE","right":{"min":null,"max":2,"inclusive":true}}`), &e); err != nil {
+				t.Fatal(err)
+			}
+			return &e
+		}(), "must have a minimum"},
 	}
 	for name, tc := range missing {
 		t.Run("missing/"+name, func(t *testing.T) {
@@ -613,7 +621,6 @@ func TestValidateRangeBounds(t *testing.T) {
 	jsonInvalid := map[string]string{
 		"object_min": `{"left":"a","operator":"RANGE","right":{"min":{"x":"1') OR 1=1 --"},"max":2,"inclusive":true}}`,
 		"array_max":  `{"left":"a","operator":"RANGE","right":{"min":1,"max":["1') OR 1=1 --"],"inclusive":true}}`,
-		"null_min":   `{"left":"a","operator":"RANGE","right":{"min":null,"max":2,"inclusive":true}}`,
 	}
 	for name, raw := range jsonInvalid {
 		t.Run("json/"+name, func(t *testing.T) {

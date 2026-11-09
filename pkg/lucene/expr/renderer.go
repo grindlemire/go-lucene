@@ -243,6 +243,10 @@ func renderList(e *Expression, verbose bool) string {
 			strs = append(strs, "<nil>")
 			continue
 		}
+		if verbose && v.Op == Null {
+			strs = append(strs, "NULL")
+			continue
+		}
 		if verbose {
 			strs = append(strs, fmt.Sprintf("%#v", v.Left))
 			continue
