@@ -830,3 +830,30 @@ func TestUnmarshalBareNumber(t *testing.T) {
 		}
 	}
 }
+
+// TestFloatJSONRoundTrip covers a float64 that encoding/json writes with an
+// exponent, such as 1e-7. A bare JSON number keeps the text it was written
+// as, so the literal is written in plain decimal form to decode with no text.
+func TestFloatJSONRoundTrip(t *testing.T) {
+	for _, v := range []float64{1e-7, -1e-7, 1e21, 0.5, 1.5e300} {
+		for name, e := range map[string]*Expression{
+			"value":       Eq("a", Lit(v)),
+			"range_bound": Rang("a", v, "*", true),
+			"list_item":   IN("a", LIST(Lit(v), Lit(2))),
+		} {
+			t.Run(fmt.Sprintf("%v/%s", v, name), func(t *testing.T) {
+				data, err := json.Marshal(e)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var back Expression
+				if err := json.Unmarshal(data, &back); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(e, &back) {
+					t.Fatalf("%s decoded as %#v, want %#v", data, &back, e)
+				}
+			})
+		}
+	}
+}

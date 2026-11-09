@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"regexp"
 	"strconv"
@@ -528,6 +529,14 @@ func (e Expression) MarshalJSON() (out []byte, err error) {
 			return json.Marshal(map[string]string{key: s})
 		}
 	}
+	// encoding/json writes a float64 below 1e-6 or from 1e21 up with an
+	// exponent, as 1e-7. A bare number keeps the text it was written as, so
+	// that would decode with text the literal never had. Writing the
+	// float64 as numberString does makes the text match the value, so the
+	// literal decodes with no text.
+	if f, ok := e.Left.(float64); ok && e.Op == Literal && !math.IsNaN(f) && !math.IsInf(f, 0) {
+		return []byte(numberString(f)), nil
+	}
 	if e.Op == Literal || e.Op == Wild || e.Op == Regexp || e.Op == Null {
 		return json.Marshal(e.Left)
 	}
@@ -769,7 +778,7 @@ func unmarshalBareNumber(text string) (*Expression, error) {
 // isJSONNumber reports whether in is a JSON number.
 func isJSONNumber(in json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(in)
-	return len(trimmed) > 0 && (trimmed[0] == '-' || (trimmed[0] >= '0' && trimmed[0] <= '9'))
+	return len(trimmed) > 0 && (trimmed[0] == '-' || (trimmed[0] >= '0' && trimmed[0] <= '9')) && json.Valid(trimmed)
 }
 
 func checkedNumberLit(v any, text string) (*Expression, error) {
