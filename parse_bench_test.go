@@ -1,6 +1,7 @@
 package lucene
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,28 @@ func BenchmarkParseDeepNesting(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			for b.Loop() {
 				if _, err := Parse(query, tc.opts...); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkParseLongGroup parses a field group of many escaped values, the
+// shape of a batched lookup by id. Every term is checked for a wildcard and
+// unescaped, so that check must not allocate per character.
+func BenchmarkParseLongGroup(b *testing.B) {
+	for _, n := range []int{15, 100, 1000} {
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf(`0190a1b2\-c3d4\-7e5f\-8a9b\-%012d`, i)
+		}
+		query := "id:(" + strings.Join(ids, " OR ") + ")"
+
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := Parse(query); err != nil {
 					b.Fatal(err)
 				}
 			}

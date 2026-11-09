@@ -106,3 +106,27 @@ func TestUnescape(t *testing.T) {
 		}
 	}
 }
+
+// HasWildcard and Unescape must give the same answer as reading the pattern
+// through Split, which is the definition of an escape.
+func TestScansMatchSplit(t *testing.T) {
+	inputs := []string{
+		"", "a", "*", "?", `\`, `\\`, `\*`, `\?`, `a\`, `a\\`, `a\\*`, `a\\\*`,
+		`fo*`, `f?o`, `fo\*bar*`, `0190a1b2\-c3d4\-7e5f`, `a\ b\:c`, `\é*`, `é\*`,
+		"\\\xff\xfe", "\xff*", `[a\]]*`, `\[*\]`, `日本\語?`,
+	}
+	for _, in := range inputs {
+		wantWild := false
+		var want strings.Builder
+		for _, c := range Split(in) {
+			wantWild = wantWild || c.IsWildcard()
+			want.WriteString(c.Text)
+		}
+		if got := HasWildcard(in); got != wantWild {
+			t.Errorf("HasWildcard(%q) = %v, want %v", in, got, wantWild)
+		}
+		if got := Unescape(in); got != want.String() {
+			t.Errorf("Unescape(%q) = %q, want %q", in, got, want.String())
+		}
+	}
+}
