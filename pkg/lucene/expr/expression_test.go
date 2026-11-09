@@ -775,3 +775,58 @@ func jsonEqual(got string, want string) bool {
 func stripWhitespace(in string) string {
 	return strings.Join(strings.Fields(in), "")
 }
+
+// TestUnmarshalBareNumber covers a JSON number written without the number
+// object form. It decodes as the parser reads the same number in a query, so a
+// float64 that rounds it keeps its text, and a number a float64 can't hold is
+// an error rather than 0 or a term.
+func TestUnmarshalBareNumber(t *testing.T) {
+	tcs := map[string]struct {
+		json   string
+		value  any
+		text   string
+		errStr string
+	}{
+		"int":        {json: `5`, value: 5},
+		"float":      {json: `0.5`, value: 0.5},
+		"big_int":    {json: `9223372036854775808`, value: 9223372036854775808.0, text: "9223372036854775808"},
+		"long_float": {json: `123456789012345678.5`, value: 123456789012345678.5, text: "123456789012345678.5"},
+		"exponent":   {json: `1E2`, value: 100.0, text: "1E2"},
+		"whole":      {json: `1.0`, value: 1.0, text: "1.0"},
+		"overflow":   {json: `1e400`, errStr: "invalid number 1e400: it is out of range for a float64"},
+		"underflow":  {json: `1e-400`, errStr: "invalid number 1e-400: it is out of range for a float64"},
+	}
+	forms := map[string]func(n string) (string, func(*Expression) *Expression){
+		"value": func(n string) (string, func(*Expression) *Expression) {
+			return `{"left":"a","operator":"EQUALS","right":` + n + `}`, func(e *Expression) *Expression { return e.Right.(*Expression) }
+		},
+		"range_bound": func(n string) (string, func(*Expression) *Expression) {
+			return `{"left":"a","operator":"RANGE","right":{"min":` + n + `,"max":"*","inclusive":true}}`, func(e *Expression) *Expression { return e.Right.(*RangeBoundary).Min.(*Expression) }
+		},
+		"list_item": func(n string) (string, func(*Expression) *Expression) {
+			return `{"left":"a","operator":"IN","right":{"left":[` + n + `],"operator":"LIST"}}`, func(e *Expression) *Expression { return e.Right.(*Expression).Left.([]*Expression)[0] }
+		},
+	}
+	for name, tc := range tcs {
+		for form, build := range forms {
+			t.Run(name+"/"+form, func(t *testing.T) {
+				data, get := build(tc.json)
+				var e Expression
+				err := json.Unmarshal([]byte(data), &e)
+				if tc.errStr != "" {
+					if err == nil || !strings.Contains(err.Error(), tc.errStr) {
+						t.Fatalf("expected an error containing %q, got: %v", tc.errStr, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				lit := get(&e)
+				if lit.Left != tc.value || lit.NumberText() != tc.text {
+					t.Fatalf("want %#v with text %q, got %#v with text %q", tc.value, tc.text, lit.Left, lit.NumberText())
+				}
+			})
+		}
+	}
+}

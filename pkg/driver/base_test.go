@@ -275,6 +275,24 @@ func TestNumberThatLosesDigitsIsWritten(t *testing.T) {
 			want:      `"a" = 9223372036854775808`,
 			wantParam: `"a" = 9223372036854775808`,
 		},
+		// A bare JSON number keeps its digits, as it does in a query.
+		"json_bare": {
+			input:     mustUnmarshal(t, `{"left":"a","operator":"EQUALS","right":9223372036854775808}`),
+			want:      `"a" = 9223372036854775808`,
+			wantParam: `"a" = 9223372036854775808`,
+		},
+		"json_bare_range_bound": {
+			input:      mustUnmarshal(t, `{"left":"a","operator":"RANGE","right":{"min":123456789012345678.5,"max":5,"inclusive":true}}`),
+			want:       `"a" >= 123456789012345678.5 AND "a" <= 5`,
+			wantParam:  `"a" >= 123456789012345678.5 AND "a" <= $1`,
+			wantParams: []any{5},
+		},
+		"json_bare_list_item": {
+			input:      mustUnmarshal(t, `{"left":"a","operator":"IN","right":{"left":[12345678901234567890123,2],"operator":"LIST"}}`),
+			want:       `"a" IN (12345678901234567890123, 2)`,
+			wantParam:  `"a" IN (12345678901234567890123, $1)`,
+			wantParams: []any{2},
+		},
 		"range_bound": {
 			input:      rangeOf(big, 5),
 			want:       `"a" >= 9223372036854775808 AND "a" <= 5`,

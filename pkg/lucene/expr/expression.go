@@ -570,9 +570,12 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	// if this does not look like an object it must be a literal
 	if !isJSONObject(json.RawMessage(data)) {
 		Expr, err := unmarshalLiteral(json.RawMessage(data))
+		if err != nil {
+			return err
+		}
 		// this is required because apparently you can't swap pointers to your receiver mid method
 		*e = *Expr
-		return err
+		return nil
 	}
 
 	var keys map[string]json.RawMessage
@@ -652,15 +655,16 @@ func (e *Expression) UnmarshalJSON(data []byte) (err error) {
 	}
 
 	if len(c.Right) > 0 && looksLikeRangeBoundary(c.Right) {
-		var boundary RangeBoundary
-		err = json.Unmarshal(c.Right, &boundary)
+		var raw jsonBoundary
+		err = json.Unmarshal(c.Right, &raw)
 		if err != nil {
 			return err
 		}
-		if boundary.Min, err = unmarshalBound(boundary.Min); err != nil {
+		boundary := RangeBoundary{Inclusive: raw.Inclusive}
+		if boundary.Min, err = unmarshalBound(raw.Min); err != nil {
 			return err
 		}
-		if boundary.Max, err = unmarshalBound(boundary.Max); err != nil {
+		if boundary.Max, err = unmarshalBound(raw.Max); err != nil {
 			return err
 		}
 		e.Right = &boundary
@@ -747,6 +751,27 @@ func unmarshalNumber(raw json.RawMessage, keys int) (*Expression, error) {
 	return checkedNumberLit(f, n.Text)
 }
 
+// unmarshalBareNumber decodes a JSON number as the parser reads the same
+// number in a query: as an int when it is one, and as a float64 that keeps
+// its text otherwise, so 9223372036854775808 keeps its digits. A number that
+// a float64 can't hold, such as 1e400 or 1e-400, is an error.
+func unmarshalBareNumber(text string) (*Expression, error) {
+	if i, err := strconv.Atoi(text); err == nil {
+		return NumberLit(i, text), nil
+	}
+	f, err := strconv.ParseFloat(text, 64)
+	if err != nil || !spellsNumber(text, f) {
+		return nil, fmt.Errorf("invalid number %s: it is out of range for a float64", text)
+	}
+	return NumberLit(f, text), nil
+}
+
+// isJSONNumber reports whether in is a JSON number.
+func isJSONNumber(in json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(in)
+	return len(trimmed) > 0 && (trimmed[0] == '-' || (trimmed[0] >= '0' && trimmed[0] <= '9'))
+}
+
 func checkedNumberLit(v any, text string) (*Expression, error) {
 	if !spellsNumber(text, v) {
 		return nil, fmt.Errorf("invalid number: text %q does not equal value %v", text, v)
@@ -785,12 +810,29 @@ func unmarshalTerm(keys map[string]json.RawMessage) (e *Expression, ok bool, err
 	return nil, false, nil
 }
 
-// unmarshalBound turns a range bound decoded into an any back into a literal.
-// Any other object stays a map, which Validate rejects.
-func unmarshalBound(in any) (*Expression, error) {
+// jsonBoundary is the JSON form of a RangeBoundary, with the bounds left
+// undecoded so that a number keeps its digits.
+type jsonBoundary struct {
+	Min       json.RawMessage `json:"min"`
+	Max       json.RawMessage `json:"max"`
+	Inclusive bool            `json:"inclusive"`
+}
+
+// unmarshalBound decodes a range bound into a literal. A number reads as it
+// does in a query. Any other object stays a map, which Validate rejects.
+func unmarshalBound(raw json.RawMessage) (*Expression, error) {
+	if isJSONNumber(raw) {
+		return unmarshalBareNumber(string(bytes.TrimSpace(raw)))
+	}
+	var in any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, err
+		}
+	}
 	m, isObject := in.(map[string]any)
 	if !isObject || !isLeafObject(m) {
-		return literalToExpr(toIntIfNecessary(in)), nil
+		return literalToExpr(in), nil
 	}
 	raw, err := json.Marshal(m)
 	if err != nil {
@@ -835,16 +877,8 @@ func unmarshalLiteral(in json.RawMessage) (e *Expression, err error) {
 		return NULL(), nil
 	}
 
-	// check if it is an int first because all ints can be parsed as floats
-	i, err := strconv.Atoi(string(in))
-	if err == nil {
-		return Lit(i), nil
-	}
-
-	// check if it is a float
-	f, err := strconv.ParseFloat(string(in), 64)
-	if err == nil {
-		return Lit(f), nil
+	if isJSONNumber(in) {
+		return unmarshalBareNumber(string(bytes.TrimSpace(in)))
 	}
 
 	// we know it is some sort of string so decode it
@@ -964,21 +998,6 @@ func wrapInColumn(in any) (out *Expression) {
 		}
 	}
 	return e
-}
-
-// apparently the json unmarshal only parses float64 values so we check if the float64
-// is actually a whole number. If it is then make it an int
-func toIntIfNecessary(in any) (out any) {
-	f, isFloat := in.(float64)
-	if !isFloat {
-		return in
-	}
-
-	if f == float64(int(f)) {
-		return int(f)
-	}
-
-	return f
 }
 
 func empty() Expression {
