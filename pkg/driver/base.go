@@ -123,6 +123,10 @@ func (b Base) RenderParam(e *expr.Expression) (s string, params []any, err error
 		return "", nil, fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
+	if err := missingOperand(e); err != nil {
+		return "", nil, err
+	}
+
 	e, err = fieldShape(e)
 	if err != nil {
 		return "", nil, err
@@ -326,6 +330,10 @@ func (b Base) Render(e *expr.Expression) (s string, err error) {
 		return "", fmt.Errorf("null cannot be rendered as a standalone value")
 	}
 
+	if err := missingOperand(e); err != nil {
+		return "", err
+	}
+
 	e, err = fieldShape(e)
 	if err != nil {
 		return "", err
@@ -522,6 +530,65 @@ func (b Base) renderCompare(e *expr.Expression, left, nullLeft string) (s string
 	return str, nil
 }
 
+// missingOperand reports an operand that e needs and does not have. The
+// parser always fills them in, but a tree built in code or read from JSON can
+// leave one out, as expr.Eq("a", nil) does, and would render as broken SQL
+// such as "a" = . A nil *expr.Expression counts as missing. A missing field is
+// reported by fieldShape.
+func missingOperand(e *expr.Expression) error {
+	switch e.Op {
+	case expr.And, expr.Or:
+		if isNil(e.Left) || isNil(e.Right) {
+			return fmt.Errorf("%s %s needs an expression on each side", article(e.Op), e.Op)
+		}
+	case expr.Not, expr.Must, expr.MustNot, expr.Boost, expr.Fuzzy:
+		if isNil(e.Left) {
+			return fmt.Errorf("%s %s needs an expression", article(e.Op), e.Op)
+		}
+	case expr.Literal, expr.Wild, expr.Regexp:
+		if isNil(e.Left) {
+			return fmt.Errorf("%s %s needs a value", article(e.Op), e.Op)
+		}
+	case expr.Range:
+		if isNil(e.Right) {
+			return fmt.Errorf("a RANGE needs bounds, as in field:[a TO b]")
+		}
+	case expr.Equals, expr.Like, expr.In, expr.Greater, expr.Less, expr.GreaterEq, expr.LessEq:
+		if isNil(e.Right) {
+			return fmt.Errorf("%s %s needs a value, as in %s", article(e.Op), e.Op, fieldExamples[e.Op])
+		}
+	case expr.List:
+		items, ok := e.Left.([]*expr.Expression)
+		if !ok {
+			return nil
+		}
+		if len(items) == 0 {
+			return fmt.Errorf("a LIST needs at least one value")
+		}
+		for _, item := range items {
+			if item == nil {
+				return fmt.Errorf("a LIST item is nil")
+			}
+		}
+	}
+	return nil
+}
+
+// isNil reports whether in is nil or a nil *expr.Expression or
+// *expr.RangeBoundary.
+func isNil(in any) bool {
+	switch v := in.(type) {
+	case nil:
+		return true
+	case *expr.Expression:
+		return v == nil
+	case *expr.RangeBoundary:
+		return v == nil
+	default:
+		return false
+	}
+}
+
 // fieldShape checks that a field operator has a field and a value it can
 // compare, and spreads a field over a group of terms. Render does not run
 // expr.Validate, so a tree built in code or read from JSON can hold a group
@@ -554,6 +621,9 @@ func fieldShape(e *expr.Expression) (*expr.Expression, error) {
 
 	value, ok := e.Right.(*expr.Expression)
 	if !ok {
+		if e.Op == expr.In {
+			return nil, fmt.Errorf("the right side of an IN must be a LIST, not %T", e.Right)
+		}
 		return e, nil
 	}
 	switch e.Op {

@@ -149,7 +149,7 @@ func TestRenderRejectsUnsupportedValues(t *testing.T) {
 		},
 		"json_in_boundary": {
 			mustUnmarshal(t, `{"left":"a","operator":"IN","right":{"min":"x","max":"z","inclusive":true}}`),
-			boundaryValue,
+			"the right side of an IN must be a LIST, not *expr.RangeBoundary",
 		},
 		"json_like_boundary": {
 			mustUnmarshal(t, `{"left":"a","operator":"LIKE","right":{"min":"x","max":"z","inclusive":true}}`),

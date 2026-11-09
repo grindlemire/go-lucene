@@ -573,8 +573,6 @@ func TestValidateRangeBounds(t *testing.T) {
 		"raw_slice":      rangeOf([]any{"x"}, 3),
 		"ast_slice":      rangeOf(Lit([]*Expression{Lit("x")}), 5),
 		"ast_value_list": rangeOf(Lit([]Expression{*Lit("x")}), 5),
-		"typed_nil_min":  rangeOf((*Expression)(nil), Lit(3)),
-		"typed_nil_max":  rangeOf(Lit(1), (*Expression)(nil)),
 	}
 	for name, e := range invalid {
 		t.Run("invalid/"+name, func(t *testing.T) {
@@ -589,6 +587,23 @@ func TestValidateRangeBounds(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "must be a single term") {
 				t.Fatalf("expected a single-term range bound error, got: %v", err)
+			}
+		})
+	}
+
+	// A nil *Expression is a missing bound.
+	missing := map[string]struct {
+		e    *Expression
+		want string
+	}{
+		"typed_nil_min": {rangeOf((*Expression)(nil), Lit(3)), "must have a minimum"},
+		"typed_nil_max": {rangeOf(Lit(1), (*Expression)(nil)), "must have a maximum"},
+	}
+	for name, tc := range missing {
+		t.Run("missing/"+name, func(t *testing.T) {
+			err := Validate(tc.e)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected an error containing %q, got: %v", tc.want, err)
 			}
 		})
 	}
@@ -774,4 +789,67 @@ func jsonEqual(got string, want string) bool {
 
 func stripWhitespace(in string) string {
 	return strings.Join(strings.Fields(in), "")
+}
+
+// TestMissingOperand covers trees with an operand left out, as a nil or a nil
+// *Expression. Building, printing or validating one used to panic.
+func TestMissingOperand(t *testing.T) {
+	var none *Expression
+	tcs := map[string]struct {
+		build   func() *Expression
+		wantErr string
+	}{
+		"eq_nil":        {func() *Expression { return Eq("a", nil) }, "EQUALS validation: right value must not be nil"},
+		"eq_typed_nil":  {func() *Expression { return Eq("a", none) }, "EQUALS validation: right value must not be nil"},
+		"field_nil":     {func() *Expression { return Eq(none, "b") }, "EQUALS validation: left value must be a literal expression"},
+		"greater_nil":   {func() *Expression { return GREATER("a", none) }, "COMPARE validation: right value must not be nil"},
+		"like_nil":      {func() *Expression { return LIKE("a", none) }, "LIKE validation: must have two values"},
+		"in_nil":        {func() *Expression { return IN("a", nil) }, "IN validation: must have two values"},
+		"in_string":     {func() *Expression { return IN("a", "x") }, "IN validation: right side must be an expression, not string"},
+		"in_empty":      {func() *Expression { return IN("a", LIST()) }, "LIST validation: must have at least one value"},
+		"list_nil_item": {func() *Expression { return LIST("x", none) }, "LIST validation: item must not be nil"},
+		"and_typed_nil": {func() *Expression { return AND(Eq("a", "b"), none) }, "AND validation: right value must not be nil"},
+		"or_typed_nil":  {func() *Expression { return OR(none, Eq("a", "b")) }, "OR validation: left value must not be nil"},
+		"not_typed_nil": {func() *Expression { return NOT(none) }, "NOT validation: sub expression must not be nil"},
+		"must_nil":      {func() *Expression { return MUST(none) }, "MUST validation: sub expression must not be nil"},
+		"boost_nil":     {func() *Expression { return BOOST(none, 2.0) }, "BOOST validation: sub expression must not be nil"},
+		"struct_and": {func() *Expression {
+			return &Expression{Op: And, Left: Eq("a", "b"), Right: none}
+		}, "AND validation: right value must not be nil"},
+		"struct_list": {func() *Expression {
+			return &Expression{Op: In, Left: Lit(Column("a")), Right: &Expression{Op: List, Left: []*Expression{none}}}
+		}, "LIST validation: item must not be nil"},
+		"struct_range": {func() *Expression {
+			return &Expression{Op: Range, Left: Lit(Column("a")), Right: (*RangeBoundary)(nil)}
+		}, "RANGE validation: boundary value must not be nil"},
+	}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("panicked: %v", r)
+				}
+			}()
+			e := tc.build()
+			_ = e.String()
+			_ = e.GoString()
+			err := Validate(e)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected an error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestListOfValues covers LIST built from plain values, which used to panic.
+// A value becomes a literal, even one with a * in it, since an IN matches
+// exactly.
+func TestListOfValues(t *testing.T) {
+	e := IN("a", LIST("x", 5, "y*", Lit("z")))
+	if err := Validate(e); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := e.String(), `a:(x OR 5 OR "y*" OR z)`; got != want {
+		t.Fatalf("want %s, got %s", want, got)
+	}
 }
