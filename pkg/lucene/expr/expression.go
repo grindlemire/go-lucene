@@ -338,7 +338,12 @@ func Validate(in any) (err error) {
 	return Validate(e.Right)
 }
 
-// Column represents a column in sql. It will not be escaped by quotes in the sql rendering
+// Column represents a column in sql. The drivers quote it for the dialect.
+//
+// String prints a name with a dot in it as written, so Column("labels.k")
+// prints as labels.k, and parsing that with lucene.WithJSONFields("labels")
+// reads the key k of the JSON column labels. Build a JSONPath to address a
+// key in a JSON column.
 type Column string
 
 // GoString is a debug print for the column type

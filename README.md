@@ -176,6 +176,7 @@ sql, err := lucene.ToPostgres(`metadata.address.city:Boston AND labels.category:
 Every operator works on a JSON path: comparisons, ranges, IN lists, wildcards, regex and null.
 
 - Without the option, or for a column that is not registered, a dotted field is still one column name: `other.category` renders as `"other.category"`.
+- `String()` prints a column whose name has a dot in it as written, so `expr.Eq("labels.category", "x")` prints `labels.category:x`, and parsing that with `labels` registered reads a JSON path. `String()` doesn't know which columns are registered. To address a key in code, build an `expr.JSONPath{Column: "labels", Path: []string{"category"}}`, which prints the same way.
 - A registered column without a dot (`labels:x`) is compared as a whole column, as before.
 - Register the column name only. A name that is empty or contains a dot (`WithJSONFields("t.labels")`) makes `Parse` return an error, because the first dot of a field always ends the column name.
 - Equality and IN with a number match a JSON number by value and any other value by its text: `labels.version:2` matches `2`, `2.0` and `"2"`.
