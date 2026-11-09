@@ -516,7 +516,10 @@ func TestJSONPathRejectsBadSegmentsInQuery(t *testing.T) {
 
 func TestJSONPathRejectsEscapedDotInKey(t *testing.T) {
 	opt := WithJSONFields("labels")
-	for _, input := range []string{`labels.a\.b:x`, `labels\.a:x`, `name:y AND labels.a.b\.c:>1`} {
+	// = and a field in parentheses are checked as : is, and so is a wildcard
+	// field, which drops its escapes.
+	for _, input := range []string{`labels.a\.b:x`, `labels\.a:x`, `name:y AND labels.a.b\.c:>1`,
+		`labels\.a=x`, `(labels\.a):x`, `((labels.a\.b)):x`, `labels\.a*:x`, `labels\.a*=x`, `(labels\.a*):x`} {
 		_, err := Parse(input, opt)
 		if err == nil || !strings.Contains(err.Error(), "cannot contain a dot") {
 			t.Errorf("Parse(%q): expected an escaped dot error, got %v", input, err)
