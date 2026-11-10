@@ -108,14 +108,19 @@ func TestUnescape(t *testing.T) {
 }
 
 // HasWildcard and Unescape must give the same answer as reading the pattern
-// through Split, which is the definition of an escape.
-func TestScansMatchSplit(t *testing.T) {
-	inputs := []string{
+// through Split, which is the definition of an escape. The seeds run under go
+// test; go test -fuzz also tries random strings.
+func FuzzScansMatchSplit(f *testing.F) {
+	for _, in := range []string{
 		"", "a", "*", "?", `\`, `\\`, `\*`, `\?`, `a\`, `a\\`, `a\\*`, `a\\\*`,
 		`fo*`, `f?o`, `fo\*bar*`, `0190a1b2\-c3d4\-7e5f`, `a\ b\:c`, `\é*`, `é\*`,
 		"\\\xff\xfe", "\xff*", `[a\]]*`, `\[*\]`, `日本\語?`,
+		// A backslash, a three-byte character cut off after two bytes, then *.
+		"\\\xe6\x97*",
+	} {
+		f.Add(in)
 	}
-	for _, in := range inputs {
+	f.Fuzz(func(t *testing.T, in string) {
 		wantWild := false
 		var want strings.Builder
 		for _, c := range Split(in) {
@@ -128,7 +133,7 @@ func TestScansMatchSplit(t *testing.T) {
 		if got := Unescape(in); got != want.String() {
 			t.Errorf("Unescape(%q) = %q, want %q", in, got, want.String())
 		}
-	}
+	})
 }
 
 // The parser calls both on every term, so neither may allocate a slice per
