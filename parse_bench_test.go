@@ -1,6 +1,7 @@
 package lucene
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -27,4 +28,50 @@ func BenchmarkParseDeepNesting(b *testing.B) {
 			}
 		})
 	}
+}
+
+// BenchmarkParseLongGroup parses a field group of many escaped values, the
+// shape of a batched lookup by id. Every term is checked for a wildcard and
+// unescaped, so that check must not allocate per character.
+func BenchmarkParseLongGroup(b *testing.B) {
+	for _, n := range []int{15, 100, 1000} {
+		query := longGroup(n)
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := Parse(query); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// TestParseAllocsPerTerm caps the allocations per term when parsing a long
+// field group. A count does not vary between machines the way time does, so
+// this check can run in CI. The budget leaves room for small changes but
+// fails when a change adds work to every term.
+func TestParseAllocsPerTerm(t *testing.T) {
+	if testing.CoverMode() != "" {
+		t.Skip("coverage instrumentation changes the allocation count")
+	}
+	const terms, budget = 100, 26
+	query := longGroup(terms)
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, err := Parse(query); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if perTerm := allocs / terms; perTerm > budget {
+		t.Fatalf("Parse allocates %.1f times per term, budget %d", perTerm, budget)
+	}
+}
+
+// longGroup returns a field group of n escaped ids joined by OR.
+func longGroup(n int) string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf(`0190a1b2\-c3d4\-7e5f\-8a9b\-%012d`, i)
+	}
+	return "id:(" + strings.Join(ids, " OR ") + ")"
 }

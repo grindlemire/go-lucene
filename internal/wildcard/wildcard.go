@@ -110,9 +110,16 @@ func InBrackets(chars []Char) []bool {
 }
 
 // HasWildcard reports whether pattern has an unescaped * or ?.
+//
+// It reads the bytes directly instead of going through Split: the parser
+// calls it on every term. A backslash escapes the byte after it, and a
+// multi-byte character never holds a byte equal to *, ? or \.
 func HasWildcard(pattern string) bool {
-	for _, c := range Split(pattern) {
-		if c.IsWildcard() {
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case '*', '?':
 			return true
 		}
 	}
@@ -120,12 +127,19 @@ func HasWildcard(pattern string) bool {
 }
 
 // Unescape returns pattern with its escapes removed: the text it matches
-// when every character is read literally.
+// when every character is read literally. A trailing backslash stays, as
+// Split reads it.
 func Unescape(pattern string) string {
+	if strings.IndexByte(pattern, '\\') < 0 {
+		return pattern
+	}
 	var b strings.Builder
 	b.Grow(len(pattern))
-	for _, c := range Split(pattern) {
-		b.WriteString(c.Text)
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] == '\\' && i+1 < len(pattern) {
+			i++
+		}
+		b.WriteByte(pattern[i])
 	}
 	return b.String()
 }
