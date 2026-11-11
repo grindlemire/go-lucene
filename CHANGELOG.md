@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* parse each term without splitting it into a list of characters, which brings parsing back to the speed and memory of 0.2.1. Since 0.3.0 the parser built that list for every term to look for wildcards and escapes, so a field group of 100 escaped ids took about twice the time and four and a half times the memory of 0.2.1 ([#94](https://github.com/grindlemire/go-lucene/pull/94), [34274af](https://github.com/grindlemire/go-lucene/commit/34274afa82381edd356d06c38eefed6dd540a108)), closes [#93](https://github.com/grindlemire/go-lucene/issues/93)
+* bring parsing back to the speed and memory of 0.2.1 ([#94](https://github.com/grindlemire/go-lucene/pull/94), [34274af](https://github.com/grindlemire/go-lucene/commit/34274afa82381edd356d06c38eefed6dd540a108)), closes [#93](https://github.com/grindlemire/go-lucene/issues/93)
 
 ## [0.3.0](https://github.com/grindlemire/go-lucene/compare/v0.2.1...v0.3.0) (2026-11-09)
 
