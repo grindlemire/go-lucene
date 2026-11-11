@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/grindlemire/go-lucene/compare/v0.3.0...v0.3.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* bring parsing back to the speed and memory of 0.2.1 ([#94](https://github.com/grindlemire/go-lucene/pull/94), [34274af](https://github.com/grindlemire/go-lucene/commit/34274afa82381edd356d06c38eefed6dd540a108)), closes [#93](https://github.com/grindlemire/go-lucene/issues/93)
+
 ## [0.3.0](https://github.com/grindlemire/go-lucene/compare/v0.2.1...v0.3.0) (2026-11-09)
 
 
