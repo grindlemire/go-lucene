@@ -127,8 +127,8 @@ func HasWildcard(pattern string) bool {
 }
 
 // Unescape returns pattern with its escapes removed: the text it matches
-// when every character is read literally. A trailing backslash stays, as
-// Split reads it.
+// when every character is read literally. A backslash at the end stands for
+// itself, as in Split.
 func Unescape(pattern string) string {
 	if strings.IndexByte(pattern, '\\') < 0 {
 		return pattern

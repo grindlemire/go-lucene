@@ -497,11 +497,7 @@ func parseLiteral(token lex.Token) (e any, err error) {
 	}
 
 	// Drop the escapes. An escaped backslash stays: foo\\bar is foo\bar.
-	if strings.Contains(token.Val, `\`) {
-		return expr.Lit(wildcard.Unescape(token.Val)), nil
-	}
-
-	return expr.Lit(token.Val), nil
+	return expr.Lit(wildcard.Unescape(token.Val)), nil
 }
 
 // escapePlus escapes each unescaped + in a wildcard's text. The lexer keeps a
