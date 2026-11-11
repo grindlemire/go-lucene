@@ -5,14 +5,7 @@
 
 ### Bug Fixes
 
-* check and remove escapes without splitting a term into characters ([34e0cad](https://github.com/grindlemire/go-lucene/commit/34e0cad2c724566e4eee6e799e30f1a6cbe9e3bb))
-* check and remove escapes without splitting a term into characters ([34274af](https://github.com/grindlemire/go-lucene/commit/34274afa82381edd356d06c38eefed6dd540a108))
-
-
-### Miscellaneous
-
-* tidy up after the escape scan fix ([6c09427](https://github.com/grindlemire/go-lucene/commit/6c09427b2cbac57f2e1f38d39c06cd9fa170a6ad))
-* tidy up after the escape scan fix ([e687e24](https://github.com/grindlemire/go-lucene/commit/e687e24d5c054ac4ee2e831fd83288657a0177da))
+* parse each term without splitting it into a list of characters, which brings parsing back to the speed and memory of 0.2.1. Since 0.3.0 the parser built that list for every term to look for wildcards and escapes, so a field group of 100 escaped ids took about twice the time and four and a half times the memory of 0.2.1 ([#94](https://github.com/grindlemire/go-lucene/pull/94), [34274af](https://github.com/grindlemire/go-lucene/commit/34274afa82381edd356d06c38eefed6dd540a108)), closes [#93](https://github.com/grindlemire/go-lucene/issues/93)
 
 ## [0.3.0](https://github.com/grindlemire/go-lucene/compare/v0.2.1...v0.3.0) (2026-11-09)
 
