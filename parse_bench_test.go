@@ -50,7 +50,9 @@ func BenchmarkParseLongGroup(b *testing.B) {
 // TestParseAllocsPerTerm caps the allocations per term when parsing a long
 // field group. A count does not vary between machines the way time does, so
 // this check can run in CI. The budget leaves room for small changes but
-// fails when a change adds work to every term.
+// fails when a change adds work to every term. Parse allocates about 22.5
+// times per term on Go 1.25 and 21.5 on Go 1.27, and going back to Split in
+// HasWildcard or Unescape adds about 5.
 func TestParseAllocsPerTerm(t *testing.T) {
 	if testing.CoverMode() != "" {
 		t.Skip("coverage instrumentation changes the allocation count")
